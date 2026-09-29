@@ -196,7 +196,9 @@ qwen3-tts-server, or a similar wrapper.
 - `QWEN_TTS_VOICE` — preset speaker (`Ryan`, `vivian`, `serena`, …) or an OpenAI alias
   (`alloy`, `nova`, …); the server maps aliases.
 - `QWEN_TTS_FORMAT` — `opus` (default) renders as a native voice bubble in Matrix clients;
-  `wav`/`mp3`/`flac`/`aac`/`pcm` also work.
+  `wav`/`mp3`/`flac`/`aac`/`pcm` also work. Many local servers ignore the format and always
+  return WAV; the engine detects that and converts to Ogg/Opus with ffmpeg when ffmpeg is on
+  `PATH` (falling back to the server's audio if it is not).
 - `QWEN_TTS_SPEED`, `QWEN_TTS_LANGUAGE` (e.g. `English`) and `QWEN_TTS_API_KEY` are optional.
 - Resilient by default: transient failures (429/5xx, network errors) are retried twice with
   backoff and error messages include the server's own explanation. If speech generation still

@@ -1,5 +1,6 @@
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
 import { requestJson, requestRaw } from "../../infra/http/request.ts";
+import { convertToOggOpus } from "./convertToOggOpus.ts";
 import type {
   SpeechAudio,
   SpeechRequest,
@@ -96,11 +97,23 @@ export class QwenTtsProvider implements TextToSpeechProvider {
       throw new ProviderError(this.name, "the local TTS server returned empty audio");
     }
 
-    return {
-      data: new Uint8Array(buffer),
-      mimeType: format.mimeType,
-      extension: format.extension,
-    };
+    // Some servers ignore response_format and always return WAV; trust the
+    // response's content type when it names an audio format we know.
+    let resolved = describeContentType(response.headers.get("content-type")) ?? format;
+    let data = new Uint8Array(buffer);
+
+    // Voice bubbles need Ogg/Opus: when the server sent something else (WAV,
+    // usually), convert it locally with ffmpeg. If that is unavailable, keep
+    // the original audio rather than losing it.
+    if (format.format === "opus" && resolved.format !== "opus") {
+      const converted = await convertToOggOpus(data);
+      if (converted) {
+        data = converted;
+        resolved = FORMATS.opus!;
+      }
+    }
+
+    return { data, mimeType: resolved.mimeType, extension: resolved.extension };
   }
 }
 
@@ -122,4 +135,23 @@ const FORMATS: Record<string, SpeechFormat> = {
 
 function describeSpeechFormat(value: string): SpeechFormat {
   return FORMATS[value.toLowerCase()] ?? FORMATS.mp3!;
+}
+
+const CONTENT_TYPES: Record<string, SpeechFormat> = {
+  "audio/wav": FORMATS.wav!,
+  "audio/x-wav": FORMATS.wav!,
+  "audio/wave": FORMATS.wav!,
+  "audio/mpeg": FORMATS.mp3!,
+  "audio/mp3": FORMATS.mp3!,
+  "audio/ogg": FORMATS.opus!,
+  "audio/flac": FORMATS.flac!,
+  "audio/x-flac": FORMATS.flac!,
+  "audio/aac": FORMATS.aac!,
+  "audio/pcm": FORMATS.pcm!,
+  "audio/l16": FORMATS.pcm!,
+};
+
+function describeContentType(value: string | null): SpeechFormat | undefined {
+  if (!value) return undefined;
+  return CONTENT_TYPES[value.split(";")[0]!.trim().toLowerCase()];
 }

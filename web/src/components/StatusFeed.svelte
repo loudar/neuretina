@@ -22,10 +22,23 @@
 
   $effect(() => {
     // Re-sorting (and appends) change the id signature — keep the newest
-    // running entries visible at the bottom.
+    // running entries visible. The newest root task is kept in view (it is the
+    // parent of the nested section below it); the sub-activities scroll
+    // internally, so only they get clipped, never the parent.
     const signature = flat.map((entry) => entry.id).join("|");
-    if (!signature) return;
-    scroller?.scrollTo({ top: scroller.scrollHeight });
+    if (!signature || !scroller) return;
+
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const roots = scroller.querySelectorAll<HTMLElement>(".row.root");
+    const lastRoot = roots.length > 0 ? roots[roots.length - 1]! : null;
+    if (!lastRoot) {
+      scroller.scrollTo({ top: maxScroll });
+      return;
+    }
+
+    const remaining = scroller.scrollHeight - lastRoot.offsetTop;
+    const target = remaining <= scroller.clientHeight ? maxScroll : lastRoot.offsetTop;
+    scroller.scrollTo({ top: Math.max(0, Math.min(target, maxScroll)) });
   });
 
   function formatTime(ts: number): string {
@@ -39,7 +52,21 @@
    */
   function stickToBottom(node: HTMLElement) {
     const sync = () => {
-      node.scrollTop = node.scrollHeight;
+      const last = node.lastElementChild as HTMLElement | null;
+      const maxScroll = Math.max(0, node.scrollHeight - node.clientHeight);
+
+      if (last) {
+        // A short entry is bottom-aligned like a log line; a long one (a full
+        // follow-up question) is shown from its start so the current task
+        // stays readable instead of being cut off mid-sentence.
+        const fits = last.offsetHeight <= node.clientHeight;
+        const target = fits
+          ? last.offsetTop + last.offsetHeight - node.clientHeight
+          : last.offsetTop;
+        node.scrollTop = Math.max(0, Math.min(target, maxScroll));
+        node.classList.toggle("tall-current", !fits);
+      }
+
       node.classList.toggle("overflowing", node.scrollHeight > node.clientHeight + 1);
     };
     const observer = new MutationObserver(sync);
@@ -59,7 +86,12 @@
 
 {#snippet rows(nodes: OrderedStatusEntry[])}
   {#each nodes as entry (entry.id)}
-    <div class="row" class:dim={entry.state !== "running"} class:failed={entry.state === "failed"}>
+    <div
+      class="row"
+      class:root={entry.depth === 0}
+      class:dim={entry.state !== "running"}
+      class:failed={entry.state === "failed"}
+    >
       <span class="icon">
         {#if entry.state === "running"}
           <CircularProgressEstimate size={18} thickness={2} />
@@ -107,6 +139,7 @@
 
 <style>
   .feed {
+    position: relative;
     max-height: 11rem;
     overflow-y: auto;
     overflow-x: hidden;
@@ -159,20 +192,26 @@
 
   /* Indented sub-activities: capped height, newest at the bottom. */
   .sub {
+    position: relative;
     display: flex;
     flex-direction: column;
+    /* Never let the parent flex column squash a nested section to nothing. */
+    flex-shrink: 0;
     gap: 2px;
     margin-inline-start: 1.1rem;
     padding-inline-start: 0.5rem;
     border-inline-start: 1px solid var(--m3c-outline-variant);
-    max-height: 200px;
+    /* Keep the section to roughly three rows so the parent task stays visible. */
+    max-height: 6.5rem;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
   }
 
-  .sub.overflowing.scrolled {
-    mask-image: linear-gradient(to bottom, transparent 0, black 2.5rem);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 2.5rem);
+  /* Fade the top only when history is above and the current entry is short;
+     a long current task is shown from its start and must stay readable. */
+  .sub.overflowing.scrolled:not(.tall-current) {
+    mask-image: linear-gradient(to bottom, transparent 0, black 2rem);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 2rem);
   }
 </style>

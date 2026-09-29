@@ -3,6 +3,7 @@ import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/provide
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
 import { PerplexitySearchProvider, dateDaysAgo } from "../src/providers/search/PerplexitySearchProvider.ts";
 import { QwenTtsProvider } from "../src/providers/tts/QwenTtsProvider.ts";
+import { convertToOggOpus } from "../src/providers/tts/convertToOggOpus.ts";
 import { AGENT_STEP_LIMIT_MESSAGE } from "../src/agents/Agent.ts";
 import { extractJson, stripMarkdown, sanitizeNarration, parseResearchOutcome } from "../src/workflows/BriefingWorkflow.ts";
 
@@ -333,6 +334,28 @@ describe("Qwen TTS provider", () => {
     await expect(provider.synthesize({ text: "x" })).rejects.toThrow(/empty audio/);
   });
 
+  test("trusts the response content type when the server ignores the format", async () => {
+    mockFetch(
+      async () =>
+        new Response(new Uint8Array([1, 2]), {
+          status: 200,
+          headers: { "Content-Type": "audio/wav" },
+        }),
+    );
+
+    const provider = new QwenTtsProvider({
+      baseUrl: "http://tts.test/v1",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+    });
+
+    const audio = await provider.synthesize({ text: "x" });
+
+    expect(audio.mimeType).toBe("audio/wav");
+    expect(audio.extension).toBe("wav");
+  });
+
   test("fails clearly when no local server is configured", async () => {
     const provider = new QwenTtsProvider({
       baseUrl: "",
@@ -342,5 +365,65 @@ describe("Qwen TTS provider", () => {
     });
 
     await expect(provider.synthesize({ text: "x" })).rejects.toThrow(/QWEN_TTS_BASE_URL/);
+  });
+});
+
+function silentWav(samples = 4800): Uint8Array {
+  const dataSize = samples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const write = (offset: number, text: string) => {
+    for (let index = 0; index < text.length; index++) {
+      view.setUint8(offset + index, text.charCodeAt(index));
+    }
+  };
+
+  write(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 24000, true);
+  view.setUint32(28, 48000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, dataSize, true);
+  return new Uint8Array(buffer);
+}
+
+const hasFfmpeg = Bun.which("ffmpeg") !== null;
+
+describe("Ogg/Opus conversion", () => {
+  test.skipIf(!hasFfmpeg)("converts WAV audio with ffmpeg", async () => {
+    const ogg = await convertToOggOpus(silentWav());
+
+    expect(ogg).toBeDefined();
+    expect(String.fromCharCode(...ogg!.slice(0, 4))).toBe("OggS");
+  });
+
+  test.skipIf(!hasFfmpeg)("converts a WAV server response when opus was requested", async () => {
+    mockFetch(
+      async () =>
+        new Response(silentWav(), {
+          status: 200,
+          headers: { "Content-Type": "audio/wav" },
+        }),
+    );
+
+    const provider = new QwenTtsProvider({
+      baseUrl: "http://tts.test/v1",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+    });
+
+    const audio = await provider.synthesize({ text: "x" });
+
+    expect(audio.mimeType).toBe("audio/ogg");
+    expect(audio.extension).toBe("ogg");
+    expect(String.fromCharCode(...audio.data.slice(0, 4))).toBe("OggS");
   });
 });
