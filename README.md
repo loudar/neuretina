@@ -365,7 +365,9 @@ Built-in message types: `config.get`, `topic.list/create/update/delete`,
   parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
   Running entries keep a stable order even while their status text updates repeatedly.
 - Sub-activities are nested: an agent's reasoning and tool calls are indented under the span that
-  owns them (research, follow-up Q&A), and no task carries a secondary detail line.
+  owns them (research, follow-up Q&A), and no task carries a secondary detail line. Each nested
+  section is capped at 200px, sticks to its newest entries (just the last few actions stay
+  visible), and fades out its top while there is older history above.
 - When nothing is running the header chip shows `idle`, otherwise the running count.
 - The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
   WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;

@@ -1,45 +1,53 @@
 import { describe, expect, test } from "bun:test";
-import { orderStatusEntries } from "../web/src/lib/statusOrder.ts";
+import { flattenStatusEntries, orderStatusEntries } from "../web/src/lib/statusOrder.ts";
 import type { StatusEntry } from "../web/src/lib/statusTypes.ts";
 
 function entry(partial: Partial<StatusEntry> & { id: string }): StatusEntry {
   return { activityId: "a", text: "t", state: "done", startedAt: 0, updatedAt: 0, ...partial };
 }
 
+function orderedIds(entries: StatusEntry[]): string[] {
+  return flattenStatusEntries(orderStatusEntries(entries)).map((item) => item.id);
+}
+
+function orderedDepths(entries: StatusEntry[]): string[] {
+  return flattenStatusEntries(orderStatusEntries(entries)).map((item) => `${item.id}:${item.depth}`);
+}
+
 describe("orderStatusEntries", () => {
   test("groups all running entries at the bottom", () => {
-    const ordered = orderStatusEntries([
+    const ordered = orderedIds([
       entry({ id: "run-early", state: "running", startedAt: 10 }),
       entry({ id: "done-1", state: "done", startedAt: 5, updatedAt: 20 }),
       entry({ id: "run-late", state: "running", startedAt: 30 }),
       entry({ id: "failed-1", state: "failed", startedAt: 6, updatedAt: 22 }),
-    ]).map((item) => item.id);
+    ]);
 
     expect(ordered).toEqual(["done-1", "failed-1", "run-early", "run-late"]);
   });
 
   test("keeps parallel running entries stable when their text updates", () => {
-    const before = orderStatusEntries([
+    const before = orderedIds([
       entry({ id: "r1", state: "running", startedAt: 10, updatedAt: 10 }),
       entry({ id: "r2", state: "running", startedAt: 20, updatedAt: 20 }),
       entry({ id: "d1", state: "done", startedAt: 1, updatedAt: 5 }),
-    ]).map((item) => item.id);
+    ]);
 
-    const after = orderStatusEntries([
+    const after = orderedIds([
       entry({ id: "r1", state: "running", startedAt: 10, updatedAt: 99 }),
       entry({ id: "r2", state: "running", startedAt: 20, updatedAt: 20 }),
       entry({ id: "d1", state: "done", startedAt: 1, updatedAt: 5 }),
-    ]).map((item) => item.id);
+    ]);
 
     expect(after).toEqual(before);
     expect(after).toEqual(["d1", "r1", "r2"]);
   });
 
   test("orders settled history by settle time", () => {
-    const ordered = orderStatusEntries([
+    const ordered = orderedIds([
       entry({ id: "late-settle", state: "done", startedAt: 1, updatedAt: 30 }),
       entry({ id: "early-settle", state: "done", startedAt: 2, updatedAt: 10 }),
-    ]).map((item) => item.id);
+    ]);
 
     expect(ordered).toEqual(["early-settle", "late-settle"]);
   });
@@ -56,7 +64,7 @@ describe("orderStatusEntries", () => {
     expect(input.map((item) => item.id)).toEqual(snapshot);
   });
 
-  test("indents children under their parent and keeps execution order", () => {
+  test("nests children under their parent and keeps execution order", () => {
     const ordered = orderStatusEntries([
       entry({ id: "research", state: "running", startedAt: 10, activityId: "research" }),
       entry({ id: "tool", state: "running", startedAt: 30, parentId: "research" }),
@@ -64,21 +72,29 @@ describe("orderStatusEntries", () => {
       entry({ id: "other", state: "running", startedAt: 15 }),
     ]);
 
-    expect(ordered.map((item) => `${item.id}:${item.depth}`)).toEqual([
-      "research:0",
-      "reasoning:1",
-      "tool:1",
-      "other:0",
-    ]);
+    expect(ordered.map((item) => item.id)).toEqual(["research", "other"]);
+    expect(ordered[0]?.children.map((item) => item.id)).toEqual(["reasoning", "tool"]);
+    expect(ordered[0]?.children.every((item) => item.depth === 1)).toBe(true);
+  });
+
+  test("supports deeper nesting", () => {
+    const entries = [
+      entry({ id: "root", state: "running", startedAt: 1 }),
+      entry({ id: "child", state: "running", startedAt: 2, parentId: "root" }),
+      entry({ id: "grandchild", state: "running", startedAt: 3, parentId: "child" }),
+    ];
+
+    const ordered = orderStatusEntries(entries);
+    expect(ordered[0]?.children[0]?.children[0]?.id).toBe("grandchild");
+    expect(orderedDepths(entries)).toEqual(["root:0", "child:1", "grandchild:2"]);
   });
 
   test("treats an orphaned child as a top-level entry", () => {
-    const ordered = orderStatusEntries([
+    const ordered = orderedIds([
       entry({ id: "orphan", parentId: "missing", state: "done", updatedAt: 5 }),
       entry({ id: "root", state: "done", updatedAt: 10 }),
     ]);
 
-    expect(ordered.map((item) => `${item.id}:${item.depth}`)).toEqual(["orphan:0", "root:0"]);
+    expect(ordered).toEqual(["orphan", "root"]);
   });
 });
-

@@ -3,17 +3,18 @@ import type { StatusEntry } from "./statusTypes";
 export interface OrderedStatusEntry extends StatusEntry {
   /** 0 = top-level, 1+ = nested under its parent entry. */
   depth: number;
+  children: OrderedStatusEntry[];
 }
 
 /**
  * Feed order with nesting: settled (dimmed) history on top, all currently
  * running entries grouped at the bottom, and any entry with a `parentId`
- * rendered directly under its parent, one indent level per link. Children
- * keep execution order (start time), not the running/settled split.
+ * nested under its parent. Children keep execution order (start time), not
+ * the running/settled split.
  */
 export function orderStatusEntries(entries: StatusEntry[]): OrderedStatusEntry[] {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
-  const children = new Map<string, StatusEntry[]>();
+  const childMap = new Map<string, StatusEntry[]>();
   const roots: StatusEntry[] = [];
 
   for (const entry of entries) {
@@ -22,19 +23,23 @@ export function orderStatusEntries(entries: StatusEntry[]): OrderedStatusEntry[]
       roots.push(entry);
       continue;
     }
-    const siblings = children.get(parent.id) ?? [];
+    const siblings = childMap.get(parent.id) ?? [];
     siblings.push(entry);
-    children.set(parent.id, siblings);
+    childMap.set(parent.id, siblings);
   }
 
-  const ordered: OrderedStatusEntry[] = [];
-  const append = (entry: StatusEntry, depth: number) => {
-    ordered.push({ ...entry, depth });
-    for (const child of sortChildren(children.get(entry.id) ?? [])) append(child, depth + 1);
-  };
+  const build = (entry: StatusEntry, depth: number): OrderedStatusEntry => ({
+    ...entry,
+    depth,
+    children: sortChildren(childMap.get(entry.id) ?? []).map((child) => build(child, depth + 1)),
+  });
 
-  for (const root of sortRoots(roots)) append(root, 0);
-  return ordered;
+  return sortRoots(roots).map((root) => build(root, 0));
+}
+
+/** Depth-first flattening (parents before their children). */
+export function flattenStatusEntries(entries: OrderedStatusEntry[]): OrderedStatusEntry[] {
+  return entries.flatMap((entry) => [entry, ...flattenStatusEntries(entry.children)]);
 }
 
 /** Settled history first (by settle time), running entries last (by start). */

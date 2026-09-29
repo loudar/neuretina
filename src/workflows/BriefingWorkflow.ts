@@ -117,7 +117,7 @@ Inline citations — every claim shows its source:
 - The source list you receive is numbered. Directly after every factual claim, add the matching number in square brackets: "Spotify crossed 300 million subscribers [4]." or "Revenue grew 12 percent [7][9]."
 - Cite the exact source that supports the claim; never invent a number and never cite a source that does not support it.
 - Short direct quotes are welcome when they carry the point — keep them brief, in quotation marks, with the same marker.
-- Use no other citation style: no links, no URLs, no numbered citations that are not in the source list, and no source list at the end. The markers are rendered as clickable pills, and they are stripped from the spoken narration automatically.
+- Use no other citation style: no links, no URLs, no markers that are not in the source list, and no source list at the end. The markers are rendered as clickable pills, and they are stripped from the spoken narration automatically.
 
 Respond with a single JSON object:
 {"markdown": "<full brief as markdown>"}`;
