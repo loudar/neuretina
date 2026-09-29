@@ -1,0 +1,27 @@
+{
+  "name": "briefing-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "dev:web": "vite web",
+    "build:web": "vite build web",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "openai": "^7.23.0"
+  },
+  "devDependencies": {
+    "@fontsource-variable/google-sans-flex": "^5.3.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/bun": "^1.4.2",
+    "m3-svelte": "^7.2.1",
+    "svelte": "^5.57.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1",
+    "vite-plugin-functions-mixins": "^0.4.1"
+  }
+}

@@ -1,0 +1,183 @@
+@import "m3-svelte/etc/styles.css";
+@import "m3-svelte/etc/recommended-styles.css";
+@import "@fontsource-variable/google-sans-flex/opsz.css";
+
+/*
+ * Density function used throughout M3 Svelte components
+ * (heights, paddings). Tune with `--density` (e.g. -1 … 1).
+ */
+@function --m3-density(--size) {
+  result: calc(var(--size) + (var(--density) * 0.25rem));
+}
+
+/*
+ * Material 3 theme, baseline palette (seed #6750a4), light + dark.
+ * Token names follow the M3 Svelte conventions (--m3c-*).
+ */
+:root {
+  color-scheme: light dark;
+  --density: 0;
+  --m3-font: "Google Sans Flex Variable", "Google Sans Flex", system-ui, sans-serif;
+
+  --m3c-primary: #6750a4;
+  --m3c-on-primary: #ffffff;
+  --m3c-primary-container: #eaddff;
+  --m3c-on-primary-container: #21005d;
+  --m3c-primary-container-subtle: #eaddff;
+  --m3c-on-primary-container-subtle: #21005d;
+
+  --m3c-secondary: #625b71;
+  --m3c-on-secondary: #ffffff;
+  --m3c-secondary-container: #e8def8;
+  --m3c-on-secondary-container: #1d192b;
+  --m3c-secondary-container-subtle: #e8def8;
+  --m3c-on-secondary-container-subtle: #1d192b;
+
+  --m3c-tertiary: #7d5260;
+  --m3c-on-tertiary: #ffffff;
+  --m3c-tertiary-container: #ffd8e4;
+  --m3c-on-tertiary-container: #31111d;
+  --m3c-tertiary-container-subtle: #ffd8e4;
+  --m3c-on-tertiary-container-subtle: #31111d;
+
+  --m3c-error: #b3261e;
+  --m3c-on-error: #ffffff;
+  --m3c-error-container: #f9dedc;
+  --m3c-on-error-container: #410e0b;
+  --m3c-error-container-subtle: #f9dedc;
+  --m3c-on-error-container-subtle: #410e0b;
+
+  --m3c-surface: #fffbfe;
+  --m3c-on-surface: #1c1b1f;
+  --m3c-on-surface-variant: #49454f;
+  --m3c-surface-container-lowest: #ffffff;
+  --m3c-surface-container-low: #f7f2fa;
+  --m3c-surface-container: #f3edf7;
+  --m3c-surface-container-high: #ece6f0;
+  --m3c-surface-container-highest: #e6e0e9;
+  --m3c-outline: #79747e;
+  --m3c-outline-variant: #cac4d0;
+  --m3c-inverse-surface: #313033;
+  --m3c-inverse-on-surface: #f4eff4;
+  --m3c-inverse-primary: #d0bcff;
+  --m3c-shadow: #000000;
+  --m3c-scrim: #000000;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --m3c-primary: #d0bcff;
+    --m3c-on-primary: #381e72;
+    --m3c-primary-container: #4f378b;
+    --m3c-on-primary-container: #eaddff;
+    --m3c-primary-container-subtle: #4f378b;
+    --m3c-on-primary-container-subtle: #eaddff;
+
+    --m3c-secondary: #ccc2dc;
+    --m3c-on-secondary: #332d41;
+    --m3c-secondary-container: #4a4458;
+    --m3c-on-secondary-container: #e8def8;
+    --m3c-secondary-container-subtle: #4a4458;
+    --m3c-on-secondary-container-subtle: #e8def8;
+
+    --m3c-tertiary: #efb8c8;
+    --m3c-on-tertiary: #492532;
+    --m3c-tertiary-container: #633b48;
+    --m3c-on-tertiary-container: #ffd8e4;
+    --m3c-tertiary-container-subtle: #633b48;
+    --m3c-on-tertiary-container-subtle: #ffd8e4;
+
+    --m3c-error: #f2b8b5;
+    --m3c-on-error: #601410;
+    --m3c-error-container: #8c1d18;
+    --m3c-on-error-container: #f9dedc;
+    --m3c-error-container-subtle: #8c1d18;
+    --m3c-on-error-container-subtle: #f9dedc;
+
+    --m3c-surface: #1c1b1f;
+    --m3c-on-surface: #e6e1e5;
+    --m3c-on-surface-variant: #cac4d0;
+    --m3c-surface-container-lowest: #0f0d13;
+    --m3c-surface-container-low: #1d1b20;
+    --m3c-surface-container: #211f26;
+    --m3c-surface-container-high: #2b2930;
+    --m3c-surface-container-highest: #36343b;
+    --m3c-outline: #938f99;
+    --m3c-outline-variant: #49454f;
+    --m3c-inverse-surface: #e6e1e5;
+    --m3c-inverse-on-surface: #313033;
+    --m3c-inverse-primary: #6750a4;
+  }
+}
+
+:root {
+  @apply --m3-body-large;
+  background-color: var(--m3c-surface);
+  color: var(--m3c-on-surface);
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+h2 {
+  @apply --m3-title-large;
+  margin: 0;
+}
+
+h3 {
+  @apply --m3-title-medium;
+  margin: 0;
+}
+
+.muted {
+  color: var(--m3c-on-surface-variant);
+}
+
+/* Shared layout helpers; component styling comes from M3 Svelte. */
+.app {
+  max-width: 76rem;
+  margin-inline: auto;
+  padding: 1rem clamp(0.75rem, 2vw, 2rem) 4rem;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.chips {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.row {
+  display: grid;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+@media (width >= 50rem) {
+  .row.two {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+  }
+}
