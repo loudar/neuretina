@@ -342,6 +342,43 @@ describe("BriefingWorkflow", () => {
     expect(researched?.payload).toMatchObject({ found: false });
   });
 
+  test("keeps bluesky post text and media on the stored sources", async () => {
+    const social = [
+      {
+        title: "Alice (@alice.bsky.social)",
+        url: "https://bsky.app/profile/alice.bsky.social/post/rkey1",
+        snippet: "Local-first is the future",
+        source: "bsky.app",
+        media: [
+          {
+            type: "image" as const,
+            thumbUrl: "https://cdn.bsky.app/thumb.jpg",
+            fullUrl: "https://cdn.bsky.app/full.jpg",
+            alt: "a chart",
+            width: 1200,
+            height: 675,
+          },
+        ],
+      },
+    ];
+    const { workflow, topics, briefs, bus, statuses } = setup({ socialResults: social });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c13", bus, logger: log, statuses },
+    );
+
+    const stored = briefs.get(output.briefId!);
+    const source = stored.sources.find((item) => item.url === social[0]!.url);
+    expect(source?.snippet).toBe("Local-first is the future");
+    expect(source?.media?.[0]).toMatchObject({
+      type: "image",
+      thumbUrl: "https://cdn.bsky.app/thumb.jpg",
+      alt: "a chart",
+    });
+  });
+
   test("collects finance lookup sources alongside search results", async () => {
     const financeResults = [
       {

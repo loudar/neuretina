@@ -34,6 +34,28 @@ export function groupSourcesByDomain(sources: BriefSource[]): SourceGroup[] {
   return [...groups.values()];
 }
 
+/**
+ * Case-insensitive filter over title, URL, snippet, provider and media alt
+ * text. Multiple words must all match (AND), in any field.
+ */
+export function filterSources(sources: BriefSource[], query: string): BriefSource[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return sources;
+
+  return sources.filter((source) => {
+    const haystack = [
+      source.title,
+      source.url,
+      source.snippet ?? "",
+      source.provider,
+      ...(source.media ?? []).map((item) => item.alt ?? ""),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   perplexity: "Perplexity",
   bluesky: "Bluesky",

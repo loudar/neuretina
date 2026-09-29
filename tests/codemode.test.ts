@@ -28,6 +28,14 @@ function stubTool(overrides: Partial<Tool> = {}): Tool {
           url: "https://example.com/a",
           snippet: "Snippet",
           source: "example.com",
+          media: [
+            {
+              type: "image",
+              thumbUrl: "https://example.com/thumb.jpg",
+              fullUrl: "https://example.com/full.jpg",
+              alt: "a chart",
+            },
+          ],
         },
       ],
     }),
@@ -55,6 +63,8 @@ describe("CodeModeTool", () => {
     expect(result.results).toHaveLength(1);
     expect(result.results[0]?.provider).toBe("stub");
     expect(result.results[0]?.url).toBe("https://example.com/a");
+    expect(result.results[0]?.snippet).toBe("Snippet");
+    expect(result.results[0]?.media?.[0]?.thumbUrl).toBe("https://example.com/thumb.jpg");
   });
 
   test("accepts a plain async function body as well as an arrow function", async () => {

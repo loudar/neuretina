@@ -1,6 +1,7 @@
 import { Agent } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
+import { BriefGetTool } from "../agents/tools/BriefGetTool.ts";
 import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
@@ -59,7 +60,7 @@ Plan first:
 - Decide yourself what to search based on the topics: merge overlapping topics and pick distinct, high-signal queries.
 - Social discussion carries as much weight as the reporting: run at least one Bluesky search per run, and treat it as the place where hype, skepticism and disagreement actually show up.
 - When a topic touches a publicly traded company, an ETF or the markets, use perplexity_finance for concrete numbers (quotes, revenue, margins, guidance, analyst estimates) — state the business question first, then the company or ticker.
-- Use past_briefs to see what was already covered earlier and what has changed since; build on that instead of repeating it.
+- Search earlier briefs by topic with past_briefs and open any of them in full with past_brief, so your notes build on what was already covered instead of repeating it.
 - Run at most 6 searches in total across web and social, plus at most 2 finance lookups. Do not run near-identical queries twice.
 
 Rules:
@@ -102,12 +103,14 @@ Substance — every sentence must earn its place:
 
 Hard budget — brevity beats completeness:
 - The entire brief, title aside, must stay under 150 words. Shorter is better.
-- At most 2 short paragraphs in total. No lists, no "Worth a look" section, no action items.
+- One short paragraph per subtopic, and at most 4 paragraphs in total. No lists, no "Worth a look" section, no action items.
 - Every sentence must add new information. Delete greetings, scene-setting, connective filler, hedges, repetition, and anything a reader could guess.
 - If two sentences overlap, keep the sharper one. Prefer concrete nouns and verbs over adjectives.
 
-Shape — everything together, NOT per topic:
-- One flowing overview of at most 2 short paragraphs that merges overlapping topics and leads with what actually matters. No per-topic sections, no sub-headings, no lists of any kind — only the title.
+Shape — one paragraph per subtopic:
+- Group the material into its distinct subtopics or stories (merging overlapping topics), then give each one its own short paragraph, separated by a blank line. Lead with what actually matters most.
+- Keep each paragraph on a single subtopic: never mash unrelated stories into one paragraph, and never split one story across paragraphs.
+- No sub-headings and no lists of any kind — only the title and the paragraphs.
 - No preamble, no closing remarks.
 - Attribute naturally by outlet name ("the Guardian reports", "according to CNBC").
 - Never include a source list, URLs, or citation numbers anywhere — links are attached separately.
@@ -454,6 +457,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         defaultRecency: this.deps.defaults.recency,
       }),
       new BriefSearchTool(this.deps.briefs),
+      new BriefGetTool(this.deps.briefs),
       new FinanceSearchTool(this.deps.finance),
     ];
 
@@ -504,7 +508,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const userContent = compress
       ? JSON.stringify({
           language: this.deps.defaults.language,
-          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact and the split-opinion reporting, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
+          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact, the split-opinion reporting and the one-paragraph-per-subtopic shape, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
           draft: compress.draft,
         })
       : JSON.stringify({
@@ -577,11 +581,18 @@ function collectSources(result: AgentRunResult): BriefSource[] {
         if (!item || typeof item !== "object") continue;
         const record = item as Record<string, unknown>;
         if (typeof record.url !== "string" || !record.url) continue;
+        const snippet =
+          typeof record.snippet === "string" && record.snippet.trim()
+            ? record.snippet.trim()
+            : undefined;
+        const media = Array.isArray(record.media) ? (record.media as BriefSource["media"]) : undefined;
         sources.push({
           title:
             typeof record.title === "string" && record.title ? record.title : record.url,
           url: record.url,
           provider: typeof record.provider === "string" ? record.provider : fallback,
+          ...(snippet ? { snippet } : {}),
+          ...(media && media.length > 0 ? { media } : {}),
         });
       }
     }

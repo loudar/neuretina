@@ -1,4 +1,4 @@
-import type { SearchResult } from "../../capabilities/search/SearchProvider.ts";
+import type { SearchMedia, SearchResult } from "../../capabilities/search/SearchProvider.ts";
 import { createSubprocessExecutor } from "../codemode/executor.ts";
 import type { CodeModeExecutor } from "../codemode/types.ts";
 import type { Tool, ToolContext } from "../Tool.ts";
@@ -44,7 +44,9 @@ bluesky_search({ query, limit?, recency? }) -> same shape
 perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }
   Structured market data for public companies and ETFs. Ask a business question naming the company or ticker.
 past_briefs({ query?, limit? }) -> { briefs: [{ id, date, topics, excerpt }] }
-  Earlier briefings, so you can build on what was already covered.
+  Search earlier briefings by topic or keyword, to build on what was already covered.
+past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
+  Open one earlier briefing in full, using an id from past_briefs.
 
 The function must return a JSON-serializable value — that value is all you get back, so filter, merge and trim inside the code (Promise.all, loops, if-statements) and return compact findings rather than raw tool output. console.log is captured and returned with the result.
 
@@ -131,12 +133,14 @@ export class CodeModeTool implements Tool<CodeModeResult> {
         if (!item || typeof item !== "object") continue;
         const record = item as Record<string, unknown>;
         if (typeof record.url !== "string" || !record.url) continue;
+        const media = Array.isArray(record.media) ? (record.media as SearchMedia[]) : undefined;
         results.push({
           title: typeof record.title === "string" && record.title ? record.title : record.url,
           url: record.url,
           snippet: typeof record.snippet === "string" ? record.snippet : "",
           source: typeof record.source === "string" ? record.source : provider,
           provider,
+          ...(media && media.length > 0 ? { media } : {}),
         });
       }
     }

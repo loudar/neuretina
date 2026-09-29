@@ -1,10 +1,15 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
+import type { SearchMedia } from "../../capabilities/search/SearchProvider.ts";
 import { NotFoundError } from "../../core/errors.ts";
 
 export interface BriefSource {
   title: string;
   url: string;
   provider: string;
+  /** Short excerpt, e.g. the text of a social post. */
+  snippet?: string;
+  /** Attached media (Bluesky images / video thumbnails). */
+  media?: SearchMedia[];
 }
 
 export interface Brief {

@@ -1,6 +1,7 @@
 import { ProviderError } from "../../core/errors.ts";
 import { requestJson } from "../../infra/http/request.ts";
 import type {
+  SearchMedia,
   SearchProvider,
   SearchQuery,
   SearchResponse,
@@ -20,6 +21,7 @@ interface SearchPostsResponse {
     cid: string;
     author: { did: string; handle: string; displayName?: string };
     record: { text?: string; createdAt?: string };
+    embed?: unknown;
     likeCount?: number;
     repostCount?: number;
     replyCount?: number;
@@ -215,6 +217,8 @@ export class BlueskySearchProvider implements SearchProvider {
     if (post.repostCount !== undefined) engagement.reposts = post.repostCount;
     if (post.replyCount !== undefined) engagement.replies = post.replyCount;
 
+    const media = extractMedia(post.embed);
+
     return {
       title: `${post.author.displayName ?? `@${handle}`} (@${handle})`,
       url: `https://bsky.app/profile/${handle}/post/${rkey}`,
@@ -222,8 +226,63 @@ export class BlueskySearchProvider implements SearchProvider {
       publishedAt: post.record.createdAt ?? post.indexedAt,
       source: "bsky.app",
       meta: { author: handle, engagement, uri: post.uri },
+      ...(media.length > 0 ? { media } : {}),
     };
   }
+}
+
+/** Extracts image and video attachments from a post's embed view. */
+function extractMedia(embed: unknown): SearchMedia[] {
+  if (!embed || typeof embed !== "object") return [];
+  const record = embed as Record<string, unknown>;
+
+  if (record.$type === "app.bsky.embed.recordWithMedia#view") {
+    return extractMedia(record.media);
+  }
+
+  if (record.$type === "app.bsky.embed.images#view" && Array.isArray(record.images)) {
+    const media: SearchMedia[] = [];
+    for (const item of record.images) {
+      if (!item || typeof item !== "object") continue;
+      const image = item as Record<string, unknown>;
+      const thumbUrl = stringOrUndefined(image.thumb);
+      const fullUrl = stringOrUndefined(image.fullsize) ?? thumbUrl;
+      if (!thumbUrl || !fullUrl) continue;
+      media.push({
+        type: "image",
+        thumbUrl,
+        fullUrl,
+        ...altOf(image.alt),
+        ...aspectOf(image.aspectRatio),
+      });
+    }
+    return media;
+  }
+
+  if (record.$type === "app.bsky.embed.video#view") {
+    const thumbUrl = stringOrUndefined(record.thumbnail);
+    if (!thumbUrl) return [];
+    return [{ type: "video", thumbUrl, fullUrl: thumbUrl, ...aspectOf(record.aspectRatio) }];
+  }
+
+  return [];
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function altOf(value: unknown): { alt?: string } {
+  const alt = stringOrUndefined(value);
+  return alt ? { alt } : {};
+}
+
+function aspectOf(value: unknown): { width?: number; height?: number } {
+  if (!value || typeof value !== "object") return {};
+  const aspect = value as Record<string, unknown>;
+  const width = typeof aspect.width === "number" ? aspect.width : undefined;
+  const height = typeof aspect.height === "number" ? aspect.height : undefined;
+  return width && height ? { width, height } : {};
 }
 
 function toSession(response: CreateSessionResponse): Session {

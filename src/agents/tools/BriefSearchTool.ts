@@ -18,7 +18,7 @@ export interface PastBriefsResult {
 export class BriefSearchTool implements Tool<PastBriefsResult> {
   readonly name = "past_briefs";
   readonly description =
-    "Look up earlier briefing summaries. Use this to see what was already covered and what has changed since, so your notes build on prior coverage instead of repeating it.";
+    "Search earlier briefing summaries by topic or keyword. Use this to see what was already covered and what has changed since, so your notes build on prior coverage instead of repeating it. Each result carries an id you can open in full with past_brief.";
   readonly parameters: Record<string, unknown> = {
     type: "object",
     properties: {

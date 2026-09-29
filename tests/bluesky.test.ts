@@ -47,6 +47,66 @@ describe("BlueskySearchProvider", () => {
     expect(response.results[0]?.meta?.engagement).toEqual({ likes: 12, reposts: 3, replies: 1 });
   });
 
+  test("extracts image and video media from post embeds", async () => {
+    const imagePost = {
+      ...post,
+      uri: "at://did:plc:abc/app.bsky.feed.post/rkey2",
+      embed: {
+        $type: "app.bsky.embed.images#view",
+        images: [
+          {
+            thumb: "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafk1@jpeg",
+            fullsize: "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:abc/bafk1@jpeg",
+            alt: "a chart",
+            aspectRatio: { width: 1200, height: 675 },
+          },
+        ],
+      },
+    };
+    const videoPost = {
+      ...post,
+      uri: "at://did:plc:abc/app.bsky.feed.post/rkey3",
+      record: { text: "watch this", createdAt: "2026-09-28T10:00:00.000Z" },
+      embed: {
+        $type: "app.bsky.embed.recordWithMedia#view",
+        media: {
+          $type: "app.bsky.embed.video#view",
+          thumbnail: "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/vid@jpeg",
+          aspectRatio: { width: 1080, height: 1920 },
+        },
+      },
+    };
+
+    mockFetch(async () => Response.json({ posts: [imagePost, videoPost] }));
+
+    const provider = new BlueskySearchProvider({
+      pdsUrl: "https://bsky.social",
+      publicUrl: "https://public.api.bsky.app",
+    });
+
+    const response = await provider.search({ query: "x" });
+
+    expect(response.results[0]?.media).toEqual([
+      {
+        type: "image",
+        thumbUrl: "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/bafk1@jpeg",
+        fullUrl: "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:abc/bafk1@jpeg",
+        alt: "a chart",
+        width: 1200,
+        height: 675,
+      },
+    ]);
+    expect(response.results[1]?.media).toEqual([
+      {
+        type: "video",
+        thumbUrl: "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/vid@jpeg",
+        fullUrl: "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:abc/vid@jpeg",
+        width: 1080,
+        height: 1920,
+      },
+    ]);
+  });
+
   test("explains the 403 when public search is blocked", async () => {
     mockFetch(async () => new Response("forbidden", { status: 403 }));
 

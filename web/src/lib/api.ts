@@ -6,10 +6,23 @@ export interface Topic {
   createdAt: number;
 }
 
+export interface BriefSourceMedia {
+  type: "image" | "video";
+  thumbUrl: string;
+  fullUrl: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface BriefSource {
   title: string;
   url: string;
   provider: string;
+  /** Short excerpt, e.g. the text of a social post. */
+  snippet?: string;
+  /** Attached media (Bluesky images / video thumbnails). */
+  media?: BriefSourceMedia[];
 }
 
 export interface Brief {

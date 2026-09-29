@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   domainInitial,
+  filterSources,
   groupSourcesByDomain,
   providerLabel,
   sourceDomain,
@@ -49,5 +50,46 @@ describe("source grouping", () => {
     expect(domainInitial("cbc.ca")).toBe("C");
     expect(domainInitial("123.net")).toBe("1");
     expect(domainInitial("")).toBe("?");
+  });
+
+  test("filters across title, url, snippet and media alt text", () => {
+    const all: BriefSource[] = [
+      {
+        title: "Bird portraits",
+        url: "https://bsky.app/profile/alice/post/1",
+        provider: "bluesky",
+        snippet: "Great tit on a branch",
+        media: [
+          {
+            type: "image",
+            thumbUrl: "https://cdn.bsky.app/t.jpg",
+            fullUrl: "https://cdn.bsky.app/f.jpg",
+            alt: "a small bird",
+          },
+        ],
+      },
+      {
+        title: "Monochrome",
+        url: "https://bsky.app/profile/bob/post/2",
+        provider: "bluesky",
+        snippet: "black and white",
+      },
+      {
+        title: "Markets",
+        url: "https://example.com/markets",
+        provider: "perplexity",
+        snippet: "stocks fell",
+      },
+    ];
+
+    expect(filterSources(all, "")).toHaveLength(3);
+    expect(filterSources(all, "   ")).toHaveLength(3);
+    expect(filterSources(all, "BIRD").map((source) => source.title)).toEqual([
+      "Bird portraits",
+    ]);
+    expect(filterSources(all, "bsky.app")).toHaveLength(2);
+    expect(filterSources(all, "black white")).toHaveLength(1);
+    expect(filterSources(all, "bird markets")).toHaveLength(0);
+    expect(filterSources(all, "example.com markets")).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, ListItem, Switch } from "m3-svelte";
+  import { Button, Dialog, Icon, ListItem, Switch, TextFieldOutlined } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
+  import iconClose from "@ktibow/iconset-material-symbols/close";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconExpandMore from "@ktibow/iconset-material-symbols/expand-more";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
@@ -9,12 +10,18 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconOpenInNew from "@ktibow/iconset-material-symbols/open-in-new";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
+  import iconSearch from "@ktibow/iconset-material-symbols/search";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
-  import { formatDateTime, formatListDate } from "../lib/format";
+  import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
-  import { domainInitial, groupSourcesByDomain, providerLabel } from "../lib/sources";
+  import {
+    domainInitial,
+    filterSources,
+    groupSourcesByDomain,
+    providerLabel,
+  } from "../lib/sources";
   import { markdownToHtml } from "../../../src/core/markdown.ts";
   import DataList from "./DataList.svelte";
   import Panel from "./Panel.svelte";
@@ -28,8 +35,11 @@
   let deleting = $state(false);
   let generating = $state(false);
   let voiceEnabled = $state(true);
+  let sourceFilter = $state("");
 
-  const sourceGroups = $derived(groupSourcesByDomain(selected?.sources ?? []));
+  const filteredSources = $derived(filterSources(selected?.sources ?? [], sourceFilter));
+  const sourceGroups = $derived(groupSourcesByDomain(filteredSources));
+  const filtering = $derived(sourceFilter.trim().length > 0);
   const briefHtml = $derived(markdownToHtml(selected?.markdown ?? ""));
 
   async function refreshList(): Promise<void> {
@@ -45,6 +55,7 @@
       const brief = await commands.briefs.get(id);
       selected = brief;
       audioUrl = null;
+      sourceFilter = "";
       if (brief.hasAudio) {
         const audio = await commands.briefs.audio(id);
         audioUrl = audio?.dataUrl ?? null;
@@ -181,31 +192,32 @@
 
   <Panel>
     {#if selected}
-      <div class="toolbar">
+      <div class="toolbar brief-head">
         <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
-        <div class="actions">
-          {#if !selected.hasAudio}
-            <Button variant="tonal" iconType="left" onclick={generateVoice} disabled={generating}>
-              <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
-            </Button>
-          {/if}
-          <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
-            <Icon icon={iconSend} /> Re-send
-          </Button>
-          <Button
-            variant="text"
-            iconType="full"
-            onclick={() => (confirmingDelete = true)}
-            disabled={deleting}
-          >
-            <Icon icon={iconDelete} />
-          </Button>
-        </div>
+        <span class="brief-time muted" title={formatDateTime(selected.createdAt)}>
+          {formatRelativeTime(selected.createdAt)}{selected.audioDurationMs
+            ? ` · ${Math.round(selected.audioDurationMs / 1000)}s audio`
+            : ""}
+        </span>
       </div>
-      <p class="muted">
-        {formatDateTime(selected.createdAt)} · {selected.sources.length} sources
-        {selected.audioDurationMs ? `· ${Math.round(selected.audioDurationMs / 1000)}s audio` : ""}
-      </p>
+      <div class="actions detail-actions">
+        {#if !selected.hasAudio}
+          <Button variant="tonal" iconType="left" onclick={generateVoice} disabled={generating}>
+            <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
+          </Button>
+        {/if}
+        <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
+          <Icon icon={iconSend} /> Re-send
+        </Button>
+        <Button
+          variant="text"
+          iconType="full"
+          onclick={() => (confirmingDelete = true)}
+          disabled={deleting}
+        >
+          <Icon icon={iconDelete} />
+        </Button>
+      </div>
 
       {#if audioUrl}
         <audio controls src={audioUrl}></audio>
@@ -216,42 +228,90 @@
       <div class="brief-text">{@html briefHtml}</div>
 
       {#if selected.sources.length > 0}
-        <div class="sources">
-          <div class="sources-head">
+        <div class="source-section">
+          <div class="source-section-head">
             <h3>Sources</h3>
-            <span class="total">{selected.sources.length}</span>
+            <span class="total">
+              {filtering
+                ? `${filteredSources.length} of ${selected.sources.length}`
+                : selected.sources.length}
+            </span>
           </div>
-          <div class="source-groups">
-            {#each sourceGroups as group (group.domain)}
-              <details class="source-group" open>
-                <summary>
-                  <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
-                  <span class="domain">{group.domain}</span>
-                  <span class="count">{group.sources.length}</span>
-                  <span class="provider-tags">
-                    {#each group.providers as provider (provider)}
-                      <span class="provider-tag" data-provider={provider}>
-                        {providerLabel(provider)}
-                      </span>
-                    {/each}
-                  </span>
-                  <span class="chevron"><Icon icon={iconExpandMore} size={18} /></span>
-                </summary>
-                <ul>
-                  {#each group.sources as source (source.url)}
-                    <li>
-                      <a href={source.url} target="_blank" rel="noreferrer">
-                        <span class="title">{source.title}</span>
-                        <span class="open" aria-hidden="true">
-                          <Icon icon={iconOpenInNew} size={15} />
+          <TextFieldOutlined
+            label="Filter sources"
+            leadingIcon={iconSearch}
+            bind:value={sourceFilter}
+            trailing={filtering
+              ? { icon: iconClose, onclick: () => (sourceFilter = "") }
+              : undefined}
+          />
+          {#if sourceGroups.length === 0}
+            <p class="muted">No sources match "{sourceFilter.trim()}".</p>
+          {:else}
+            <div class="source-groups">
+              {#each sourceGroups as group (group.domain)}
+                <details class="source-group" open={filtering}>
+                  <summary>
+                    <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
+                    <span class="domain">{group.domain}</span>
+                    <span class="count">{group.sources.length}</span>
+                    <span class="provider-tags">
+                      {#each group.providers as provider (provider)}
+                        <span class="provider-tag" data-provider={provider}>
+                          {providerLabel(provider)}
                         </span>
-                      </a>
-                    </li>
-                  {/each}
-                </ul>
-              </details>
-            {/each}
-          </div>
+                      {/each}
+                    </span>
+                    <span class="chevron"><Icon icon={iconExpandMore} size={18} /></span>
+                  </summary>
+                  <ul>
+                    {#each group.sources as source (source.url)}
+                      <li class="source">
+                        <a class="source-head" href={source.url} target="_blank" rel="noreferrer">
+                          <span class="title">{source.title}</span>
+                          <span class="open" aria-hidden="true">
+                            <Icon icon={iconOpenInNew} size={15} />
+                          </span>
+                        </a>
+                        {#if source.provider === "bluesky" && source.snippet}
+                          <p class="snippet">{source.snippet}</p>
+                        {/if}
+                        {#if source.media?.length}
+                          <div class="media">
+                            {#each source.media as item, index (item.thumbUrl + index)}
+                              <a
+                                class="media-item"
+                                href={item.type === "video" ? source.url : item.fullUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={item.alt ?? "Open media"}
+                              >
+                                <img
+                                  src={item.thumbUrl}
+                                  alt={item.alt ?? ""}
+                                  loading="lazy"
+                                  width={item.width}
+                                  height={item.height}
+                                  style={item.width && item.height
+                                    ? `aspect-ratio: ${item.width} / ${item.height};`
+                                    : ""}
+                                />
+                                {#if item.type === "video"}
+                                  <span class="play" aria-hidden="true">
+                                    <Icon icon={iconPlay} size={18} />
+                                  </span>
+                                {/if}
+                              </a>
+                            {/each}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                </details>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     {:else}
@@ -293,6 +353,26 @@
 
   .voice-label {
     line-height: 1;
+  }
+
+  .brief-head {
+    flex-wrap: nowrap;
+  }
+
+  .brief-head h2 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .brief-time {
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  .detail-actions {
+    justify-content: flex-end;
   }
 
   .entry {
@@ -397,13 +477,13 @@
     font-size: 0.85em;
   }
 
-  .sources {
+  .source-section {
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
   }
 
-  .sources-head {
+  .source-section-head {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -515,25 +595,28 @@
   .source-group ul {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: 0.4rem;
     margin: 0;
     padding: 0 0.4rem 0.4rem;
     list-style: none;
   }
 
-  .source-group a {
+  .source {
+    padding: 0.5rem 0.6rem;
+    border-radius: var(--m3-shape-small);
+    background-color: var(--m3c-surface-container-highest);
+  }
+
+  .source:hover {
+    background-color: var(--m3c-surface-container-high);
+  }
+
+  .source-head {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
-    padding: 0.35rem 0.5rem;
-    border-radius: var(--m3-shape-small);
     color: var(--m3c-on-surface);
     text-decoration: none;
-  }
-
-  .source-group a:hover,
-  .source-group a:focus-visible {
-    background-color: var(--m3c-surface-container-high);
   }
 
   .title {
@@ -550,8 +633,53 @@
     transition: opacity 120ms;
   }
 
-  .source-group a:hover .open,
-  .source-group a:focus-visible .open {
+  .source-head:hover .open,
+  .source-head:focus-visible .open {
     opacity: 1;
+  }
+
+  .snippet {
+    margin: 0.2rem 0 0;
+    font-size: 0.84rem;
+    line-height: 1.45;
+    color: var(--m3c-on-surface-variant);
+    white-space: pre-wrap;
+  }
+
+  .media {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.45rem;
+  }
+
+  .media-item {
+    position: relative;
+    display: inline-flex;
+    border-radius: var(--m3-shape-small);
+    overflow: hidden;
+  }
+
+  .media img {
+    display: block;
+    height: 7rem;
+    width: auto;
+    max-width: 100%;
+    object-fit: cover;
+    background-color: var(--m3c-surface-container-highest);
+  }
+
+  .media-item:hover img {
+    opacity: 0.9;
+  }
+
+  .play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.25);
+    pointer-events: none;
   }
 </style>

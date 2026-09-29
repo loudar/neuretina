@@ -48,12 +48,12 @@ Adding an agent capability means implementing `Tool` and passing it to an `Agent
 The researcher does not call search tools one by one. It gets a single `run_code` tool and writes one
 small JavaScript program per run. The program executes in a sandboxed Bun subprocess where the tools
 are exposed as async functions — `perplexity_search`, `bluesky_search`, `perplexity_finance`,
-`past_briefs` — and reaches the engine's real providers over a stdio bridge. Only the program's
-return value and captured `console.log` output come back to the model, so searches run in parallel
-with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact findings
-enter the model context. This is the pattern behind Cloudflare's Code Mode and the CodeAct paper:
-it removes the per-search model round-trip (and the intermediate results) that dominate token and
-latency cost.
+`past_briefs`, `past_brief` — and reaches the engine's real providers over a stdio bridge. Only the
+program's return value and captured `console.log` output come back to the model, so searches run in
+parallel with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact
+findings enter the model context. This is the pattern behind Cloudflare's Code Mode and the CodeAct
+paper: it removes the per-search model round-trip (and the intermediate results) that dominate token
+and latency cost.
 
 Guardrails: a wall-clock timeout per program, a tool-call budget (12 per program, plus the agent's
 own), clipped result and log sizes, and a screen that rejects code touching `fetch`, `process`,
