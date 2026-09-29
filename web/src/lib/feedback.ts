@@ -8,3 +8,8 @@ export function errorText(error: unknown): string {
 export function reportError(error: unknown): void {
   snackbar(errorText(error), undefined, true);
 }
+
+/** Shows a short success message in a snackbar. */
+export function reportSuccess(message: string): void {
+  snackbar(message, undefined, true);
+}

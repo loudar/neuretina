@@ -261,6 +261,37 @@ describe("webhook gateway", () => {
     }
   });
 
+  test("re-sends a stored brief as formatted text plus audio", async () => {
+    const brief = kernel.briefs.create({
+      correlationId: "c-brief",
+      topics: ["Rust"],
+      markdown: "# Rust\n\nAll quiet.",
+      narration: "Rust is quiet",
+      sources: [],
+    });
+    kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg", 1000);
+
+    const messaging = kernel.messaging as StubMessaging;
+    const before = messaging.sent.length;
+
+    const result = await call<{ briefId: string; sent: Array<{ kind: string }> }>("brief.send", {
+      id: brief.id,
+    });
+
+    expect(result.briefId).toBe(brief.id);
+    expect(result.sent.map((entry) => entry.kind)).toEqual(["text", "voice"]);
+
+    const added = messaging.sent.slice(before).map((entry) => entry.message);
+    expect(added).toHaveLength(2);
+    const summary = added[0]!;
+    expect(summary.kind).toBe("text");
+    if (summary.kind === "text") {
+      expect(summary.text).toContain("# Rust");
+      expect(summary.html).toContain("<h2>Rust</h2>");
+    }
+    expect(added[1]!.kind).toBe("voice");
+  });
+
   test("event.pull returns persisted history", async () => {
     const events = await call<DomainEvent[]>("event.pull", { since: 0, limit: 500 });
     const topics = events.map((event) => event.topic);

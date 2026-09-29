@@ -2,8 +2,9 @@
   import { Button, Chip, Icon, ListItem } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
+  import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
-  import { reportError } from "../lib/feedback";
+  import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
   import DataList from "./DataList.svelte";
@@ -13,6 +14,7 @@
   let selected = $state<Brief | null>(null);
   let audioUrl = $state<string | null>(null);
   let busy = $state(false);
+  let resending = $state(false);
 
   async function refreshList(): Promise<void> {
     try {
@@ -44,6 +46,19 @@
       reportError(error);
     } finally {
       busy = false;
+    }
+  }
+
+  async function resend(): Promise<void> {
+    if (!selected || resending) return;
+    resending = true;
+    try {
+      const result = await commands.briefs.send(selected.id);
+      reportSuccess(`Brief re-sent (${result.sent.length} message(s))`);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      resending = false;
     }
   }
 
@@ -85,7 +100,12 @@
 
   <Panel>
     {#if selected}
-      <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
+      <div class="toolbar">
+        <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
+        <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
+          <Icon icon={iconSend} /> Re-send
+        </Button>
+      </div>
       <p class="muted">
         {formatDateTime(selected.createdAt)} · {selected.sources.length} sources
         {selected.audioDurationMs ? `· ${Math.round(selected.audioDurationMs / 1000)}s audio` : ""}

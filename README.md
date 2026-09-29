@@ -186,11 +186,17 @@ baseline palette in light and dark mode (`web/src/app.css`) plus the Google Sans
 Only truly custom pieces are hand-styled (the dense event log and the audio element), and even
 those use the M3 design tokens.
 
+The Briefs view shows the full summary, plays the stored audio, and offers **Re-send** to deliver
+the brief to Matrix again (formatted summary + voice).
+
 ## Topics and scheduled tasks
 
 - **Topics** are managed in the UI (or by sending `topic.create` / `topic.delete` / `topic.list`
   through the webhook). Each topic is researched on the web and on Bluesky, then the compiler
   groups the brief by topic.
+- **Delivery is two messages:** the compiled summary as a formatted text message (markdown
+  rendered to Matrix `formatted_body`) followed by the voice message. The Briefs view has a
+  **Re-send** button, and `brief.send { id }` does the same over the webhook.
 - **Relevance-checked research:** the researcher agent finishes with a `{"found": <bool>, "notes":
   …}` verdict, and its tool budget is capped. Search engines return junk even for nonsense
   queries, so if no topic yields *relevant* material the workflow writes **no summary and sends
@@ -241,7 +247,7 @@ without any streaming connection. Read-only message types (`event.*`, `*.list`, 
 itself.
 
 Built-in message types: `config.get`, `topic.list/create/delete`, `job.list/create/update/delete/run`,
-`workflow.list/run`, `brief.list/get/audio`, `event.pull/wait`. Adding one is
+`workflow.list/run`, `brief.list/get/audio/send`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
 ## Live activity feed (WebSocket)
@@ -255,9 +261,9 @@ Built-in message types: `config.get`, `topic.list/create/delete`, `job.list/crea
   model`, `Generating speech` / `Waiting for ElevenLabs`, `Sending voice message` /
   `Waiting for Matrix`, plus job lifecycle entries (`Running job "…"`, finished/failed) and
   skipped/failed notices.
-- Running entries show an animated M3 spinner; finished ones are dimmed; the newest entry is at
-  the bottom. Multiple runs (parallel jobs, UI-triggered runs, Matrix commands) interleave
-  safely — entries are keyed by activity id and correlation id.
+- Running entries show an animated M3 spinner and are **grouped at the bottom of the list**, so
+  parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
+  Running entries keep a stable order even while their status text updates repeatedly.
 - When nothing is running the header chip shows `idle`, otherwise the running count.
 - The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
   WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;

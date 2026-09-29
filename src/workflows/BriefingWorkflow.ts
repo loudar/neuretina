@@ -10,6 +10,7 @@ import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { BriefRepository, BriefSource } from "../domain/briefs/BriefRepository.ts";
 import type { Topic, TopicRepository } from "../domain/topics/TopicRepository.ts";
 import type { Workflow, WorkflowContext } from "../core/workflow/Workflow.ts";
+import { markdownToHtml } from "../core/markdown.ts";
 
 export interface BriefingWorkflowInput {
   topics?: string[];
@@ -59,15 +60,21 @@ Finish with a single JSON object and nothing else:
 {"found": true|false, "notes": "<compact bullet-point notes, each with a source title and URL — or, when found is false, a short explanation of what you searched and why nothing relevant came back>"}
 Set "found" to false whenever the searches did not produce material that is actually relevant to the topic.`;
 
-const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral morning briefing. You receive research notes about several topics and compile them into one brief.
+const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral morning briefing. You receive research notes about several topics and compile them into ONE short overview.
+
+Hard limits — this is an overview, not a report:
+- Per topic: at most 2 short sentences of synthesis, then at most 2 one-line bullets under "What people are saying" (only when sources actually disagree or notable opinions exist).
+- Then a "Worth a look" list with the 1-5 most interesting things to investigate further, taken from the notes. Each item is exactly one short line: a label plus why it is interesting (a few words) — no quotes, no summaries.
+- Never list the same source twice in a "Worth a look" list; pick the most substantive or novel items.
+- Whole brief under 350 words. No preamble, no closing remarks.
 
 Requirements:
 - Absolute neutrality: report what sources claim and where they disagree. Do not take sides, do not add opinions, do not moralize.
-- Attribute claims to their sources ("according to <source>", "<outlet> reports").
+- Attribute claims compactly by outlet name ("according to Reuters", "<outlet> reports").
 - Group the brief by topic, in the order given.
-- Keep it tight: for each topic a short synthesis paragraph, then "What people are saying" with representative viewpoints, then a numbered source list.
+- Never include a source list, URLs, or citation numbers anywhere in the markdown or the narration — sources are attached separately by the system.
 - If the input has a non-empty "missingTopics" list, add one short line per missing topic noting that no material was found for it — never invent content for those.
-- The "narration" field is a spoken-word version of the brief: no markdown, no URLs, no source numbers read aloud; natural sentences, same order, same neutrality.
+- The "narration" field is the spoken overview: one short paragraph per topic (2-3 sentences) plus a one-line mention of the top "Worth a look" items (short labels only). Keep the whole narration under ~200 words. It is read aloud by a speech model, so it must contain no URLs, no markdown, and no source references.
 
 Respond with a single JSON object:
 {"markdown": "<full brief as markdown>", "narration": "<spoken version as plain text>"}`;
@@ -238,29 +245,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
       if (!speech) {
         if (shouldDeliver) {
-          const sendSpan = this.deps.statuses?.begin(
-            `${correlationId}:send`,
-            "Sending text message (speech unavailable)",
-            { correlationId },
-          );
-          try {
-            sendSpan?.update("Waiting for Matrix");
-            const sent = await this.deps.messaging.send({
-              kind: "text",
-              text: compiled.narration,
-              channel: input.channel,
-            });
-            sendSpan?.done(`Text message sent (${sent.channel})`);
-            output.messageEventId = sent.id;
-            bus.publish(
-              "message.text.sent",
-              { correlationId, channel: sent.channel, eventId: sent.id },
-              { source: `workflow:${this.id}`, correlationId },
-            );
-          } catch (error) {
-            sendSpan?.failed("Sending text message failed");
-            throw error;
-          }
+          output.messageEventId = await this.deliverSummary(brief.markdown, input.channel, context);
         }
         return output;
       }
@@ -282,6 +267,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       record("speech synthesized", { bytes: speech.data.byteLength });
 
       if (shouldDeliver) {
+        output.messageEventId = await this.deliverSummary(brief.markdown, input.channel, context);
+
         const sendSpan = this.deps.statuses?.begin(`${correlationId}:send`, "Sending voice message", {
           correlationId,
         });
@@ -302,7 +289,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           sendSpan?.failed("Sending voice message failed");
           throw error;
         }
-        output.messageEventId = sent.id;
 
         bus.publish(
           "message.voice.sent",
@@ -316,33 +302,41 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     }
 
     if (shouldDeliver) {
-      const sendSpan = this.deps.statuses?.begin(`${correlationId}:send`, "Sending text message", {
-        correlationId,
-      });
-      let sent;
-      try {
-        sendSpan?.update("Waiting for Matrix");
-        sent = await this.deps.messaging.send({
-          kind: "text",
-          text: compiled.narration,
-          channel: input.channel,
-        });
-        sendSpan?.done(`Text message sent (${sent.channel})`);
-      } catch (error) {
-        sendSpan?.failed("Sending text message failed");
-        throw error;
-      }
-      output.messageEventId = sent.id;
+      output.messageEventId = await this.deliverSummary(brief.markdown, input.channel, context);
+    }
 
+    return output;
+  }
+
+  /** Sends the compiled brief as a formatted text message (markdown → HTML). */
+  private async deliverSummary(
+    markdown: string,
+    channel: string | undefined,
+    context: WorkflowContext,
+  ): Promise<string> {
+    const { bus, correlationId } = context;
+    const sendSpan = this.deps.statuses?.begin(`${correlationId}:summary`, "Sending summary", {
+      correlationId,
+    });
+    try {
+      sendSpan?.update("Waiting for Matrix");
+      const sent = await this.deps.messaging.send({
+        kind: "text",
+        text: markdown,
+        html: markdownToHtml(markdown),
+        channel,
+      });
+      sendSpan?.done(`Summary sent (${sent.channel})`);
       bus.publish(
         "message.text.sent",
         { correlationId, channel: sent.channel, eventId: sent.id },
         { source: `workflow:${this.id}`, correlationId },
       );
-      record("text brief delivered", { channel: sent.channel, eventId: sent.id });
+      return sent.id;
+    } catch (error) {
+      sendSpan?.failed("Sending summary failed");
+      throw error;
     }
-
-    return output;
   }
 
   /**
@@ -457,14 +451,17 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       typeof parsed?.markdown === "string" && parsed.markdown.trim() ? parsed.markdown.trim() : undefined;
     const narration =
       typeof parsed?.narration === "string" && parsed.narration.trim()
-        ? parsed.narration.trim()
+        ? sanitizeNarration(parsed.narration)
         : undefined;
 
     if (markdown && narration) return { markdown, narration };
 
     context.logger.warn("compiler returned non-JSON output, falling back to raw text");
     const raw = completion.text.trim();
-    return { markdown: markdown ?? raw, narration: narration ?? stripMarkdown(markdown ?? raw) };
+    return {
+      markdown: markdown ?? raw,
+      narration: narration ?? sanitizeNarration(stripMarkdown(markdown ?? raw)),
+    };
   }
 }
 
@@ -571,6 +568,35 @@ export function stripMarkdown(text: string): string {
     .replace(/^\s*[-*+]\s+/gm, "")
     .replace(/^\s*\d+[.)]\s+/gm, "")
     .replace(/[*_`>~]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Makes text safe for speech synthesis: no URLs, no source lists, no citation
+ * markers. Belt-and-braces — the prompt asks for this too, but the TTS input
+ * must never carry sources.
+ */
+export function sanitizeNarration(text: string): string {
+  let result = text;
+
+  // Drop a trailing source-list block, whether it starts a new line or is
+  // glued to the last sentence ("… debated. Sources: 1. …"). The inline form
+  // only counts when a list actually follows, so ordinary prose is kept.
+  result = result.split(/\n\s*(?:sources?|source list|quellen|referenzen)\s*[::]/i)[0] ?? result;
+  result =
+    result.split(/\s+(?:sources?|quellen)\s*[::]\s*(?=\d+[.)]|https?:|www\.)/i)[0] ?? result;
+
+  // Remove URLs and bare www links.
+  result = result.replace(/https?:\/\/\S+/gi, "");
+  result = result.replace(/www\.\S+/gi, "");
+
+  // Remove numbered citation markers like [1] or [12].
+  result = result.replace(/\[\d+\]/g, "");
+
+  return result
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s+([.,;:!?])/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

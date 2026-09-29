@@ -140,6 +140,10 @@ export const commands = {
     list: () => send<Brief[]>("brief.list"),
     get: (id: string) => send<Brief>("brief.get", { id }),
     audio: (id: string) => send<BriefAudio | null>("brief.audio", { id }),
+    send: (id: string) =>
+      send<{ briefId: string; sent: Array<{ kind: string; eventId: string }> }>("brief.send", {
+        id,
+      }),
   },
 
   workflows: {

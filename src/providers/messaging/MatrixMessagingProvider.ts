@@ -37,10 +37,15 @@ export class MatrixMessagingProvider implements MessagingProvider {
     this.assertConfigured(roomId);
 
     if (message.kind === "text") {
-      const eventId = await this.client.sendMessage(roomId!, "m.room.message", {
+      const content: Record<string, unknown> = {
         msgtype: "m.text",
         body: message.text,
-      });
+      };
+      if (message.html) {
+        content.format = "org.matrix.custom.html";
+        content.formatted_body = message.html;
+      }
+      const eventId = await this.client.sendMessage(roomId!, "m.room.message", content);
       return { id: eventId, channel: roomId!, kind: "text" };
     }
 

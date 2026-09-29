@@ -53,6 +53,7 @@ export interface Kernel {
   scheduler: Scheduler;
   commands: CommandRouter;
   statuses: StatusHub;
+  messaging: MessagingProvider;
   api: ApiServer;
   shutdown(): Promise<void>;
 }
@@ -161,7 +162,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   scheduler.reload();
 
   const commands = new CommandRouter({ bus, logger: logger.child("commands") });
-  registerCommands(commands, { config, bus, topics, briefs, jobs, workflows, scheduler });
+  registerCommands(commands, { config, bus, topics, briefs, jobs, workflows, scheduler, messaging });
 
   const kv = new KeyValueRepository(db);
   let chatListener: MatrixCommandListener | null = null;
@@ -246,6 +247,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     scheduler,
     commands,
     statuses,
+    messaging,
     api,
     shutdown,
   };

@@ -4,16 +4,21 @@
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
   import { statusFeed } from "../lib/statuses.svelte";
+  import { sortStatusEntries } from "../lib/statusOrder";
 
   let scroller: HTMLDivElement | undefined = $state();
 
+  // Running entries are grouped at the bottom; settled history stays above.
+  const ordered = $derived(sortStatusEntries(statusFeed.entries));
   const runningCount = $derived(
-    statusFeed.entries.filter((entry) => entry.state === "running").length,
+    ordered.filter((entry) => entry.state === "running").length,
   );
 
   $effect(() => {
-    // Keep the newest entry visible (entries.length changes on append).
-    statusFeed.entries.length;
+    // Re-sorting (and appends) change the id signature — keep the newest
+    // running entries visible at the bottom.
+    const signature = ordered.map((entry) => entry.id).join("|");
+    if (!signature) return;
     scroller?.scrollTo({ top: scroller.scrollHeight });
   });
 
@@ -36,7 +41,7 @@
     </div>
 
     <div class="feed" bind:this={scroller}>
-      {#each statusFeed.entries as entry (entry.id)}
+      {#each ordered as entry (entry.id)}
         <div class="row" class:dim={entry.state !== "running"} class:failed={entry.state === "failed"}>
           <span class="icon">
             {#if entry.state === "running"}
@@ -47,10 +52,12 @@
               <Icon icon={iconCheck} size={18} />
             {/if}
           </span>
-          <span class="text">{entry.text}</span>
-          {#if entry.detail}
-            <span class="detail">{entry.detail}</span>
-          {/if}
+          <span class="body">
+            <span class="text">{entry.text}</span>
+            {#if entry.detail}
+              <span class="detail">{entry.detail}</span>
+            {/if}
+          </span>
           <span class="time">{formatTime(entry.updatedAt)}</span>
         </div>
       {/each}
@@ -65,7 +72,8 @@
 <style>
   .feed {
     max-height: 11rem;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -74,7 +82,7 @@
   .row {
     display: flex;
     gap: 0.6rem;
-    align-items: center;
+    align-items: flex-start;
     padding: 0.25rem 0.4rem;
     border-radius: var(--m3-shape-small);
   }
@@ -91,19 +99,24 @@
   .icon {
     display: inline-flex;
     flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .text {
-    flex-shrink: 0;
+    overflow-wrap: anywhere;
   }
 
   .detail {
     color: var(--m3c-on-surface-variant);
     font-size: 0.8rem;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
   }
 
   .time {

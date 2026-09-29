@@ -38,8 +38,9 @@ function setup(options: SetupOptions = {}) {
     if (system.includes("editor")) {
       return completion(
         JSON.stringify({
-          markdown: "# Morning brief\n\n## Rust\nAll quiet. [1]\n\n## AI regulation\nHeated debate. [2]",
-          narration: "Rust is quiet today. AI regulation is being debated.",
+          markdown: "# Morning brief\n\n## Rust\nAll quiet.\n\n## AI regulation\nHeated debate.",
+          narration:
+            "Rust is quiet today. AI regulation is being debated. Sources: 1. example.com https://example.com/article",
         }),
       );
     }
@@ -114,14 +115,25 @@ describe("BriefingWorkflow", () => {
 
     expect(tts.requests).toHaveLength(1);
     expect(tts.requests[0]).toContain("Rust");
+    expect(tts.requests[0]).not.toContain("http");
+    expect(tts.requests[0]).not.toContain("Sources");
 
-    expect(messaging.sent).toHaveLength(1);
-    expect(messaging.sent[0]?.message.kind).toBe("voice");
+    // Summary as formatted text first, then the voice message.
+    expect(messaging.sent).toHaveLength(2);
+    const summary = messaging.sent[0]!.message;
+    expect(summary.kind).toBe("text");
+    if (summary.kind === "text") {
+      expect(summary.text).toContain("# Morning brief");
+      expect(summary.html).toContain("<h2>Morning brief</h2>");
+      expect(summary.html).toContain("<h3>Rust</h3>");
+    }
+    expect(messaging.sent[1]?.message.kind).toBe("voice");
 
     const topicsEmitted = events.map((event) => event.topic);
     expect(topicsEmitted).toContain("brief.research.started");
     expect(topicsEmitted).toContain("brief.generated");
     expect(topicsEmitted).toContain("tts.synthesized");
+    expect(topicsEmitted).toContain("message.text.sent");
     expect(topicsEmitted).toContain("message.voice.sent");
     expect(topicsEmitted).toContain("agent.tool.succeeded");
   });
@@ -158,7 +170,12 @@ describe("BriefingWorkflow", () => {
 
     expect(tts.requests).toHaveLength(1);
     expect(messaging.sent).toHaveLength(1);
-    expect(messaging.sent[0]?.message.kind).toBe("text");
+    const message = messaging.sent[0]!.message;
+    expect(message.kind).toBe("text");
+    if (message.kind === "text") {
+      expect(message.text).toContain("# Morning brief");
+      expect(message.html).toContain("<h2>Morning brief</h2>");
+    }
   });
 
   test("sends a text notice instead of a brief when nothing was found", async () => {

@@ -3,8 +3,10 @@ import { configStatus } from "../config/env.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
+import { markdownToHtml } from "../core/markdown.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
+import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import type { BriefRepository } from "../domain/briefs/BriefRepository.ts";
 import type { CreateJobInput, JobRepository, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
@@ -18,10 +20,11 @@ export interface CommandDeps {
   jobs: JobRepository;
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
+  messaging: MessagingProvider;
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, topics, briefs, jobs, workflows, scheduler, config } = deps;
+  const { bus, topics, briefs, jobs, workflows, scheduler, messaging, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -169,6 +172,50 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     };
   });
 
+  // Re-sends a stored brief: the summary as formatted text, plus the audio
+  // as a voice message when one exists.
+  router.register("brief.send", async (payload, context) => {
+    const record = asRecord(payload);
+    const id = requireString(record, "id");
+    const channel = optionalString(record, "channel");
+    const brief = briefs.get(id);
+    const sent: Array<{ kind: "text" | "voice"; eventId: string }> = [];
+
+    const text = await messaging.send({
+      kind: "text",
+      text: brief.markdown,
+      html: markdownToHtml(brief.markdown),
+      channel,
+    });
+    bus.publish(
+      "message.text.sent",
+      { correlationId: context.correlationId, channel: text.channel, eventId: text.id },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    sent.push({ kind: "text", eventId: text.id });
+
+    const audio = briefs.getAudio(id);
+    if (audio) {
+      const voice = await messaging.send({
+        kind: "voice",
+        audio: audio.audio,
+        mimeType: audio.mimeType,
+        durationMs: brief.audioDurationMs,
+        filename: `brief-${dateOf(brief.createdAt)}.${extensionFor(audio.mimeType)}`,
+        caption: `Brief – ${new Date(brief.createdAt).toLocaleString()}`,
+        channel,
+      });
+      bus.publish(
+        "message.voice.sent",
+        { correlationId: context.correlationId, briefId: id, channel: voice.channel, eventId: voice.id },
+        { source: "commands", correlationId: context.correlationId },
+      );
+      sent.push({ kind: "voice", eventId: voice.id });
+    }
+
+    return { briefId: id, sent };
+  });
+
   router.register("event.pull", (payload) => {
     const record = asRecord(payload);
     const since = typeof record.since === "number" ? record.since : 0;
@@ -256,6 +303,17 @@ function optionalString(record: Record<string, unknown>, key: string): string | 
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(Math.max(Math.floor(value), min), max);
+}
+
+function dateOf(timestamp: number): string {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType.includes("ogg") || mimeType.includes("opus")) return "ogg";
+  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  return "bin";
 }
 
 export function eventWaitTimeoutMs(payload: unknown): number {

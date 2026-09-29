@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
-import { extractJson, stripMarkdown } from "../src/workflows/BriefingWorkflow.ts";
+import { extractJson, stripMarkdown, sanitizeNarration } from "../src/workflows/BriefingWorkflow.ts";
 
 const fetchSpy = spyOn(globalThis, "fetch");
 
@@ -121,5 +121,22 @@ describe("LLM output parsing", () => {
     expect(stripped).not.toContain("https://example.com");
     expect(stripped).toContain("hello");
     expect(stripped).toContain("Link says");
+  });
+
+  test("narration sanitizer removes URLs, citation markers and source lists", () => {
+    const sanitized = sanitizeNarration(
+      "Rust is quiet today. Details at https://example.com/deep [1] and www.example.org/x.\nSources: 1. CBC — https://cbc.ca/1\n2. Guardian",
+    );
+
+    expect(sanitized).not.toContain("http");
+    expect(sanitized).not.toContain("www.");
+    expect(sanitized).not.toContain("[1]");
+    expect(sanitized).not.toContain("Sources");
+    expect(sanitized).toContain("Rust is quiet today.");
+  });
+
+  test("narration sanitizer leaves clean narration untouched", () => {
+    const text = "Rust is quiet today. AI regulation is debated. Worth looking up: the new rules.";
+    expect(sanitizeNarration(text)).toBe(text);
   });
 });

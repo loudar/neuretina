@@ -1,22 +1,9 @@
+import type { StatusEntry, StatusMessage, StatusState } from "./statusTypes";
+
+export type { StatusEntry, StatusState };
+
 const MAX_ENTRIES = 100;
 const RECONNECT_DELAY_MS = 2000;
-
-export type StatusState = "running" | "done" | "failed";
-
-export interface StatusEntry {
-  id: string;
-  activityId: string;
-  correlationId?: string;
-  text: string;
-  detail?: string;
-  state: StatusState;
-  startedAt: number;
-  updatedAt: number;
-}
-
-type StatusMessage =
-  | { type: "snapshot"; entries: StatusEntry[] }
-  | { type: "entry"; entry: StatusEntry };
 
 /**
  * Live status feed over WebSocket (`/api/ws`): server-push, ephemeral,

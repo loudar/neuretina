@@ -1,6 +1,8 @@
 export interface OutboundTextMessage {
   kind: "text";
   text: string;
+  /** Optional pre-rendered HTML version of the text (e.g. Matrix formatted_body). */
+  html?: string;
   channel?: string;
 }
 
