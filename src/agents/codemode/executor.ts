@@ -209,7 +209,11 @@ async function runInSubprocess(
             finish(() => resolve({ result: message.result, logs, toolCalls: calls }));
           } else if (message.type === "error") {
             const error = typeof message.error === "string" ? message.error : "code execution failed";
-            finish(() => reject(new Error(error)));
+            const logs = Array.isArray(message.logs)
+              ? message.logs.filter((item): item is string => typeof item === "string").slice(-5)
+              : [];
+            const detail = logs.length > 0 ? `\nLogs:\n${logs.join("\n")}` : "";
+            finish(() => reject(new Error(`${error}${detail}`)));
           }
         }
       }

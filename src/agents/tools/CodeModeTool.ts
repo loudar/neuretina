@@ -52,6 +52,8 @@ past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
 
 The function must return a JSON-serializable value — that value is all you get back, so filter, merge and trim inside the code (Promise.all, loops, if-statements) and return compact findings rather than raw tool output. console.log is captured and returned with the result.
 
+Tool calls never throw: a failed call resolves to { error: string, results: [], briefs: [], data: [], answer: "" } instead of rejecting, so one flaky provider cannot abort your program. Check .error when it matters and carry on with the calls that succeeded.
+
 Example:
 async () => {
   const [web, social] = await Promise.all([

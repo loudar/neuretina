@@ -13,6 +13,7 @@
   import iconSearch from "@ktibow/iconset-material-symbols/search";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
+  import { renderCitations } from "../lib/citations";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -40,7 +41,9 @@
   const filteredSources = $derived(filterSources(selected?.sources ?? [], sourceFilter));
   const sourceGroups = $derived(groupSourcesByDomain(filteredSources));
   const filtering = $derived(sourceFilter.trim().length > 0);
-  const briefHtml = $derived(markdownToHtml(selected?.markdown ?? ""));
+  const briefHtml = $derived(
+    renderCitations(markdownToHtml(selected?.markdown ?? ""), selected?.sources ?? []),
+  );
 
   async function refreshList(): Promise<void> {
     try {
@@ -468,6 +471,29 @@
 
   .brief-text :global(a) {
     color: var(--m3c-primary);
+  }
+
+  .brief-text :global(a.cite) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25em;
+    height: 1.25em;
+    padding: 0 0.35em;
+    margin: 0 0.1em;
+    border-radius: var(--m3-shape-full);
+    background-color: var(--m3c-secondary-container);
+    color: var(--m3c-on-secondary-container);
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    vertical-align: 0.2em;
+  }
+
+  .brief-text :global(a.cite:hover) {
+    background-color: var(--m3c-primary-container);
+    color: var(--m3c-on-primary-container);
   }
 
   .brief-text :global(code) {

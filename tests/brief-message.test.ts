@@ -29,4 +29,10 @@ describe("buildBriefMessage", () => {
   test("returns the summary unchanged when there are no sources", () => {
     expect(buildBriefMessage("# Brief", [])).toBe("# Brief");
   });
+
+  test("keeps citation markers clickable in the message body", () => {
+    const message = buildBriefMessage("Up 12 percent [2].", sources);
+
+    expect(message).toContain("Up 12 percent [2](https://a.com/2).");
+  });
 });

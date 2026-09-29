@@ -107,6 +107,45 @@ describe("BlueskySearchProvider", () => {
     ]);
   });
 
+  test("retries transient PDS failures and falls back to the public AppView", async () => {
+    const calls: string[] = [];
+    mockFetch(async (input) => {
+      const url = String(input);
+      calls.push(url);
+
+      if (url.endsWith("/xrpc/com.atproto.server.createSession")) {
+        return Response.json({ accessJwt: "jwt", refreshJwt: "r", handle: "b", did: "d" });
+      }
+      if (url.startsWith("https://bsky.social/xrpc/app.bsky.feed.searchPosts")) {
+        return new Response("upstream failure", { status: 502 });
+      }
+      if (url.startsWith("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts")) {
+        return Response.json({ posts: [post] });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const provider = new BlueskySearchProvider({
+      identifier: "b",
+      appPassword: "p",
+      pdsUrl: "https://bsky.social",
+      publicUrl: "https://public.api.bsky.app",
+    });
+
+    const response = await provider.search({ query: "x" });
+
+    expect(response.results).toHaveLength(1);
+    // One attempt plus two retries on the PDS, then the AppView fallback.
+    expect(
+      calls.filter((url) => url.startsWith("https://bsky.social/xrpc/app.bsky.feed.searchPosts")),
+    ).toHaveLength(3);
+    expect(
+      calls.some((url) =>
+        url.startsWith("https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts"),
+      ),
+    ).toBe(true);
+  });
+
   test("explains the 403 when public search is blocked", async () => {
     mockFetch(async () => new Response("forbidden", { status: 403 }));
 

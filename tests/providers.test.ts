@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
+import { AGENT_STEP_LIMIT_MESSAGE } from "../src/agents/Agent.ts";
 import { extractJson, stripMarkdown, sanitizeNarration, parseResearchOutcome } from "../src/workflows/BriefingWorkflow.ts";
 
 const fetchSpy = spyOn(globalThis, "fetch");
@@ -195,5 +196,11 @@ describe("LLM output parsing", () => {
     expect(outcome.found).toBe(true);
     expect(outcome.notes).toContain("Just some notes");
     expect(outcome.missingTopics).toEqual([]);
+  });
+
+  test("treats a step-limited agent answer as nothing found", () => {
+    const outcome = parseResearchOutcome(AGENT_STEP_LIMIT_MESSAGE);
+    expect(outcome.found).toBe(false);
+    expect(outcome.notes).toContain("ran out of steps");
   });
 });

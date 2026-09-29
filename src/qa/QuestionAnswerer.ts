@@ -71,7 +71,7 @@ export class QuestionAnswerer {
     );
 
     try {
-      const result = await this.agent.run(question, context);
+      const result = await this.agent.run(question, { ...context, statusParentId: status?.id });
       const answer =
         sanitizeNarration(stripMarkdown(result.text)).trim() ||
         "I couldn't find a good answer for that.";

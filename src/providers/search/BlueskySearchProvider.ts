@@ -46,6 +46,13 @@ interface Session {
 
 const SESSION_TTL_MS = 90 * 60 * 1000;
 
+/** Transient upstream failures are retried before falling back to the AppView. */
+const SEARCH_RETRY = {
+  retries: 2,
+  baseDelayMs: 400,
+  retryStatuses: [408, 425, 429, 500, 502, 503, 504],
+};
+
 export class BlueskySearchProvider implements SearchProvider {
   readonly name = "bluesky";
   readonly kind = "social" as const;
@@ -93,6 +100,18 @@ export class BlueskySearchProvider implements SearchProvider {
         const refreshed = await this.ensureSession();
         return this.searchOnHost(pds, params, true, refreshed.accessJwt);
       }
+      if (
+        isTransient(error) &&
+        trimTrailingSlash(pds) !== trimTrailingSlash(this.options.publicUrl)
+      ) {
+        // The PDS search endpoint proxies to the AppView; when it fails
+        // upstream, the public AppView often still answers.
+        try {
+          return await this.searchOnHost(this.options.publicUrl, params, false);
+        } catch {
+          // Report the original PDS failure rather than the fallback's.
+        }
+      }
       throw error;
     }
   }
@@ -108,7 +127,7 @@ export class BlueskySearchProvider implements SearchProvider {
     if (authenticated && token) headers.Authorization = `Bearer ${token}`;
 
     try {
-      return await requestJson<SearchPostsResponse>(this.name, url, { headers });
+      return await requestJson<SearchPostsResponse>(this.name, url, { headers }, SEARCH_RETRY);
     } catch (error) {
       if (error instanceof ProviderError && error.status === 403 && !authenticated) {
         throw new ProviderError(
@@ -307,4 +326,9 @@ function recencyToSince(recency: SearchQuery["recency"]): string | undefined {
 
 function trimTrailingSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+function isTransient(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  return error.status === undefined || error.status >= 500;
 }

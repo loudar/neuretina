@@ -51,7 +51,10 @@ are exposed as async functions — `perplexity_search`, `bluesky_search`, `perpl
 `past_briefs`, `past_brief` — and reaches the engine's real providers over a stdio bridge. Only the
 program's return value and captured `console.log` output come back to the model, so searches run in
 parallel with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact
-findings enter the model context. This is the pattern behind Cloudflare's Code Mode and the CodeAct
+findings enter the model context. Tool calls never throw: a failed provider call resolves to
+`{ error, results: [], briefs: [], data: [], answer: "" }`, so one flaky search (a Bluesky 504, a
+finance timeout) cannot abort the program — the code carries on with whatever succeeded. This is
+the pattern behind Cloudflare's Code Mode and the CodeAct
 paper: it removes the per-search model round-trip (and the intermediate results) that dominate token
 and latency cost.
 
@@ -179,7 +182,9 @@ What you need:
 
 The provider logs in with `com.atproto.server.createSession`, refreshes the session automatically,
 and searches via `app.bsky.feed.searchPosts` on your PDS (the officially recommended route for
-authenticated reads).
+authenticated reads). Transient upstream failures (502/503/…) are retried with backoff, and if the
+PDS search endpoint still fails the provider falls back to the public AppView instead of failing
+the whole research run.
 
 Without credentials it falls back to the public AppView, but Bluesky currently load-sheds
 unauthenticated `searchPosts` with `HTTP 403`, so app-password auth is strongly recommended.
@@ -275,6 +280,11 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
   TTS-aware (speakable sentences, symbols written out, everyday expressions kept neutral) and the
   narration is derived from the summary itself, so the audio reads the same text minus the links.
+- **Inline citations:** the compiler receives the numbered source list together with the research
+  notes and cites every factual claim with a marker like `[4]`. The UI renders those markers as
+  small clickable numbered pills linking to the source, and the Matrix text message turns them
+  into clickable links. The markers are stripped from the spoken narration automatically, and the
+  grouped source list below the brief stays as the full reference.
 - **Voice is optional per run:** scheduled tasks accept `{"generateAudio": false}` (the Jobs UI
   has a mic toggle at creation and per task), and the manual "Run briefing now" button has its
   own mic toggle — text-only runs skip TTS entirely and deliver just the formatted summary.
@@ -288,7 +298,8 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
   queries, so if no topic yields *relevant* material the workflow writes **no summary and sends
   no audio** — instead you get a plain text notice listing the topics and the exact queries that
   were tried. Topics that found nothing are marked as missing when other topics did have
-  material.
+  material. The same notice path is used when the agent runs out of steps or returns empty notes,
+  and the compiler is never allowed to store an empty brief.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
   an event.
@@ -353,6 +364,8 @@ Built-in message types: `config.get`, `topic.list/create/update/delete`,
 - Running entries show an animated M3 spinner and are **grouped at the bottom of the list**, so
   parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
   Running entries keep a stable order even while their status text updates repeatedly.
+- Sub-activities are nested: an agent's reasoning and tool calls are indented under the span that
+  owns them (research, follow-up Q&A), and no task carries a secondary detail line.
 - When nothing is running the header chip shows `idle`, otherwise the running count.
 - The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
   WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;

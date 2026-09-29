@@ -98,30 +98,47 @@ describe("CodeModeTool", () => {
     ).rejects.toThrow("boom");
   });
 
-  test("lets code catch tool failures", async () => {
+  test("a failed tool call resolves to an error value instead of aborting the program", async () => {
     const failing = stubTool({
+      name: "bad",
       execute: async () => {
         throw new Error("provider down");
       },
     });
-    const tool = new CodeModeTool({ tools: [failing] });
+    const tool = new CodeModeTool({ tools: [failing, stubTool()] });
 
     const result = await tool.execute(
       {
         code: `async () => {
-          try {
-            await lookup({ query: "x" });
-            return "unexpected";
-          } catch (error) {
-            return String(error.message);
-          }
+          const [failed, good] = await Promise.all([
+            bad({ query: "x" }),
+            lookup({ query: "y" }),
+          ]);
+          return {
+            error: failed.error,
+            badResults: failed.results.length,
+            goodResults: good.results.length,
+          };
         }`,
       },
       toolContext(),
     );
 
-    expect(result.result).toBe("provider down");
-    expect(result.toolCalls).toBe(1);
+    expect(result.result).toEqual({ error: "provider down", badResults: 0, goodResults: 1 });
+    expect(result.toolCalls).toBe(2);
+  });
+
+  test("reports program errors with captured logs", async () => {
+    const tool = new CodeModeTool({ tools: [stubTool()] });
+
+    await expect(
+      tool.execute(
+        {
+          code: `async () => { console.log("debug info"); throw new Error("boom"); }`,
+        },
+        toolContext(),
+      ),
+    ).rejects.toThrow(/boom[\s\S]*debug info/);
   });
 
   test("rejects code that tries to leave the sandbox", async () => {
@@ -144,12 +161,9 @@ describe("CodeModeTool", () => {
           let ok = 0;
           let err = 0;
           for (let i = 0; i < 4; i++) {
-            try {
-              await lookup({ query: "q" + i });
-              ok++;
-            } catch {
-              err++;
-            }
+            const result = await lookup({ query: "q" + i });
+            if (result.error) err++;
+            else ok++;
           }
           return { ok, err };
         }`,

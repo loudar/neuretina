@@ -23,6 +23,8 @@ export interface AgentContext {
   correlationId: string;
   bus: EventBus;
   logger: Logger;
+  /** Status entry to nest this agent's activity under (e.g. its research span). */
+  statusParentId?: string;
 }
 
 export interface AgentToolInvocation {
@@ -48,6 +50,10 @@ export interface AgentRunResult {
 }
 
 const MAX_TOOL_RESULT_CHARS = 8000;
+
+/** Used when the loop ends without the model producing a final answer. */
+export const AGENT_STEP_LIMIT_MESSAGE =
+  "The agent reached its step limit before producing a final answer.";
 
 export class Agent {
   readonly name: string;
@@ -104,7 +110,10 @@ export class Agent {
       let finalText = "";
 
       for (let index = 0; index < this.maxSteps; index++) {
-        const reasoning = this.statuses?.begin(activityId, "Reasoning", { correlationId });
+        const reasoning = this.statuses?.begin(activityId, "Reasoning", {
+          correlationId,
+          parentId: context.statusParentId,
+        });
 
         reasoning?.update("Waiting for the model");
         const completion = await this.llm.complete({
@@ -178,9 +187,7 @@ export class Agent {
       }
 
       if (!finalText) {
-        finalText =
-          steps.at(-1)?.text ||
-          "The agent reached its step limit before producing a final answer.";
+        finalText = steps.at(-1)?.text || AGENT_STEP_LIMIT_MESSAGE;
       }
 
       const result: AgentRunResult = {
@@ -230,7 +237,10 @@ export class Agent {
       { source, correlationId },
     );
 
-    const status = this.statuses?.begin(activityId, `Calling tool ${name}`, { correlationId });
+    const status = this.statuses?.begin(activityId, `Calling tool ${name}`, {
+      correlationId,
+      parentId: context.statusParentId,
+    });
     status?.update(`Waiting for ${name}`);
 
     const tool = this.tools.get(name);

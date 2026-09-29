@@ -10,8 +10,9 @@ export function buildBriefMessage(
   sources: BriefSource[],
   maxSources = 6,
 ): string {
+  const body = linkCitations(markdown, sources);
   const highlights = selectHighlightSources(sources, maxSources);
-  if (highlights.length === 0) return markdown;
+  if (highlights.length === 0) return body;
 
   const lines = [
     "",
@@ -19,7 +20,16 @@ export function buildBriefMessage(
     ...highlights.map((source, index) => `${index + 1}. [${sanitizeTitle(source.title)}](${source.url})`),
   ];
 
-  return `${markdown.trimEnd()}\n${lines.join("\n")}`;
+  return `${body.trimEnd()}\n${lines.join("\n")}`;
+}
+
+/** Keeps [n] citation markers clickable in Matrix clients. */
+function linkCitations(markdown: string, sources: BriefSource[]): string {
+  return markdown.replace(/\[(\d+)\]/g, (match, digits: string) => {
+    const source = sources[Number(digits) - 1];
+    if (!source) return match;
+    return `[${digits}](${source.url})`;
+  });
 }
 
 /** Keeps research order but avoids listing several links from the same site. */

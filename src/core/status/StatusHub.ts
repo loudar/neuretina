@@ -5,6 +5,8 @@ export interface StatusEntry {
   /** Groups entries that belong to the same running thing (parallel-safe). */
   activityId: string;
   correlationId?: string;
+  /** Entry this one runs under (e.g. an agent step under its research span). */
+  parentId?: string;
   text: string;
   detail?: string;
   state: StatusState;
@@ -25,6 +27,7 @@ export interface StatusHandle {
 
 export interface BeginStatusOptions {
   correlationId?: string;
+  parentId?: string;
   detail?: string;
 }
 
@@ -102,6 +105,7 @@ export class StatusHub {
       id: crypto.randomUUID(),
       activityId,
       correlationId: options.correlationId,
+      parentId: options.parentId,
       text,
       detail: options.detail,
       state,

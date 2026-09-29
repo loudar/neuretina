@@ -1,4 +1,4 @@
-import { Agent } from "../agents/Agent.ts";
+import { Agent, AGENT_STEP_LIMIT_MESSAGE } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import { BriefGetTool } from "../agents/tools/BriefGetTool.ts";
@@ -54,7 +54,7 @@ export interface BriefingWorkflowOutput {
 
 const RESEARCH_SYSTEM_PROMPT = `You are a meticulous research assistant. You get a list of topics the user cares about — the topics may overlap.
 
-You research by writing JavaScript through the run_code tool: one small async function per run that calls the search and finance functions listed in the tool description, then returns compact findings. Run independent calls in parallel with Promise.all, filter and merge inside the code, and return only what matters — never raw tool output.
+You research by writing JavaScript through the run_code tool: one small async function per run that calls the search and finance functions listed in the tool description, then returns compact findings. Run independent calls in parallel with Promise.all — calls never throw: a failed one comes back with an "error" field and empty results, so continue with what succeeded and never let one flaky provider abort the program. Filter and merge inside the code, and return only what matters — never raw tool output.
 
 Plan first:
 - Decide yourself what to search based on the topics: merge overlapping topics and pick distinct, high-signal queries.
@@ -112,8 +112,12 @@ Shape — one paragraph per subtopic:
 - Keep each paragraph on a single subtopic: never mash unrelated stories into one paragraph, and never split one story across paragraphs.
 - No sub-headings and no lists of any kind — only the title and the paragraphs.
 - No preamble, no closing remarks.
-- Attribute naturally by outlet name ("the Guardian reports", "according to CNBC").
-- Never include a source list, URLs, or citation numbers anywhere — links are attached separately.
+
+Inline citations — every claim shows its source:
+- The source list you receive is numbered. Directly after every factual claim, add the matching number in square brackets: "Spotify crossed 300 million subscribers [4]." or "Revenue grew 12 percent [7][9]."
+- Cite the exact source that supports the claim; never invent a number and never cite a source that does not support it.
+- Short direct quotes are welcome when they carry the point — keep them brief, in quotation marks, with the same marker.
+- Use no other citation style: no links, no URLs, no numbered citations that are not in the source list, and no source list at the end. The markers are rendered as clickable pills, and they are stripped from the spoken narration automatically.
 
 Respond with a single JSON object:
 {"markdown": "<full brief as markdown>"}`;
@@ -170,6 +174,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         correlationId,
         bus,
         logger: logger.child("research"),
+        statusParentId: researchSpan?.id,
       });
     } catch (error) {
       researchSpan?.failed("Research failed");
@@ -177,7 +182,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     }
 
     const outcome = parseResearchOutcome(result.text);
-    const sources = outcome.found ? collectSources(result) : [];
+    // The agent can "succeed" with nothing usable (empty notes, step limit):
+    // never compile or store a brief out of that.
+    const found = outcome.found && outcome.notes.trim().length > 0;
+    const sources = found ? collectSources(result) : [];
     const queries = collectQueries(result);
     const uniqueSources = dedupeSources(sources).slice(0, 80);
     const missingTopics = outcome.missingTopics.filter((name) =>
@@ -185,7 +193,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     );
 
     researchSpan?.done(
-      outcome.found
+      found
         ? `Research complete (${uniqueSources.length} source(s), ${queries.length} search(es))`
         : "Nothing relevant found",
     );
@@ -196,7 +204,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         correlationId,
         topics: topicNames,
         sources: uniqueSources.length,
-        found: outcome.found,
+        found,
         queries,
         missingTopics,
       },
@@ -205,13 +213,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     record("research completed", {
       sources: uniqueSources.length,
       queries: queries.length,
-      found: outcome.found,
+      found,
       missingTopics,
     });
 
     // Nothing relevant found: do not fabricate a summary, do not generate
     // audio. Instead deliver a plain text notice with what was searched.
-    if (!outcome.found) {
+    if (!found) {
       return this.handleNoMaterial(topicNames, queries, input, context);
     }
 
@@ -221,7 +229,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     let compiled: { markdown: string; narration: string };
     try {
       compile?.update("Waiting for the compiler model");
-      compiled = await this.compile({ topics: topicNames, notes: outcome.notes }, context);
+      compiled = await this.compile(
+        { topics: topicNames, notes: outcome.notes, sources: uniqueSources },
+        context,
+      );
       compile?.done("Brief compiled");
     } catch (error) {
       compile?.failed("Compilation failed");
@@ -497,7 +508,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       systemPrompt: RESEARCH_SYSTEM_PROMPT,
       llm: this.deps.llm,
       tools: [new CodeModeTool({ tools, maxToolCalls: 12 })],
-      maxSteps: 5,
+      maxSteps: 6,
       maxToolCalls: 4,
       temperature: 0.2,
       statuses: this.deps.statuses,
@@ -505,7 +516,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   private async compile(
-    research: { topics: string[]; notes: string },
+    research: { topics: string[]; notes: string; sources: BriefSource[] },
     context: WorkflowContext,
   ): Promise<{ markdown: string; narration: string }> {
     const draft = await this.requestCompilation(research, context);
@@ -531,20 +542,24 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   private async requestCompilation(
-    research: { topics: string[]; notes: string },
+    research: { topics: string[]; notes: string; sources: BriefSource[] },
     context: WorkflowContext,
     compress?: { draft: string; words: number },
   ): Promise<{ markdown: string; narration: string }> {
     const userContent = compress
       ? JSON.stringify({
           language: this.deps.defaults.language,
-          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact, the split-opinion reporting and the one-paragraph-per-subtopic shape, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
+          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact, every inline source link, the split-opinion reporting and the one-paragraph-per-subtopic shape, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
           draft: compress.draft,
         })
       : JSON.stringify({
           language: this.deps.defaults.language,
           date: new Date().toISOString().slice(0, 10),
           topics: research.topics,
+          sources: research.sources.map((source, index) => ({
+            n: index + 1,
+            title: source.title,
+          })),
           notes: research.notes,
         });
 
@@ -569,8 +584,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       return { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
     }
 
+    // JSON without usable markdown means the compiler gave up: never store an
+    // empty brief. Fall back to raw text only for genuinely non-JSON output.
+    if (parsed) throw new Error("Compiler returned an empty brief");
+
     context.logger.warn("compiler returned non-JSON output, falling back to raw text");
     const raw = completion.text.trim();
+    if (!raw) throw new Error("Compiler returned an empty brief");
     return { markdown: raw, narration: sanitizeNarration(stripMarkdown(raw)) };
   }
 }
@@ -659,10 +679,19 @@ export function parseResearchOutcome(text: string): {
   notes: string;
   missingTopics: string[];
 } {
+  if (text.trim() === AGENT_STEP_LIMIT_MESSAGE) {
+    return {
+      found: false,
+      notes: "The research agent ran out of steps before producing findings.",
+      missingTopics: [],
+    };
+  }
+
   const parsed = extractJson<{ found?: unknown; notes?: unknown; missingTopics?: unknown }>(text);
   if (parsed && typeof parsed.found === "boolean") {
-    const notes =
-      typeof parsed.notes === "string" && parsed.notes.trim() ? parsed.notes.trim() : text.trim();
+    // An explicit empty notes field stays empty (and is treated as nothing
+    // found); only a missing notes field falls back to the raw text.
+    const notes = typeof parsed.notes === "string" ? parsed.notes.trim() : text.trim();
     const missingTopics = Array.isArray(parsed.missingTopics)
       ? parsed.missingTopics
           .filter((topic): topic is string => typeof topic === "string")

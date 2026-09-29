@@ -27,8 +27,12 @@ interface SetupOptions {
   financeResults?: typeof sampleResults;
   /** Verdict the research agent reports for its final JSON answer. */
   researchVerdict?: boolean;
+  /** The stub researcher reports found=true with empty notes. */
+  emptyNotes?: boolean;
   /** Makes the first compiler call return a draft far over the word budget. */
   longCompilerOutput?: boolean;
+  /** The stub compiler returns an empty markdown document. */
+  emptyCompilerOutput?: boolean;
   /** The stub researcher's program calls only the finance lookup. */
   financeOnly?: boolean;
 }
@@ -38,6 +42,7 @@ function setup(options: SetupOptions = {}) {
   const bus = new EventBus(new EventStore(db), log);
   const topics = new TopicRepository(db);
   const briefs = new BriefRepository(new ArtifactRepository(db));
+  const compilerInputs: string[] = [];
   let compilerCalls = 0;
 
   const llm = stubLlm((request) => {
@@ -45,6 +50,10 @@ function setup(options: SetupOptions = {}) {
 
     if (system.includes("editor")) {
       compilerCalls += 1;
+      compilerInputs.push(request.messages[1]?.content ?? "");
+      if (options.emptyCompilerOutput) {
+        return completion(JSON.stringify({ markdown: "" }));
+      }
       if (options.longCompilerOutput && compilerCalls === 1) {
         const filler = Array.from({ length: 200 }, (_, index) => `longfact${index}`).join(" ");
         return completion(JSON.stringify({ markdown: `# Morning brief\n\n${filler}` }));
@@ -75,7 +84,9 @@ function setup(options: SetupOptions = {}) {
     return completion(
       JSON.stringify({
         found: options.researchVerdict ?? true,
-        notes: "Notes: something happened https://example.com/article",
+        notes: options.emptyNotes
+          ? ""
+          : "Notes: something happened https://example.com/article",
       }),
     );
   });
@@ -97,7 +108,7 @@ function setup(options: SetupOptions = {}) {
     defaults: { recency: "day", resultsPerProvider: 5, language: "en" },
   });
 
-  return { workflow, topics, briefs, bus, tts, messaging, statuses };
+  return { workflow, topics, briefs, bus, tts, messaging, statuses, compilerInputs };
 }
 
 describe("BriefingWorkflow", () => {
@@ -378,6 +389,47 @@ describe("BriefingWorkflow", () => {
       thumbUrl: "https://cdn.bsky.app/thumb.jpg",
       alt: "a chart",
     });
+  });
+
+  test("does not store a brief when the researcher returns empty notes", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup({ emptyNotes: true });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c14", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(true);
+    expect(briefs.list()).toHaveLength(0);
+  });
+
+  test("fails instead of storing an empty brief when the compiler returns nothing", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup({ emptyCompilerOutput: true });
+    topics.add({ name: "Rust" });
+
+    await expect(
+      workflow.run(
+        { deliver: false, generateAudio: false },
+        { correlationId: "c15", bus, logger: log, statuses },
+      ),
+    ).rejects.toThrow(/empty brief/);
+    expect(briefs.list()).toHaveLength(0);
+  });
+
+  test("passes the collected sources to the compiler for inline citations", async () => {
+    const { workflow, topics, bus, statuses, compilerInputs } = setup();
+    topics.add({ name: "Rust" });
+
+    await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c16", bus, logger: log, statuses },
+    );
+
+    expect(compilerInputs[0]).toContain('"sources"');
+    expect(compilerInputs[0]).toContain('"n":1');
+    expect(compilerInputs[0]).toContain("Example article");
+    expect(compilerInputs[0]).toContain("Another source");
   });
 
   test("collects finance lookup sources alongside search results", async () => {

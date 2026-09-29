@@ -4,12 +4,13 @@
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
   import { statusFeed } from "../lib/statuses.svelte";
-  import { sortStatusEntries } from "../lib/statusOrder";
+  import { orderStatusEntries } from "../lib/statusOrder";
 
   let scroller: HTMLDivElement | undefined = $state();
 
-  // Running entries are grouped at the bottom; settled history stays above.
-  const ordered = $derived(sortStatusEntries(statusFeed.entries));
+  // Running entries are grouped at the bottom; settled history stays above;
+  // sub-activities are indented under the task they belong to.
+  const ordered = $derived(orderStatusEntries(statusFeed.entries));
   const runningCount = $derived(
     ordered.filter((entry) => entry.state === "running").length,
   );
@@ -42,7 +43,12 @@
 
     <div class="feed" bind:this={scroller}>
       {#each ordered as entry (entry.id)}
-        <div class="row" class:dim={entry.state !== "running"} class:failed={entry.state === "failed"}>
+        <div
+          class="row"
+          class:dim={entry.state !== "running"}
+          class:failed={entry.state === "failed"}
+          style:--depth={entry.depth}
+        >
           <span class="icon">
             {#if entry.state === "running"}
               <CircularProgressEstimate size={18} thickness={2} />
@@ -54,9 +60,6 @@
           </span>
           <span class="body">
             <span class="text">{entry.text}</span>
-            {#if entry.detail}
-              <span class="detail">{entry.detail}</span>
-            {/if}
           </span>
           <span class="time">{formatTime(entry.updatedAt)}</span>
         </div>
@@ -84,6 +87,7 @@
     gap: 0.6rem;
     align-items: flex-start;
     padding: 0.25rem 0.4rem;
+    padding-inline-start: calc(0.4rem + var(--depth, 0) * 1.1rem);
     border-radius: var(--m3-shape-small);
   }
 
@@ -110,12 +114,6 @@
   }
 
   .text {
-    overflow-wrap: anywhere;
-  }
-
-  .detail {
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.8rem;
     overflow-wrap: anywhere;
   }
 

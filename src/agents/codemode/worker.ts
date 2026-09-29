@@ -61,15 +61,25 @@ const sandboxConsole = {
   debug: (...values: unknown[]) => pushLog(formatLog(values)),
 };
 
-const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+const pending = new Map<number, (value: unknown) => void>();
 let nextId = 1;
 
 function callTool(name: string, args: unknown): Promise<unknown> {
   const id = nextId++;
   writeLine({ type: "call", id, name, args: args ?? {} });
-  return new Promise((resolve, reject) => {
-    pending.set(id, { resolve, reject });
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
   });
+}
+
+/**
+ * A failed tool call resolves to this instead of throwing, so one flaky
+ * provider (a 502 from Bluesky, a finance timeout, …) can never abort the
+ * whole program — `Promise.all` still completes and the code can carry on
+ * with whatever succeeded.
+ */
+function failedCall(error: string): Record<string, unknown> {
+  return { error, results: [], briefs: [], data: [], answer: "" };
 }
 
 let jobResolve: ((job: Job) => void) | undefined;
@@ -91,11 +101,10 @@ function handleLine(line: string): void {
   }
 
   if (message.type === "result") {
-    const waiter = pending.get(message.id);
-    if (!waiter) return;
+    const resolve = pending.get(message.id);
+    if (!resolve) return;
     pending.delete(message.id);
-    if (typeof message.error === "string") waiter.reject(new Error(message.error));
-    else waiter.resolve(message.result);
+    resolve(typeof message.error === "string" ? failedCall(message.error) : message.result);
   }
 }
 
