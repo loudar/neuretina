@@ -133,7 +133,16 @@ bun test
 
 - Create an API key → `KEY_PERPLEXITY`.
 - **Web search:** the agent calls `POST https://api.perplexity.ai/search` and receives raw ranked
-  results (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop.
+  results (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop. Searches are limited to
+  the last 3 days (`DEFAULT_SEARCH_RECENCY`, one of `hour`/`day`/`3days`/`week`/`month`/`year`; the
+  3-day window uses Perplexity's publication-date filter) and to English
+  (`DEFAULT_BRIEF_LANGUAGE` → `search_language_filter`).
+- **Reputable-source filter:** web searches send Perplexity's `search_domain_filter` allowlist, so
+  results come from Wikipedia, major wires and outlets with strong correction records, quality
+  tech/science press and `.gov` primary sources. Root domains match their subdomains and `.gov`
+  matches the whole TLD. Tune it with `DEFAULT_SEARCH_DOMAINS` (comma-separated, max 20) or set it
+  to `off` to search the whole web; the researcher can also pass `scope: "open"` per query when a
+  topic needs an official or niche page (release notes, docs).
 - **Finance lookups:** when a topic touches a public company, an ETF or the markets, the researcher
   can call the `perplexity_finance` tool. It uses Perplexity's Agent API
   (`POST https://api.perplexity.ai/v1/agent`) with the `finance_search` tool, which returns a

@@ -1,6 +1,36 @@
 import type { LogLevel } from "../core/logger.ts";
+import type { SearchRecency } from "../capabilities/search/SearchProvider.ts";
 
-export type SearchRecency = "hour" | "day" | "week" | "month" | "year";
+export type { SearchRecency };
+
+/**
+ * Default web-search allowlist: Wikipedia, major wires and outlets with strong
+ * correction records, quality tech/science press and .gov primary sources.
+ * Perplexity's `search_domain_filter` accepts at most 20 entries; root domains
+ * match their subdomains and ".gov" matches the whole TLD.
+ */
+export const DEFAULT_SEARCH_DOMAINS = [
+  "wikipedia.org",
+  "reuters.com",
+  "apnews.com",
+  "bbc.com",
+  "npr.org",
+  "theguardian.com",
+  "nytimes.com",
+  "washingtonpost.com",
+  "ft.com",
+  "economist.com",
+  "bloomberg.com",
+  "cnbc.com",
+  "aljazeera.com",
+  "dw.com",
+  "arstechnica.com",
+  "theverge.com",
+  "techcrunch.com",
+  "nature.com",
+  "science.org",
+  ".gov",
+];
 
 export interface AppConfig {
   port: number;
@@ -17,6 +47,8 @@ export interface AppConfig {
     briefCron: string;
     searchRecency: SearchRecency;
     searchResultsPerProvider: number;
+    /** Reputable-source allowlist for web search; empty disables the filter. */
+    searchDomains: string[];
     briefLanguage: string;
   };
   llm: {
@@ -88,8 +120,23 @@ function list(env: Env, name: string): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
+/**
+ * `DEFAULT_SEARCH_DOMAINS` — comma-separated allowlist. Unset uses the
+ * reputable default; `off`/`none` disables the filter entirely.
+ */
+function parseSearchDomains(env: Env): string[] {
+  const raw = str(env, "DEFAULT_SEARCH_DOMAINS");
+  if (raw === undefined) return [...DEFAULT_SEARCH_DOMAINS];
+  if (["off", "none", "false", "0"].includes(raw.trim().toLowerCase())) return [];
+  return raw
+    .split(",")
+    .map((domain) => domain.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
 export function loadConfig(env: Env = Bun.env): AppConfig {
-  const recency = str(env, "DEFAULT_SEARCH_RECENCY", "day") as SearchRecency;
+  const recency = str(env, "DEFAULT_SEARCH_RECENCY", "3days") as SearchRecency;
 
   return {
     port: num(env, "PORT", 8080),
@@ -105,6 +152,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       briefCron: str(env, "DEFAULT_BRIEF_CRON", "0 7 * * *")!,
       searchRecency: recency,
       searchResultsPerProvider: num(env, "DEFAULT_SEARCH_RESULTS", 6),
+      searchDomains: parseSearchDomains(env),
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
     llm: {

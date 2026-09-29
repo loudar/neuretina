@@ -163,6 +163,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       defaults: {
         recency: config.defaults.searchRecency,
         resultsPerProvider: config.defaults.searchResultsPerProvider,
+        searchDomains: config.defaults.searchDomains,
         language: config.defaults.briefLanguage,
       },
     }),
@@ -210,6 +211,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     defaults: {
       recency: config.defaults.searchRecency,
       resultsPerProvider: config.defaults.searchResultsPerProvider,
+      language: config.defaults.briefLanguage,
+      searchDomains: config.defaults.searchDomains,
     },
   });
 

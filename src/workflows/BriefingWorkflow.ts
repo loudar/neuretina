@@ -7,7 +7,7 @@ import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
-import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
+import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import { errorMessage } from "../core/errors.ts";
@@ -36,8 +36,10 @@ export interface BriefingWorkflowDeps {
   messaging: MessagingProvider;
   statuses?: StatusHub;
   defaults: {
-    recency: "hour" | "day" | "week" | "month" | "year";
+    recency: SearchRecency;
     resultsPerProvider: number;
+    /** Reputable-source allowlist for web search; empty disables the filter. */
+    searchDomains: string[];
     language: string;
   };
 }
@@ -60,6 +62,7 @@ Plan first:
 - Decide yourself what to search based on the topics: merge overlapping topics and pick distinct, high-signal queries.
 - Social discussion carries as much weight as the reporting: run at least one Bluesky search per run, and treat it as the place where hype, skepticism and disagreement actually show up.
 - When a topic touches a publicly traded company, an ETF or the markets, use perplexity_finance for concrete numbers (quotes, revenue, margins, guidance, analyst estimates) — state the business question first, then the company or ticker.
+- Web search is restricted to a curated list of reputable sources. Only switch a query to scope "open" when that list cannot cover the topic at all (release notes, official documentation, a niche community) — prefer reputable coverage whenever it exists.
 - Search earlier briefs by topic with past_briefs and open any of them in full with past_brief, so your notes build on what was already covered instead of repeating it.
 - Run at most 6 searches in total across web and social, plus at most 2 finance lookups. Do not run near-identical queries twice.
 
@@ -490,6 +493,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         provider: this.deps.webSearch,
         defaultLimit: this.deps.defaults.resultsPerProvider,
         defaultRecency: this.deps.defaults.recency,
+        defaultLanguage: this.deps.defaults.language,
+        domains: this.deps.defaults.searchDomains,
       }),
       new SearchTool({
         provider: this.deps.socialSearch,
@@ -613,8 +618,21 @@ function buildResearchPrompt(topics: Topic[], recency: string): string {
     "Topics to cover (they may overlap — plan your searches accordingly):",
     list,
     "",
-    `Focus on material from the last ${recency}.`,
+    `Focus on material from the last ${recencyLabel(recency)}.`,
   ].join("\n");
+}
+
+const RECENCY_LABELS: Record<string, string> = {
+  hour: "hour",
+  day: "day",
+  "3days": "3 days",
+  week: "week",
+  month: "month",
+  year: "year",
+};
+
+function recencyLabel(recency: string): string {
+  return RECENCY_LABELS[recency] ?? recency;
 }
 
 function collectSources(result: AgentRunResult): BriefSource[] {

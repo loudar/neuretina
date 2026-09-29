@@ -59,7 +59,7 @@ describe("QuestionAnswerer", () => {
       webSearch,
       socialSearch,
       briefs: new BriefRepository(new ArtifactRepository(db)),
-      defaults: { recency: "week", resultsPerProvider: 3 },
+      defaults: { recency: "week", resultsPerProvider: 3, language: "en", searchDomains: [] },
     });
 
     const bus = new EventBus(new EventStore(db), log);

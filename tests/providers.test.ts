@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
+import { PerplexitySearchProvider, dateDaysAgo } from "../src/providers/search/PerplexitySearchProvider.ts";
 import { AGENT_STEP_LIMIT_MESSAGE } from "../src/agents/Agent.ts";
 import { extractJson, stripMarkdown, sanitizeNarration, parseResearchOutcome } from "../src/workflows/BriefingWorkflow.ts";
 
@@ -202,5 +203,87 @@ describe("LLM output parsing", () => {
     const outcome = parseResearchOutcome(AGENT_STEP_LIMIT_MESSAGE);
     expect(outcome.found).toBe(false);
     expect(outcome.notes).toContain("ran out of steps");
+  });
+});
+
+describe("Perplexity domain filter", () => {
+  test("sends the allowlist and caps it at 20 domains", async () => {
+    let body: Record<string, unknown> = {};
+    mockFetch(async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ results: [], id: "search-1" });
+    });
+
+    const provider = new PerplexitySearchProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+
+    await provider.search({
+      query: "climate policy",
+      domains: Array.from({ length: 25 }, (_, index) => `d${index}.com`),
+    });
+
+    expect((body.search_domain_filter as string[]).length).toBe(20);
+  });
+
+  test("omits the filter when no domains are given", async () => {
+    let body: Record<string, unknown> = {};
+    mockFetch(async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ results: [], id: "search-2" });
+    });
+
+    const provider = new PerplexitySearchProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+
+    await provider.search({ query: "anything" });
+
+    expect(body.search_domain_filter).toBeUndefined();
+  });
+});
+
+describe("Perplexity recency and language filters", () => {
+  test("maps 3days to a publication date filter and sends the language", async () => {
+    let body: Record<string, unknown> = {};
+    mockFetch(async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ results: [], id: "search-3" });
+    });
+
+    const provider = new PerplexitySearchProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+
+    await provider.search({ query: "x", recency: "3days", language: "en" });
+
+    expect(body.search_recency_filter).toBeUndefined();
+    expect(String(body.search_after_date_filter)).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+    expect(body.search_language_filter).toEqual(["en"]);
+  });
+
+  test("passes coarse recency windows through", async () => {
+    let body: Record<string, unknown> = {};
+    mockFetch(async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({ results: [], id: "search-4" });
+    });
+
+    const provider = new PerplexitySearchProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+
+    await provider.search({ query: "x", recency: "week" });
+
+    expect(body.search_recency_filter).toBe("week");
+    expect(body.search_after_date_filter).toBeUndefined();
+  });
+
+  test("dateDaysAgo formats MM/DD/YYYY", () => {
+    expect(dateDaysAgo(3, new Date(2026, 8, 29, 12).getTime())).toBe("09/26/2026");
   });
 });

@@ -39,8 +39,8 @@ export interface CodeModeResult {
 
 const DESCRIPTION = `Run JavaScript to do research in one step, instead of calling each tool separately. Write one async arrow function that plans and runs the whole lookup and returns only the findings you need. Inside the sandbox these async functions are available:
 
-perplexity_search({ query, limit?, recency? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
-  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "week" | "month" | "year".
+perplexity_search({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
+  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).
 bluesky_search({ query, limit?, recency? }) -> same shape
   Recent Bluesky posts, where hype, skepticism and disagreement show up.
 perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }

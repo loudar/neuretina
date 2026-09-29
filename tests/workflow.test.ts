@@ -105,7 +105,7 @@ function setup(options: SetupOptions = {}) {
     tts,
     messaging,
     statuses,
-    defaults: { recency: "day", resultsPerProvider: 5, language: "en" },
+    defaults: { recency: "day", resultsPerProvider: 5, searchDomains: [], language: "en" },
   });
 
   return { workflow, topics, briefs, bus, tts, messaging, statuses, compilerInputs };

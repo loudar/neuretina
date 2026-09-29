@@ -24,6 +24,9 @@ export interface PerplexitySearchOptions {
   defaultLimit?: number;
 }
 
+/** Perplexity rejects domain filters longer than this. */
+const MAX_DOMAIN_FILTER = 20;
+
 export class PerplexitySearchProvider implements SearchProvider {
   readonly name = "perplexity";
   readonly kind = "web" as const;
@@ -42,7 +45,18 @@ export class PerplexitySearchProvider implements SearchProvider {
       max_results: query.limit ?? this.options.defaultLimit ?? 10,
       search_type: "web",
     };
-    if (query.recency) payload.search_recency_filter = query.recency;
+    if (query.recency === "3days") {
+      // Perplexity's recency filter has no 3-day window; a publication date
+      // filter gives the exact cutoff (MM/DD/YYYY).
+      payload.search_after_date_filter = dateDaysAgo(3);
+    } else if (query.recency) {
+      payload.search_recency_filter = query.recency;
+    }
+    if (query.language) payload.search_language_filter = [query.language];
+    // Perplexity allows at most 20 entries per request; no prefix = allowlist.
+    if (query.domains && query.domains.length > 0) {
+      payload.search_domain_filter = query.domains.slice(0, MAX_DOMAIN_FILTER);
+    }
 
     const response = await requestJson<PerplexitySearchResponse>(
       this.name,
@@ -75,4 +89,12 @@ function hostnameOf(url: string): string {
   } catch {
     return "web";
   }
+}
+
+/** Perplexity expects MM/DD/YYYY for date filters. */
+export function dateDaysAgo(days: number, now = Date.now()): string {
+  const date = new Date(now - days * 24 * 60 * 60 * 1000);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${month}/${day}/${date.getFullYear()}`;
 }

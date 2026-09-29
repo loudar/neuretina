@@ -1,5 +1,12 @@
 export type SearchKind = "web" | "social" | "news";
 
+/**
+ * Time window for search results. "3days" is an exact window (Perplexity
+ * cannot express it as a recency filter, so providers use a date filter);
+ * the rest are the coarse windows providers natively support.
+ */
+export type SearchRecency = "hour" | "day" | "3days" | "week" | "month" | "year";
+
 export interface SearchMedia {
   type: "image" | "video";
   /** Small preview URL (e.g. the Bluesky CDN thumbnail). */
@@ -14,9 +21,12 @@ export interface SearchMedia {
 export interface SearchQuery {
   query: string;
   limit?: number;
-  recency?: "hour" | "day" | "week" | "month" | "year";
+  recency?: SearchRecency;
+  /** ISO 639-1 language code, e.g. "en". */
   language?: string;
   sort?: "relevance" | "latest";
+  /** Allowlist of domains (root domains, TLDs like ".gov", or "domain.com/path"). */
+  domains?: string[];
 }
 
 export interface SearchResult {

@@ -25,8 +25,12 @@ export interface QuestionAnswererDeps {
   briefs: BriefRepository;
   statuses?: StatusHub;
   defaults: {
-    recency: "hour" | "day" | "week" | "month" | "year";
+    recency: "hour" | "day" | "3days" | "week" | "month" | "year";
     resultsPerProvider: number;
+    /** ISO 639-1 language code applied to web searches. */
+    language: string;
+    /** Reputable-source allowlist for web search; empty disables the filter. */
+    searchDomains: string[];
   };
 }
 
@@ -47,6 +51,8 @@ export class QuestionAnswerer {
           provider: deps.webSearch,
           defaultLimit: deps.defaults.resultsPerProvider,
           defaultRecency: deps.defaults.recency,
+          defaultLanguage: deps.defaults.language,
+          domains: deps.defaults.searchDomains,
         }),
         new SearchTool({
           provider: deps.socialSearch,

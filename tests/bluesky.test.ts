@@ -146,6 +146,27 @@ describe("BlueskySearchProvider", () => {
     ).toBe(true);
   });
 
+  test("maps 3days to a three-day window and passes the language", async () => {
+    let calledUrl = "";
+    mockFetch(async (input) => {
+      calledUrl = String(input);
+      return Response.json({ posts: [post] });
+    });
+
+    const provider = new BlueskySearchProvider({
+      pdsUrl: "https://bsky.social",
+      publicUrl: "https://public.api.bsky.app",
+    });
+
+    await provider.search({ query: "x", recency: "3days", language: "en" });
+
+    const params = new URL(calledUrl).searchParams;
+    const ageMs = Date.now() - new Date(params.get("since") ?? 0).getTime();
+    expect(ageMs).toBeGreaterThan(2.9 * 24 * 60 * 60 * 1000);
+    expect(ageMs).toBeLessThan(3.1 * 24 * 60 * 60 * 1000);
+    expect(params.get("lang")).toBe("en");
+  });
+
   test("explains the 403 when public search is blocked", async () => {
     mockFetch(async () => new Response("forbidden", { status: 403 }));
 

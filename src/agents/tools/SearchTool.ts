@@ -6,7 +6,11 @@ export interface SearchToolOptions {
   toolName?: string;
   description?: string;
   defaultLimit?: number;
-  defaultRecency?: "hour" | "day" | "week" | "month" | "year";
+  defaultRecency?: "hour" | "day" | "3days" | "week" | "month" | "year";
+  /** ISO 639-1 language code applied to every query (e.g. "en"). */
+  defaultLanguage?: string;
+  /** Reputable-source allowlist applied by default (empty = no filter). */
+  domains?: string[];
 }
 
 export class SearchTool implements Tool<SearchResponse> {
@@ -17,35 +21,50 @@ export class SearchTool implements Tool<SearchResponse> {
   private readonly provider: SearchProvider;
   private readonly defaultLimit: number;
   private readonly defaultRecency?: SearchToolOptions["defaultRecency"];
+  private readonly defaultLanguage?: string;
+  private readonly domains: string[];
 
   constructor(options: SearchToolOptions) {
     this.provider = options.provider;
     this.name = options.toolName ?? `${options.provider.name}_search`;
-    this.description = options.description ?? describeKind(this.provider);
     this.defaultLimit = options.defaultLimit ?? 6;
     this.defaultRecency = options.defaultRecency;
+    this.defaultLanguage = options.defaultLanguage;
+    this.domains = options.domains ?? [];
 
-    this.parameters = {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "The search query. Plain keywords or a short phrase work best.",
-        },
-        limit: {
-          type: "integer",
-          description: `Maximum number of results to return (default ${this.defaultLimit}).`,
-          minimum: 1,
-          maximum: this.provider.kind === "social" ? 100 : 20,
-        },
-        recency: {
-          type: "string",
-          enum: ["hour", "day", "week", "month", "year"],
-          description: "Only return results from this time window (default: day).",
-        },
+    const base = options.description ?? describeKind(this.provider);
+    this.description =
+      this.domains.length > 0
+        ? `${base} Results are limited to a curated allowlist of reputable sources (established outlets, Wikipedia, primary .gov sources) by default; pass scope "open" only when you need an official or niche page that the allowlist cannot cover, such as release notes or documentation.`
+        : base;
+
+    const properties: Record<string, unknown> = {
+      query: {
+        type: "string",
+        description: "The search query. Plain keywords or a short phrase work best.",
       },
-      required: ["query"],
+      limit: {
+        type: "integer",
+        description: `Maximum number of results to return (default ${this.defaultLimit}).`,
+        minimum: 1,
+        maximum: this.provider.kind === "social" ? 100 : 20,
+      },
+      recency: {
+        type: "string",
+        enum: ["hour", "day", "3days", "week", "month", "year"],
+        description: `Only return results from this time window (default: ${this.defaultRecency ?? "day"}).`,
+      },
     };
+    if (this.domains.length > 0) {
+      properties.scope = {
+        type: "string",
+        enum: ["reputable", "open"],
+        description:
+          '"reputable" (default) keeps results on the reputable-source allowlist; "open" searches the whole web.',
+      };
+    }
+
+    this.parameters = { type: "object", properties, required: ["query"] };
   }
 
   async execute(args: Record<string, unknown>): Promise<SearchResponse> {
@@ -54,8 +73,10 @@ export class SearchTool implements Tool<SearchResponse> {
 
     const limit = typeof args.limit === "number" ? args.limit : this.defaultLimit;
     const recency = isRecency(args.recency) ? args.recency : this.defaultRecency;
+    const domains =
+      args.scope === "open" || this.domains.length === 0 ? undefined : this.domains;
 
-    return this.provider.search({ query, limit, recency });
+    return this.provider.search({ query, limit, recency, language: this.defaultLanguage, domains });
   }
 }
 
@@ -71,5 +92,12 @@ function describeKind(provider: SearchProvider): string {
 }
 
 function isRecency(value: unknown): value is NonNullable<SearchToolOptions["defaultRecency"]> {
-  return value === "hour" || value === "day" || value === "week" || value === "month" || value === "year";
+  return (
+    value === "hour" ||
+    value === "day" ||
+    value === "3days" ||
+    value === "week" ||
+    value === "month" ||
+    value === "year"
+  );
 }
