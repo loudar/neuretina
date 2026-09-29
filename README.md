@@ -19,8 +19,9 @@ scheduler (Bun.cron, jobs in SQLite)
         Matrix       → voice message (MSC3245)                      │
                                                                      ▼
                           every step publishes typed events → EventBus → SQLite event log
-                                                                     │
-                                            Svelte UI ◄── webhook event.wait (feed long-poll)
+                                                            │                    │
+                                            Svelte UI ◄─────┴── webhook event.wait (event feed)
+                                            Svelte UI ◄──────── WS /api/ws (live status feed)
 ```
 
 ### Architecture
@@ -89,6 +90,10 @@ bun test
 - Pick a voice from the voice library and set `ELEVENLABS_VOICE_ID`.
 - `opus_48000_128` is the default output format because Matrix clients render Ogg/Opus as a
   native voice bubble.
+- Resilient by default: transient provider failures (auth blips, 429/5xx, network errors) are
+  retried twice with backoff and error messages include the API's own explanation. If speech
+  generation still fails after retries, the compiled brief is **delivered as a text message
+  instead** — a flaky TTS call never throws away a good brief.
 
 ### Bluesky / AT Protocol search
 
@@ -186,6 +191,12 @@ those use the M3 design tokens.
 - **Topics** are managed in the UI (or by sending `topic.create` / `topic.delete` / `topic.list`
   through the webhook). Each topic is researched on the web and on Bluesky, then the compiler
   groups the brief by topic.
+- **Relevance-checked research:** the researcher agent finishes with a `{"found": <bool>, "notes":
+  …}` verdict, and its tool budget is capped. Search engines return junk even for nonsense
+  queries, so if no topic yields *relevant* material the workflow writes **no summary and sends
+  no audio** — instead you get a plain text notice listing the topics and the exact queries that
+  were tried. Topics that found nothing are marked as missing when other topics did have
+  material.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
   an event.
@@ -197,12 +208,13 @@ those use the M3 design tokens.
 
 ## Message gateway (webhooks only)
 
-The service deliberately has **no REST endpoints and no streaming endpoints**.
-Everything — including every UI interaction — is a webhook message:
+There are **no REST endpoints**. Data flows two ways:
 
-- **The only endpoint:** `POST /api/webhook`. `GET /api/webhook` returns `200` with the
-  available message types and doubles as the liveness probe.
-- Everything else under `/api/*` is `404`; `/*` serves the built UI.
+- **`POST /api/webhook`** — the only ingress; every UI interaction and every external message
+  goes through it (see below). `GET /api/webhook` returns `200` with the available message types
+  and doubles as the liveness probe.
+- **`GET /api/ws`** — the one WebSocket, used exclusively for the ephemeral live status feed
+  (see "Live activity feed"). Nothing else is served except the static UI.
 
 Message envelope:
 
@@ -211,7 +223,7 @@ Message envelope:
 ```
 
 The gateway publishes `message.received` (audit, except for read-only types) and dispatches the
-message to its handler. The handler result comes back **in the same HTTP response**:
+message to its handler. Handler results come back **in the same HTTP response**:
 
 ```json
 { "ok": true, "type": "topic.create", "correlationId": "…", "result": { "id": "…" } }
@@ -231,6 +243,25 @@ itself.
 Built-in message types: `config.get`, `topic.list/create/delete`, `job.list/create/update/delete/run`,
 `workflow.list/run`, `brief.list/get/audio`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
+
+## Live activity feed (WebSocket)
+
+`GET /api/ws` pushes an ephemeral, in-memory status feed to the UI (broadcast by
+`src/core/status/StatusHub.ts`, not persisted):
+
+- On connect the client receives a `snapshot`, then incremental `entry` messages.
+- Granular states: `Reasoning`, `Waiting for the model`, `Calling tool <tool>`,
+  `Waiting for <tool>`, `Researching "<topic>"`, `Compiling brief` / `Waiting for the compiler
+  model`, `Generating speech` / `Waiting for ElevenLabs`, `Sending voice message` /
+  `Waiting for Matrix`, plus job lifecycle entries (`Running job "…"`, finished/failed) and
+  skipped/failed notices.
+- Running entries show an animated M3 spinner; finished ones are dimmed; the newest entry is at
+  the bottom. Multiple runs (parallel jobs, UI-triggered runs, Matrix commands) interleave
+  safely — entries are keyed by activity id and correlation id.
+- When nothing is running the header chip shows `idle`, otherwise the running count.
+- The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
+  WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;
+  everything else keeps working.
 
 ## Startup validation
 

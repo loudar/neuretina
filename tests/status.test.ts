@@ -1,0 +1,197 @@
+import { describe, expect, test } from "bun:test";
+import { StatusHub } from "../src/core/status/StatusHub.ts";
+import { StatusService } from "../src/status/StatusService.ts";
+import { EventBus } from "../src/core/events/EventBus.ts";
+import { EventStore } from "../src/core/events/EventStore.ts";
+import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
+import { createLogger } from "../src/core/logger.ts";
+import { Agent } from "../src/agents/Agent.ts";
+import type { Tool } from "../src/agents/Tool.ts";
+import { completion, stubLlm } from "./support.ts";
+
+const log = createLogger("test", { level: "error" });
+
+describe("StatusHub", () => {
+  test("tracks entries through begin/update/done and notifies subscribers", () => {
+    const hub = new StatusHub();
+    const messages: Array<{ type: string }> = [];
+    hub.subscribe((message) => messages.push(message));
+
+    const handle = hub.begin("activity-1", "Reasoning", { correlationId: "corr" });
+    expect(hub.snapshot()).toHaveLength(1);
+    expect(hub.snapshot()[0]).toMatchObject({ text: "Reasoning", state: "running" });
+
+    handle.update("Waiting for the model");
+    handle.done("Model answered");
+
+    const entry = hub.snapshot()[0]!;
+    expect(entry.text).toBe("Model answered");
+    expect(entry.state).toBe("done");
+    expect(entry.correlationId).toBe("corr");
+    expect(messages.map((message) => message.type)).toEqual(["entry", "entry", "entry"]);
+  });
+
+  test("supports parallel activities in insertion order", () => {
+    const hub = new StatusHub();
+    const a = hub.begin("a", "Job A");
+    hub.begin("b", "Job B");
+    a.done("Job A done");
+
+    const entries = hub.snapshot();
+    expect(entries.map((entry) => entry.text)).toEqual(["Job A done", "Job B"]);
+    expect(entries[0]!.state).toBe("done");
+    expect(entries[1]!.state).toBe("running");
+  });
+
+  test("failRunning settles only matching running entries", () => {
+    const hub = new StatusHub();
+    hub.begin("a", "A", { correlationId: "c1" });
+    hub.begin("b", "B", { correlationId: "c2" });
+
+    hub.failRunning("c1", "boom");
+
+    const entries = hub.snapshot();
+    expect(entries[0]).toMatchObject({ state: "failed", detail: "boom" });
+    expect(entries[1]).toMatchObject({ state: "running" });
+  });
+
+  test("trims old settled entries but keeps running ones", () => {
+    const hub = new StatusHub({ maxEntries: 10 });
+    const running = hub.begin("keep", "running");
+    for (let i = 0; i < 20; i++) hub.push(`done ${i}`);
+
+    const entries = hub.snapshot();
+    expect(entries).toHaveLength(10);
+    expect(entries.some((entry) => entry.id === running.id)).toBe(true);
+  });
+});
+
+describe("StatusService", () => {
+  function setup() {
+    const db = new SqliteDatabase(":memory:");
+    const bus = new EventBus(new EventStore(db), log);
+    const hub = new StatusHub();
+    new StatusService({ bus, logger: log, hub });
+    return { bus, hub };
+  }
+
+  test("maps the job lifecycle to a single running entry", () => {
+    const { bus, hub } = setup();
+
+    bus.publish(
+      "job.started",
+      { id: "j1", name: "morning-brief", workflow: "briefing", trigger: "manual" },
+      { source: "t", correlationId: "c1" },
+    );
+    expect(hub.snapshot()[0]).toMatchObject({
+      text: 'Running job "morning-brief" (manual)',
+      state: "running",
+    });
+
+    bus.publish(
+      "job.finished",
+      { id: "j1", name: "morning-brief", workflow: "briefing", durationMs: 5000 },
+      { source: "t", correlationId: "c1" },
+    );
+    expect(hub.snapshot()).toHaveLength(1);
+    expect(hub.snapshot()[0]).toMatchObject({
+      text: 'Job "morning-brief" finished (5s)',
+      state: "done",
+    });
+  });
+
+  test("records skips, compiled briefs, failures and chat commands", () => {
+    const { bus, hub } = setup();
+
+    bus.publish("brief.skipped", { correlationId: "c", reason: "No material found", topics: ["a"] }, { source: "t", correlationId: "c" });
+    bus.publish("brief.generated", { correlationId: "c", briefId: "b1", topics: ["a"], sources: 3, characters: 100 }, { source: "t", correlationId: "c" });
+    bus.publish("workflow.failed", { workflow: "briefing", correlationId: "c", error: "x" }, { source: "t", correlationId: "c" });
+    bus.publish("chat.command.received", { channel: "r", sender: "@u:x", command: "start", args: "j" }, { source: "t", correlationId: "c" });
+
+    const entries = hub.snapshot();
+    expect(entries.map((entry) => entry.state)).toEqual(["failed", "done", "failed", "done"]);
+    expect(entries[1]!.text).toContain("Brief compiled");
+  });
+
+  test("a failed workflow also fails its still-running entries", () => {
+    const { bus, hub } = setup();
+    hub.begin("span", "Waiting for the model", { correlationId: "c9" });
+    bus.publish("workflow.failed", { workflow: "briefing", correlationId: "c9", error: "nope" }, { source: "t", correlationId: "c9" });
+
+    const entries = hub.snapshot();
+    expect(entries[0]).toMatchObject({ state: "failed", detail: "nope" });
+    expect(entries[1]!.state).toBe("failed");
+  });
+});
+
+describe("Agent status instrumentation", () => {
+  test("emits reasoning, tool call and waiting entries", async () => {
+    const hub = new StatusHub();
+    const seen: string[] = [];
+    hub.subscribe((message) => {
+      if (message.type === "entry") seen.push(message.entry.text);
+    });
+
+    const tool: Tool = {
+      name: "web_search",
+      description: "search",
+      parameters: {},
+      execute: async () => ({ results: ["r1"] }),
+    };
+    const llm = stubLlm((request) =>
+      request.messages.some((message) => message.role === "tool")
+        ? completion("Final notes")
+        : completion("", [{ id: "call-1", name: "web_search", arguments: { query: "x" } }]),
+    );
+
+    const bus = new EventBus(new EventStore(new SqliteDatabase(":memory:")), log);
+    const agent = new Agent({
+      name: "researcher",
+      systemPrompt: "s",
+      llm,
+      tools: [tool],
+      statuses: hub,
+    });
+
+    await agent.run("input", { correlationId: "corr", bus, logger: log });
+
+    expect(seen).toContain("Reasoning");
+    expect(seen).toContain("Waiting for the model");
+    expect(seen).toContain("Calling tool web_search");
+    expect(seen).toContain("Waiting for web_search");
+    expect(seen).toContain("Model answered");
+
+    const entries = hub.snapshot();
+    expect(entries.every((entry) => entry.state === "done")).toBe(true);
+    expect(entries.some((entry) => entry.text === "Tool web_search returned (1 results)")).toBe(true);
+  });
+
+  test("enforces the tool call budget", async () => {
+    const hub = new StatusHub();
+    const tool: Tool = {
+      name: "web_search",
+      description: "search",
+      parameters: {},
+      execute: async () => ({ results: [] }),
+    };
+    const llm = stubLlm(() => completion("", [{ id: crypto.randomUUID(), name: "web_search", arguments: { query: "x" } }]));
+    const bus = new EventBus(new EventStore(new SqliteDatabase(":memory:")), log);
+    const agent = new Agent({
+      name: "researcher",
+      systemPrompt: "s",
+      llm,
+      tools: [tool],
+      maxSteps: 3,
+      maxToolCalls: 1,
+      statuses: hub,
+    });
+
+    const result = await agent.run("input", { correlationId: "corr", bus, logger: log });
+
+    const errors = result.steps
+      .flatMap((step) => step.invocations)
+      .map((invocation) => invocation.error)
+      .filter(Boolean);
+    expect(errors.some((error) => error!.includes("budget"))).toBe(true);
+  });
+});

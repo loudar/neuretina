@@ -68,19 +68,25 @@ export class ElevenLabsTtsProvider implements TextToSpeechProvider {
   }): Promise<Uint8Array> {
     const url = `${this.options.baseUrl}/v1/text-to-speech/${encodeURIComponent(input.voiceId)}?output_format=${encodeURIComponent(input.outputFormat)}`;
 
-    const response = await requestRaw(this.name, url, {
-      method: "POST",
-      headers: {
-        "xi-api-key": this.options.apiKey!,
-        "Content-Type": "application/json",
-        Accept: "audio/*",
+    // Transient 401s and rate limits are retried with backoff.
+    const response = await requestRaw(
+      this.name,
+      url,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": this.options.apiKey!,
+          "Content-Type": "application/json",
+          Accept: "audio/*",
+        },
+        body: JSON.stringify({
+          text: input.text,
+          model_id: input.modelId,
+          ...(input.previousText ? { previous_text: input.previousText } : {}),
+        }),
       },
-      body: JSON.stringify({
-        text: input.text,
-        model_id: input.modelId,
-        ...(input.previousText ? { previous_text: input.previousText } : {}),
-      }),
-    });
+      { retries: 2 },
+    );
 
     const buffer = await response.arrayBuffer();
     if (buffer.byteLength === 0) {

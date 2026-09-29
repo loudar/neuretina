@@ -4,12 +4,14 @@ import { AppError, NotFoundError, ValidationError, errorMessage } from "../core/
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
+import type { StatusHub } from "../core/status/StatusHub.ts";
 import { eventWaitTimeoutMs } from "../commands/registerCommands.ts";
 
 export interface ApiDeps {
   config: AppConfig;
   bus: EventBus;
   commands: CommandRouter;
+  statuses: StatusHub;
   logger: Logger;
 }
 
@@ -28,6 +30,18 @@ const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
+  const statusClients = new Set<Bun.ServerWebSocket<undefined>>();
+
+  const unsubscribeStatuses = deps.statuses.subscribe((message) => {
+    const payload = JSON.stringify(message);
+    for (const client of statusClients) {
+      try {
+        client.send(payload);
+      } catch {
+        statusClients.delete(client);
+      }
+    }
+  });
 
   const server = Bun.serve({
     port: deps.config.port,
@@ -47,9 +61,27 @@ export function createApiServer(deps: ApiDeps): ApiServer {
         ),
       },
 
+      "/api/ws": (request: Bun.BunRequest<"/api/ws">, server: Bun.Server<undefined>) => {
+        if (server.upgrade(request)) return undefined;
+        return jsonResponse({ error: "WebSocket upgrade required" }, 426);
+      },
+
       "/api/*": () => jsonResponse({ error: "Not found" }, 404),
 
       "/*": (request: Request) => serveWeb(request, deps.config.webDist),
+    },
+
+    websocket: {
+      open(ws) {
+        statusClients.add(ws);
+        ws.send(JSON.stringify(deps.statuses.snapshotMessage()));
+      },
+      close(ws) {
+        statusClients.delete(ws);
+      },
+      message() {
+        // The status feed is server-push only.
+      },
     },
 
     fetch: (request: Request) => serveWeb(request, deps.config.webDist),
@@ -63,7 +95,10 @@ export function createApiServer(deps: ApiDeps): ApiServer {
   log.info("webhook gateway listening", { port: server.port ?? deps.config.port });
   return {
     port: server.port ?? deps.config.port,
-    stop: () => server.stop(true),
+    stop: () => {
+      unsubscribeStatuses();
+      server.stop(true);
+    },
   };
 }
 

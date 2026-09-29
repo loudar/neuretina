@@ -83,9 +83,12 @@ export class StubTts implements TextToSpeechProvider {
   readonly defaultVoiceId = "stub-voice";
   readonly requests: string[] = [];
   options: { mimeType?: string; extension?: string; durationMs?: number } = {};
+  /** When set, synthesize() rejects with this message. */
+  failWith?: string;
 
   async synthesize(request: { text: string }) {
     this.requests.push(request.text);
+    if (this.failWith) throw new Error(this.failWith);
     return {
       data: new Uint8Array([1, 2, 3, 4]),
       mimeType: this.options.mimeType ?? "audio/ogg",

@@ -6,10 +6,12 @@
   import iconSync from "@ktibow/iconset-material-symbols/sync";
   import { commands, type AppConfigInfo } from "./lib/api";
   import { eventStream } from "./lib/events.svelte";
+  import { statusFeed } from "./lib/statuses.svelte";
   import BriefsPanel from "./components/BriefsPanel.svelte";
   import TopicsPanel from "./components/TopicsPanel.svelte";
   import JobsPanel from "./components/JobsPanel.svelte";
   import EventLog from "./components/EventLog.svelte";
+  import StatusFeedPanel from "./components/StatusFeed.svelte";
 
   let tab = $state("briefs");
   let config = $state<AppConfigInfo | null>(null);
@@ -35,13 +37,17 @@
 
   onMount(() => {
     eventStream.start();
+    statusFeed.start();
     void commands
       .config()
       .then((loaded) => (config = loaded))
       .catch(() => {
         config = null;
       });
-    return () => eventStream.stop();
+    return () => {
+      eventStream.stop();
+      statusFeed.stop();
+    };
   });
 </script>
 
@@ -61,6 +67,8 @@
   </div>
 
   <Tabs bind:tab items={tabs} />
+
+  <StatusFeedPanel />
 
   {#if tab === "briefs"}
     <BriefsPanel />

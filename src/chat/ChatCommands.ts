@@ -50,7 +50,8 @@ export function createChatCommandHandler(
     if (job) {
       const correlationId = crypto.randomUUID();
       watchCompletion(correlationId, [`job.finished`, `job.failed`], `Job "${job.name}"`);
-      void deps.scheduler.runNow(job, correlationId);
+      // Failures are recorded as job.failed events and reported by watchCompletion.
+      void deps.scheduler.runNow(job, correlationId).catch(() => undefined);
       return `Started job "${job.name}" (${job.workflow}) now — I'll post again when it finishes.`;
     }
 
@@ -60,7 +61,9 @@ export function createChatCommandHandler(
     if (workflow) {
       const correlationId = crypto.randomUUID();
       watchCompletion(correlationId, [`workflow.finished`, `workflow.failed`], `Workflow "${workflow.id}"`);
-      void deps.workflows.run(workflow.id, {}, { correlationId });
+      void deps.workflows.run(workflow.id, {}, { correlationId }).catch((error) => {
+        log.warn("workflow run failed", { error: errorMessage(error) });
+      });
       return `Started workflow "${workflow.id}" now — I'll post again when it finishes.`;
     }
 

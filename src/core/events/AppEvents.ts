@@ -59,6 +59,7 @@ export interface AppEvents {
     correlationId: string;
     topic: string;
     sources: number;
+    found: boolean;
     notes: string;
   };
   "brief.generated": {
@@ -68,7 +69,12 @@ export interface AppEvents {
     sources: number;
     characters: number;
   };
-  "brief.skipped": { correlationId: string; reason: string };
+  "brief.skipped": {
+    correlationId: string;
+    reason: string;
+    topics?: string[];
+    queries?: string[];
+  };
 
   "tts.synthesized": {
     correlationId: string;

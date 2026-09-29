@@ -5,6 +5,7 @@ import { EventStore } from "../src/core/events/EventStore.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { Scheduler } from "../src/core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
+import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 
@@ -19,7 +20,7 @@ afterEach(() => {
 function setup(workflow: Workflow) {
   const db = new SqliteDatabase(":memory:");
   const bus = new EventBus(new EventStore(db), log);
-  const workflows = new WorkflowRegistry({ bus, logger: log });
+  const workflows = new WorkflowRegistry({ bus, logger: log, statuses: new StatusHub() });
   workflows.register(workflow);
   const jobs = new JobRepository(db);
   const scheduler = new Scheduler({ jobs, workflows, bus, logger: log });
@@ -93,3 +94,4 @@ describe("Scheduler", () => {
     expect(scheduler.registeredCount).toBe(1);
   });
 });
+

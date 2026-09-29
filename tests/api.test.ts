@@ -62,6 +62,15 @@ async function call<T>(type: string, payload?: unknown): Promise<T> {
   return body.result as T;
 }
 
+async function waitUntil(condition: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("waitUntil timed out");
+}
+
 describe("webhook gateway", () => {
   test("exposes only the webhook and static files", async () => {
     const probe = await fetch(`${base}/api/webhook`);
@@ -195,6 +204,61 @@ describe("webhook gateway", () => {
     expect(started.started).toBe(true);
 
     await skipped;
+  });
+
+  test("streams status updates over WebSocket", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${kernel.api.port}/api/ws`);
+    const messages: Array<{ type: string; entry?: { text?: string } }> = [];
+    ws.onmessage = (event) => messages.push(JSON.parse(String(event.data)));
+
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("websocket connection failed"));
+    });
+
+    await waitUntil(() => messages.some((message) => message.type === "snapshot"));
+
+    kernel.statuses.begin("api-test-activity", "hello from test");
+    await waitUntil(() =>
+      messages.some(
+        (message) => message.type === "entry" && message.entry?.text === "hello from test",
+      ),
+    );
+
+    ws.close();
+  });
+
+  test("a failing workflow does not raise unhandled rejections", async () => {
+    kernel.workflows.register({
+      id: "boom",
+      description: "always fails",
+      run: async () => {
+        throw new Error("boom");
+      },
+    });
+
+    const rejections: unknown[] = [];
+    const onRejection = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", onRejection);
+
+    try {
+      // Subscribe before sending: the workflow may fail in the same tick.
+      const failed = waitForEvent(
+        kernel.bus,
+        "workflow.failed",
+        (event) => (event.payload as { workflow: string }).workflow === "boom",
+      );
+
+      const started = await call<{ started: boolean }>("workflow.run", { id: "boom", input: {} });
+      expect(started.started).toBe(true);
+
+      await failed;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(rejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onRejection);
+    }
   });
 
   test("event.pull returns persisted history", async () => {

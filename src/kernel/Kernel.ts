@@ -4,6 +4,8 @@ import { errorMessage } from "../core/errors.ts";
 import { EventBus } from "../core/events/EventBus.ts";
 import { EventStore } from "../core/events/EventStore.ts";
 import { CommandRouter } from "../core/commands/CommandRouter.ts";
+import { StatusHub } from "../core/status/StatusHub.ts";
+import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
@@ -50,6 +52,7 @@ export interface Kernel {
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
   commands: CommandRouter;
+  statuses: StatusHub;
   api: ApiServer;
   shutdown(): Promise<void>;
 }
@@ -123,7 +126,11 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       client: matrixClient,
     });
 
-  const workflows = new WorkflowRegistry({ bus, logger: logger.child("workflows") });
+  const statuses = new StatusHub();
+  new StatusService({ bus, logger: logger.child("status"), hub: statuses });
+
+  const workflows = new WorkflowRegistry({ bus, logger: logger.child("workflows"), statuses });
+
   workflows.register(
     new BriefingWorkflow({
       topics,
@@ -133,6 +140,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       socialSearch,
       tts,
       messaging,
+      statuses,
       defaults: {
         recency: config.defaults.searchRecency,
         resultsPerProvider: config.defaults.searchResultsPerProvider,
@@ -181,6 +189,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     config,
     bus,
     commands,
+    statuses,
     logger,
   });
 
@@ -236,6 +245,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     workflows,
     scheduler,
     commands,
+    statuses,
     api,
     shutdown,
   };

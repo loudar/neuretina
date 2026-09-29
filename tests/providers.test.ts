@@ -1,7 +1,19 @@
-import { describe, expect, test } from "bun:test";
-import { splitText, describeFormat } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
 import { extractJson, stripMarkdown } from "../src/workflows/BriefingWorkflow.ts";
+
+const fetchSpy = spyOn(globalThis, "fetch");
+
+afterEach(() => {
+  fetchSpy.mockReset();
+});
+
+function mockFetch(
+  implementation: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+): void {
+  fetchSpy.mockImplementation(implementation as unknown as typeof fetch);
+}
 
 describe("ElevenLabs text splitting", () => {
   test("keeps short text in one chunk", () => {
@@ -37,6 +49,34 @@ describe("ElevenLabs output formats", () => {
       bytesPerSecond: 16000,
     });
     expect(describeFormat("wav_44100").mimeType).toBe("audio/wav");
+  });
+
+  test("retries a transient 401 and succeeds", async () => {
+    let calls = 0;
+    mockFetch(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ detail: { message: "Unauthorized" } }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    });
+
+    const provider = new ElevenLabsTtsProvider({
+      apiKey: "key",
+      baseUrl: "https://api.elevenlabs.io",
+      modelId: "eleven_v4",
+      voiceId: "voice",
+      outputFormat: "opus_48000_128",
+    });
+
+    const audio = await provider.synthesize({ text: "hello" });
+
+    expect(calls).toBe(2);
+    expect(audio.data).toEqual(new Uint8Array([1, 2, 3]));
+    expect(audio.mimeType).toBe("audio/ogg");
   });
 });
 

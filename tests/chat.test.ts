@@ -6,6 +6,7 @@ import { EventStore } from "../src/core/events/EventStore.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { Scheduler } from "../src/core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
+import { StatusHub } from "../src/core/status/StatusHub.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { StubMessaging, testConfig } from "./support.ts";
@@ -28,7 +29,7 @@ function setup() {
   const db = new SqliteDatabase(":memory:");
   const bus = new EventBus(new EventStore(db), log);
   const jobs = new JobRepository(db);
-  const workflows = new WorkflowRegistry({ bus, logger: log });
+  const workflows = new WorkflowRegistry({ bus, logger: log, statuses: new StatusHub() });
   const messaging = new StubMessaging();
   const scheduler = new Scheduler({ jobs, workflows, bus, logger: log });
 
@@ -134,3 +135,4 @@ describe("chat commands", () => {
     expect(reply).toContain("llm");
   });
 });
+

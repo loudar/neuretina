@@ -130,7 +130,8 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("job.run", (payload) => {
     const job = jobs.get(requireString(asRecord(payload), "id"));
-    void scheduler.runNow(job);
+    // Failures are recorded as job.failed events by the scheduler.
+    void scheduler.runNow(job).catch(() => undefined);
     return { started: true, jobId: job.id, workflow: job.workflow };
   });
 
@@ -140,7 +141,8 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const record = asRecord(payload);
     const workflow = workflows.get(requireString(record, "id"));
     const input = asOptionalRecord(record, "input") ?? {};
-    void workflows.run(workflow.id, input);
+    // Failures are recorded as workflow.failed events by the registry.
+    void workflows.run(workflow.id, input).catch(() => undefined);
     return { started: true, workflow: workflow.id };
   });
 

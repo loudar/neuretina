@@ -1,11 +1,13 @@
 import type { Logger } from "../logger.ts";
 import type { EventBus } from "../events/EventBus.ts";
+import type { StatusHub } from "../status/StatusHub.ts";
 import { NotFoundError, errorMessage } from "../errors.ts";
 
 export interface WorkflowContext {
   correlationId: string;
   bus: EventBus;
   logger: Logger;
+  statuses: StatusHub;
 }
 
 export interface Workflow<TInput = unknown, TOutput = unknown> {
@@ -28,7 +30,7 @@ export class WorkflowRegistry {
   private readonly workflows = new Map<string, Workflow>();
 
   constructor(
-    private readonly deps: { bus: EventBus; logger: Logger },
+    private readonly deps: { bus: EventBus; logger: Logger; statuses: StatusHub },
   ) {}
 
   register<TInput, TOutput>(workflow: Workflow<TInput, TOutput>): void {
@@ -66,6 +68,7 @@ export class WorkflowRegistry {
         correlationId,
         bus: this.deps.bus,
         logger,
+        statuses: this.deps.statuses,
       })) as TOutput;
 
       const durationMs = Date.now() - started;
