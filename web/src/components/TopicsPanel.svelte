@@ -51,10 +51,6 @@
 
 <Panel>
   <h2>Topics of interest</h2>
-  <p class="muted">
-    The briefing agent researches each topic on the web and on Bluesky, then compiles a neutral
-    brief grouped by topic.
-  </p>
 
   <div class="actions">
     <TextFieldOutlined label="Topic" bind:value={name} enter={add} />

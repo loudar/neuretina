@@ -92,10 +92,6 @@
 
 <Panel>
   <h2>Scheduled tasks</h2>
-  <p class="muted">
-    Cron runs in the server's timezone (TZ). Runs never overlap. You can also start a task from
-    Matrix with <code>/start &lt;task id or name&gt;</code>.
-  </p>
 
   <div class="actions">
     <TextFieldOutlined label="Name" bind:value={name} />

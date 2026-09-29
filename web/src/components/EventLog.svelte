@@ -25,11 +25,6 @@
     </div>
   </div>
 
-  <p class="muted">
-    Every subsystem publishes to the event bus; this is the persisted stream (seq {eventStream.lastSeq}).
-    Fed by webhook <code>event.wait</code> long-polls and resumes automatically after drops.
-  </p>
-
   {#if filtered.length === 0}
     <p class="muted">No events yet.</p>
   {:else}
