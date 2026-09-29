@@ -13,6 +13,7 @@ import {
   StubTts,
   completion,
   sampleResults,
+  stubFinance,
   stubLlm,
   stubSearch,
 } from "./support.ts";
@@ -22,10 +23,13 @@ const log = createLogger("test", { level: "error" });
 interface SetupOptions {
   webResults?: typeof sampleResults;
   socialResults?: typeof sampleResults;
+  financeResults?: typeof sampleResults;
   /** Verdict the research agent reports for its final JSON answer. */
   researchVerdict?: boolean;
   /** Makes the first compiler call return a draft far over the word budget. */
   longCompilerOutput?: boolean;
+  /** Tools the stub researcher calls, in order, before its verdict. */
+  researchTools?: string[];
 }
 
 function setup(options: SetupOptions = {}) {
@@ -52,11 +56,11 @@ function setup(options: SetupOptions = {}) {
     }
 
     const toolMessages = request.messages.filter((message) => message.role === "tool").length;
-    if (toolMessages === 0) {
-      return completion("", [{ id: "call-1", name: "perplexity_search", arguments: { query: "t" } }]);
-    }
-    if (toolMessages === 1) {
-      return completion("", [{ id: "call-2", name: "bluesky_search", arguments: { query: "t" } }]);
+    const sequence = options.researchTools ?? ["perplexity_search", "bluesky_search"];
+    if (toolMessages < sequence.length) {
+      const name = sequence[toolMessages]!;
+      const args = name === "perplexity_finance" ? { question: "NVDA quote" } : { query: "t" };
+      return completion("", [{ id: `call-${toolMessages + 1}`, name, arguments: args }]);
     }
     return completion(
       JSON.stringify({
@@ -76,6 +80,7 @@ function setup(options: SetupOptions = {}) {
     llm,
     webSearch: stubSearch("perplexity", "web", options.webResults ?? sampleResults),
     socialSearch: stubSearch("bluesky", "social", options.socialResults ?? [sampleResults[1]!]),
+    finance: stubFinance(options.financeResults ?? []),
     tts,
     messaging,
     statuses,
@@ -326,6 +331,34 @@ describe("BriefingWorkflow", () => {
 
     const researched = events.find((event) => event.topic === "brief.research.completed");
     expect(researched?.payload).toMatchObject({ found: false });
+  });
+
+  test("collects finance lookup sources alongside search results", async () => {
+    const financeResults = [
+      {
+        title: "NVDA quote",
+        url: "https://www.perplexity.ai/finance/NVDA",
+        snippet: "NVDA quote",
+        source: "www.perplexity.ai",
+      },
+    ];
+    const { workflow, topics, briefs, bus, statuses } = setup({
+      researchTools: ["perplexity_finance"],
+      financeResults,
+    });
+    topics.add({ name: "Nvidia" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c12", bus, logger: log, statuses },
+    );
+
+    const stored = briefs.get(output.briefId!);
+    const source = stored.sources.find(
+      (item) => item.url === "https://www.perplexity.ai/finance/NVDA",
+    );
+    expect(source).toBeDefined();
+    expect(source?.provider).toBe("perplexity");
   });
 });
 

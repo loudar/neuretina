@@ -28,6 +28,8 @@ export interface AppConfig {
   perplexity: {
     apiKey?: string;
     baseUrl: string;
+    /** Model used by the Agent API finance_search tool. */
+    financeModel: string;
   };
   elevenlabs: {
     apiKey?: string;
@@ -108,12 +110,17 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     llm: {
       apiKey: str(env, "OPENCODE_API_KEY"),
       baseUrl: str(env, "LLM_BASE_URL", "https://opencode.ai/zen/go/v1")!,
-      model: str(env, "LLM_MODEL", "deepseek-v4-flash")!,
+      model: str(env, "LLM_MODEL", "deepseek-v4.1-flash")!,
       sessionId: str(env, "LLM_SESSION_ID"),
     },
     perplexity: {
       apiKey: str(env, "KEY_PERPLEXITY"),
       baseUrl: str(env, "PERPLEXITY_BASE_URL", "https://api.perplexity.ai")!,
+      financeModel: str(
+        env,
+        "PERPLEXITY_FINANCE_MODEL",
+        "perplexity/glm-5.3-flash",
+      )!,
     },
     elevenlabs: {
       apiKey: str(env, "KEY_ELEVENLABS"),

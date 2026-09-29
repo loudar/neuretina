@@ -11,6 +11,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "../src/capabilities/search/SearchProvider.ts";
+import type { FinanceProvider } from "../src/capabilities/finance/FinanceProvider.ts";
 import type {
   MessagingProvider,
   OutboundMessage,
@@ -57,6 +58,29 @@ export function stubSearch(
       query: query.query,
       provider: name,
       kind,
+      results,
+    }),
+  };
+}
+
+export function stubFinance(
+  results: SearchResult[] = [],
+  answer = "Stub finance answer",
+): FinanceProvider {
+  return {
+    name: "perplexity",
+    lookup: async (query) => ({
+      question: query.question,
+      provider: "perplexity",
+      answer,
+      data: [
+        {
+          category: "quote",
+          tickers: ["NVDA"],
+          content: answer,
+          sources: results.map((result) => result.url),
+        },
+      ],
       results,
     }),
   };

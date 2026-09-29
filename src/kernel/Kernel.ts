@@ -22,11 +22,13 @@ import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListe
 import { createChatCommandHandler } from "../chat/ChatCommands.ts";
 import { OpenAiCompatibleLlmProvider } from "../providers/llm/OpenAiCompatibleLlmProvider.ts";
 import { PerplexitySearchProvider } from "../providers/search/PerplexitySearchProvider.ts";
+import { PerplexityFinanceProvider } from "../providers/finance/PerplexityFinanceProvider.ts";
 import { BlueskySearchProvider } from "../providers/search/BlueskySearchProvider.ts";
 import { ElevenLabsTtsProvider } from "../providers/tts/ElevenLabsTtsProvider.ts";
 import { MatrixMessagingProvider } from "../providers/messaging/MatrixMessagingProvider.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
+import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import { createApiServer, type ApiServer } from "../api/server.ts";
@@ -37,6 +39,7 @@ export interface KernelOverrides {
   llm?: LlmProvider;
   webSearch?: SearchProvider;
   socialSearch?: SearchProvider;
+  finance?: FinanceProvider;
   tts?: TextToSpeechProvider;
   messaging?: MessagingProvider;
 }
@@ -100,6 +103,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       defaultLimit: config.defaults.searchResultsPerProvider,
     });
 
+  const finance =
+    overrides.finance ??
+    new PerplexityFinanceProvider({
+      apiKey: config.perplexity.apiKey,
+      baseUrl: config.perplexity.baseUrl,
+      model: config.perplexity.financeModel,
+    });
+
   const tts =
     overrides.tts ??
     new ElevenLabsTtsProvider({
@@ -142,6 +153,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       llm,
       webSearch,
       socialSearch,
+      finance,
       tts,
       messaging,
       statuses,

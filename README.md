@@ -13,6 +13,7 @@ scheduler (Bun.cron, jobs in SQLite)
    └─> workflow run ────────────────────────────────────────────────┐
         research agent (LLM tool-calling loop)                      │
           ├─ web_search      → Perplexity Search API                │
+          ├─ finance         → Perplexity Agent API (finance_search)│
           └─ bluesky_search  → AT Protocol app.bsky.feed.searchPosts│
         compiler LLM → neutral markdown brief + spoken narration    │
         ElevenLabs   → speech audio (eleven_v4)                     │
@@ -29,7 +30,7 @@ scheduler (Bun.cron, jobs in SQLite)
 | Layer | Location | Purpose |
 | --- | --- | --- |
 | Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, logger, errors |
-| Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `TextToSpeechProvider`, `MessagingProvider` |
+| Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
 | Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, ElevenLabs, Matrix) |
 | Domain | `src/domain` | SQLite repositories: topics, briefs, scheduled jobs |
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `SearchTool` that wraps any `SearchProvider` |
@@ -69,7 +70,7 @@ bun test
 ### OpenCode Go (LLM)
 
 - Subscribe to Go at https://opencode.ai/auth and copy the API key → `OPENCODE_API_KEY`.
-- Defaults: `LLM_BASE_URL=https://opencode.ai/zen/go/v1`, `LLM_MODEL=deepseek-v4-flash`
+- Defaults: `LLM_BASE_URL=https://opencode.ai/zen/go/v1`, `LLM_MODEL=deepseek-v4.1-flash`
   (OpenAI-compatible `/chat/completions`).
 - OpenCode Go requires a client user agent and a stable `x-opencode-session` id per conversation.
   The engine sends both automatically: the session id is the id of the workflow run (agent tool
@@ -77,11 +78,25 @@ bun test
   per-process uuid. Pin `LLM_SESSION_ID` if you want one routing/cache session across runs.
 - `bun run check:llm` sends one tiny completion to verify the key/endpoint end-to-end.
 
-### Perplexity (web search)
+### Perplexity (web + finance)
 
 - Create an API key → `KEY_PERPLEXITY`.
-- The agent calls `POST https://api.perplexity.ai/search` and receives raw ranked results
-  (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop.
+- **Web search:** the agent calls `POST https://api.perplexity.ai/search` and receives raw ranked
+  results (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop.
+- **Finance lookups:** when a topic touches a public company, an ETF or the markets, the researcher
+  can call the `perplexity_finance` tool. It uses Perplexity's Agent API
+  (`POST https://api.perplexity.ai/v1/agent`) with the `finance_search` tool, which returns a
+  synthesized answer plus structured data — quotes, financial statements, earnings, guidance,
+  analyst estimates, ownership — with citation-ready `perplexity.ai/finance/…` source links that
+  flow into the brief's source list.
+- `finance_search` runs on a Perplexity-hosted model. `PERPLEXITY_FINANCE_MODEL` defaults to
+  `perplexity/glm-5.3-flash` — the best open-weight model on Vals AI Finance Agent v2 (57.9%,
+  ahead of DeepSeek V4 Pro 0813 at 50.4%, Kimi K3 at 54.4% and MiniMax M3 at 48.3%) and the
+  cheapest capable option. The research agent and compiler keep running on `LLM_MODEL`
+  (`deepseek-v4.1-flash`).
+- `finance_search` is a beta, per-invocation billed tool (see Perplexity's docs) and must be
+  enabled for your key; if a lookup fails the researcher continues with web/social results and the
+  error is visible in the activity feed.
 
 ### ElevenLabs (speech)
 
@@ -204,7 +219,9 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
 - **Topics** are managed in the UI (or by sending `topic.create` / `topic.update` /
   `topic.delete` / `topic.list` through the webhook), including a **mute toggle** — muted topics
   are excluded from every briefing until unmuted. One LLM-planned research run covers all topics
-  at once (they may overlap), and the compiler merges everything into a single brief.
+  at once (they may overlap), the compiler merges everything into a single brief, and the
+  researcher can pull concrete market numbers (quotes, revenue, margins, guidance, estimates)
+  through Perplexity finance lookups when a topic involves a public company or the markets.
 - **Delivery is two messages by default:** the compiled summary as a formatted text message
   (markdown rendered to Matrix `formatted_body`) followed by the voice message. The summary is
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
