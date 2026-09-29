@@ -198,6 +198,9 @@
   }
 
   .entry {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
     border-radius: var(--m3-shape-medium);
   }
 

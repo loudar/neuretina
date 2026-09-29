@@ -62,6 +62,7 @@ export interface AppEvents {
     sources: number;
     found: boolean;
     queries: string[];
+    missingTopics?: string[];
   };
   "brief.generated": {
     correlationId: string;
@@ -106,4 +107,12 @@ export interface AppEvents {
   "chat.command.received": { channel: string; sender: string; command: string; args: string };
   "chat.command.handled": { channel: string; command: string; reply: string };
   "chat.command.failed": { channel: string; command: string; error: string };
+  "chat.question.received": { channel: string; sender: string; question: string };
+  "chat.question.answered": {
+    channel: string;
+    sender: string;
+    question: string;
+    answer: string;
+  };
+  "chat.question.failed": { channel: string; sender: string; question: string; error: string };
 }

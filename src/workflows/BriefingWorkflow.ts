@@ -84,6 +84,13 @@ Tone:
 - Conversational, like telling a well-informed friend what's going on: plain words, short sentences, active voice. No press-release or agency-speak.
 - Still strictly neutral: report what sources claim and where they disagree — never take sides or add opinions.
 
+Substance — every sentence must earn its place:
+- Write like a sharp editor curating for a busy reader: pick the two to four developments that genuinely change their understanding, not the easiest ones to summarise.
+- Every sentence must contain something concrete: a fact, a number, a name, a consequence, or a disagreement. Prefer specifics over generalities.
+- Before keeping a sentence, ask: would the reader be better informed by it than by nothing? If not, delete it.
+- Never write about missing information. No "there was no reaction", "coverage was thin", "it remains unclear", "a gap rather than agreement", "no news on X". If an aspect has no material, leave it out entirely — silence is not news.
+- No meta-commentary about the research process, the number of sources, or what was left out.
+
 Hard budget — brevity beats completeness:
 - The entire brief, title aside, must stay under 150 words. Shorter is better.
 - At most 2 short paragraphs in total. No lists, no "Worth a look" section, no action items.
@@ -95,7 +102,6 @@ Shape — everything together, NOT per topic:
 - No preamble, no closing remarks.
 - Attribute naturally by outlet name ("the Guardian reports", "according to CNBC").
 - Never include a source list, URLs, or citation numbers anywhere — links are attached separately.
-- If the input has a non-empty "missingTopics" list, note conversationally in one short line that nothing was found for them.
 
 Respond with a single JSON object:
 {"markdown": "<full brief as markdown>"}`;
@@ -180,6 +186,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         sources: uniqueSources.length,
         found: outcome.found,
         queries,
+        missingTopics,
       },
       { source: `workflow:${this.id}`, correlationId },
     );
@@ -187,6 +194,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       sources: uniqueSources.length,
       queries: queries.length,
       found: outcome.found,
+      missingTopics,
     });
 
     // Nothing relevant found: do not fabricate a summary, do not generate
@@ -201,11 +209,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     let compiled: { markdown: string; narration: string };
     try {
       compile?.update("Waiting for the compiler model");
-      compiled = await this.compile(
-        { topics: topicNames, notes: outcome.notes },
-        context,
-        missingTopics,
-      );
+      compiled = await this.compile({ topics: topicNames, notes: outcome.notes }, context);
       compile?.done("Brief compiled");
     } catch (error) {
       compile?.failed("Compilation failed");
@@ -454,9 +458,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private async compile(
     research: { topics: string[]; notes: string },
     context: WorkflowContext,
-    missingTopics: string[] = [],
   ): Promise<{ markdown: string; narration: string }> {
-    const draft = await this.requestCompilation(research, context, missingTopics);
+    const draft = await this.requestCompilation(research, context);
     const draftWords = wordCount(draft.markdown);
 
     if (draftWords <= HARD_WORD_CEILING) return draft;
@@ -465,7 +468,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     // for over-long drafts before anything is spoken or delivered.
     context.logger.warn("brief over word budget; compressing", { words: draftWords });
     try {
-      const compressed = await this.requestCompilation(research, context, missingTopics, {
+      const compressed = await this.requestCompilation(research, context, {
         draft: draft.markdown,
         words: draftWords,
       });
@@ -481,7 +484,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private async requestCompilation(
     research: { topics: string[]; notes: string },
     context: WorkflowContext,
-    missingTopics: string[],
     compress?: { draft: string; words: number },
   ): Promise<{ markdown: string; narration: string }> {
     const userContent = compress
@@ -489,14 +491,12 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           language: this.deps.defaults.language,
           instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact and the split-opinion reporting, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
           draft: compress.draft,
-          missingTopics,
         })
       : JSON.stringify({
           language: this.deps.defaults.language,
           date: new Date().toISOString().slice(0, 10),
           topics: research.topics,
           notes: research.notes,
-          missingTopics,
         });
 
     const completion = await this.deps.llm.complete({

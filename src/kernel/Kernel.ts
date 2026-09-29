@@ -15,6 +15,7 @@ import { TopicRepository } from "../domain/topics/TopicRepository.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
 import { registerCommands } from "../commands/registerCommands.ts";
 import { StartupService } from "../startup/StartupService.ts";
+import { QuestionAnswerer } from "../qa/QuestionAnswerer.ts";
 import { KeyValueRepository } from "../domain/kv/KeyValueRepository.ts";
 import { MatrixClient } from "../providers/messaging/MatrixClient.ts";
 import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListener.ts";
@@ -184,6 +185,18 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   });
 
   const kv = new KeyValueRepository(db);
+  const questionAnswerer = new QuestionAnswerer({
+    llm,
+    webSearch,
+    socialSearch,
+    briefs,
+    statuses,
+    defaults: {
+      recency: config.defaults.searchRecency,
+      resultsPerProvider: config.defaults.searchResultsPerProvider,
+    },
+  });
+
   let chatListener: MatrixCommandListener | null = null;
   if (config.matrix.chatCommands) {
     chatListener = new MatrixCommandListener({
@@ -202,6 +215,12 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
         bus,
         logger: logger.child("chat"),
       }),
+      onQuestion: (input) =>
+        questionAnswerer.answer(input.question, {
+          correlationId: crypto.randomUUID(),
+          bus,
+          logger: logger.child("qa"),
+        }),
     });
   }
 

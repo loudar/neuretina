@@ -2,13 +2,15 @@
   import { Button, Chip, Dialog, Icon, ListItem, Switch } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
+  import iconLabel from "@ktibow/iconset-material-symbols/label";
+  import iconLink from "@ktibow/iconset-material-symbols/link";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
-  import { formatDateTime } from "../lib/format";
+  import { formatDateTime, formatListDate } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
   import DataList from "./DataList.svelte";
   import Panel from "./Panel.svelte";
@@ -111,12 +113,6 @@
     }
     await select(selected.id);
   });
-
-  function listItemSupporting(brief: Brief): string {
-    const topics = brief.topics.join(", ") || "untitled";
-    const audio = brief.hasAudio ? " · audio ready" : "";
-    return `${topics} · ${brief.sources.length} sources${audio}`;
-  }
 </script>
 
 <div class="row two">
@@ -147,13 +143,28 @@
     <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
       {#snippet children(brief)}
         <div class="entry" class:selected={selected?.id === brief.id}>
-          <ListItem
-            onclick={() => select(brief.id)}
-            headline={formatDateTime(brief.createdAt)}
-            supporting={listItemSupporting(brief)}
-          >
+          <ListItem onclick={() => select(brief.id)} headline={formatListDate(brief.createdAt)}>
             {#snippet leading()}
               <Icon icon={iconArticle} />
+            {/snippet}
+            {#snippet trailing()}
+              <div class="badges">
+                <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
+                  <Icon icon={iconLabel} size={14} />{brief.topics.length}
+                </span>
+                <span class="badge sources" title={`${brief.sources.length} source(s)`}>
+                  <Icon icon={iconLink} size={14} />{brief.sources.length}
+                </span>
+                <span
+                  class="badge audio"
+                  class:has-audio={brief.hasAudio}
+                  title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
+                >
+                  <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
+                    ? "audio"
+                    : "text"}
+                </span>
+              </div>
             {/snippet}
           </ListItem>
         </div>
@@ -250,6 +261,9 @@
   }
 
   .entry {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
     border-radius: var(--m3-shape-medium);
     transition: background-color 150ms;
   }
@@ -257,6 +271,43 @@
   .entry.selected {
     background-color: var(--m3c-secondary-container);
     color: var(--m3c-on-secondary-container);
+  }
+
+  .badges {
+    display: inline-flex;
+    gap: 0.35rem;
+    align-items: center;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: var(--m3-shape-full);
+    font-size: 0.72rem;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  .badge.topics {
+    background-color: var(--m3c-secondary-container);
+    color: var(--m3c-on-secondary-container);
+  }
+
+  .badge.sources {
+    background-color: var(--m3c-surface-container-highest);
+    color: var(--m3c-on-surface-variant);
+  }
+
+  .badge.audio.has-audio {
+    background-color: var(--m3c-tertiary-container);
+    color: var(--m3c-on-tertiary-container);
+  }
+
+  .badge.audio:not(.has-audio) {
+    border: 1px solid var(--m3c-outline-variant);
+    color: var(--m3c-on-surface-variant);
   }
 
   .brief-text {

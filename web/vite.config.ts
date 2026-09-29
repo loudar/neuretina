@@ -7,6 +7,9 @@ export default defineConfig({
   // are compiled, so it runs first. m3-svelte must not be pre-bundled by the
   // dependency optimizer, otherwise its styles bypass the plugin in dev.
   plugins: [functionsMixins({ deps: ["m3-svelte"] }), svelte()],
+  define: {
+    __BUILD_STAMP__: JSON.stringify(new Date().toISOString()),
+  },
   optimizeDeps: {
     exclude: ["m3-svelte"],
   },

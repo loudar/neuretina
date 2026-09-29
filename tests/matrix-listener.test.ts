@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { parseChatCommand, MatrixCommandListener } from "../src/providers/messaging/MatrixCommandListener.ts";
+import {
+  parseChatCommand,
+  stripReplyFallback,
+  MatrixCommandListener,
+} from "../src/providers/messaging/MatrixCommandListener.ts";
 import { MatrixClient } from "../src/providers/messaging/MatrixClient.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
@@ -41,7 +45,11 @@ interface SentRequest {
   body?: string;
 }
 
-function setupListener(options: { allowedSenders?: string[]; onCommand?: (command: ChatCommand) => Promise<string> }) {
+function setupListener(options: {
+  allowedSenders?: string[];
+  onCommand?: (command: ChatCommand) => Promise<string>;
+  onQuestion?: (input: { question: string; sender: string; quotedEventId: string }) => Promise<string>;
+}) {
   const db = new SqliteDatabase(":memory:");
   const kv = new KeyValueRepository(db);
   const bus = new EventBus(new EventStore(db), log);
@@ -104,6 +112,41 @@ function setupListener(options: { allowedSenders?: string[]; onCommand?: (comman
           },
         });
       }
+      if (since === "s1") {
+        return Response.json({
+          next_batch: "s2",
+          rooms: {
+            join: {
+              "!room:matrix.test": {
+                timeline: {
+                  events: [
+                    {
+                      type: "m.room.message",
+                      sender: "@user:matrix.test",
+                      event_id: "$m5",
+                      content: {
+                        msgtype: "m.text",
+                        body: "> <@bot:matrix.test> Morning brief\n\nwhat is X?",
+                        "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$botmsg" },
+                      },
+                    },
+                    {
+                      type: "m.room.message",
+                      sender: "@user:matrix.test",
+                      event_id: "$m6",
+                      content: {
+                        msgtype: "m.text",
+                        body: "> <@someone:matrix.test> hello\n\nnot for the bot",
+                        "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$someone-else" },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        });
+      }
       // Pace the loop like a real long-poll would.
       await new Promise((resolve) => setTimeout(resolve, 20));
       return Response.json({ next_batch: since });
@@ -115,6 +158,7 @@ function setupListener(options: { allowedSenders?: string[]; onCommand?: (comman
     return new Response("not found", { status: 404 });
   });
 
+  const questions: Array<{ question: string; sender: string; quotedEventId: string }> = [];
   const listener = new MatrixCommandListener({
     client,
     kv,
@@ -128,9 +172,15 @@ function setupListener(options: { allowedSenders?: string[]; onCommand?: (comman
         received.push(command);
         return `ack:${command.command}`;
       }),
+    onQuestion:
+      options.onQuestion ??
+      (async (input) => {
+        questions.push(input);
+        return "Answer text";
+      }),
   });
 
-  return { listener, kv, bus, received, sent };
+  return { listener, kv, bus, received, sent, questions };
 }
 
 describe("MatrixCommandListener", () => {
@@ -195,5 +245,40 @@ describe("MatrixCommandListener", () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]?.body).toContain("handler exploded");
+  });
+
+  test("answers follow-up questions that quote one of the bot's messages", async () => {
+    const { listener, bus, sent, questions } = setupListener({});
+    // Simulate a message the bot sent earlier (summary text delivery).
+    bus.publish(
+      "message.text.sent",
+      { correlationId: "c-bot", channel: "!room:matrix.test", eventId: "$botmsg" },
+      { source: "test" },
+    );
+
+    const answered = waitForEvent(bus, "chat.question.answered");
+    await listener.start();
+    await answered;
+    listener.stop();
+
+    // Only the reply quoting *our* message is answered (with the quote
+    // fallback stripped); the one quoting someone else is ignored.
+    expect(questions).toHaveLength(1);
+    expect(questions[0]).toMatchObject({
+      question: "what is X?",
+      sender: "@user:matrix.test",
+      quotedEventId: "$botmsg",
+    });
+
+    const reply = sent.find((request) => request.body?.includes("Answer text"));
+    expect(reply?.body).toContain('"event_id":"$m5"');
+  });
+});
+
+describe("stripReplyFallback", () => {
+  test("removes the quoted reply lines", () => {
+    expect(stripReplyFallback("> <@bot:test> Brief title\n\nwhat is X?")).toBe("what is X?");
+    expect(stripReplyFallback("> a\n> b\nplain text")).toBe("plain text");
+    expect(stripReplyFallback("no quote here")).toBe("no quote here");
   });
 });

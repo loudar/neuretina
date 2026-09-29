@@ -5,6 +5,14 @@ import type { KeyValueRepository } from "../../domain/kv/KeyValueRepository.ts";
 import type { ChatCommand, ChatCommandSource } from "../../capabilities/chat/ChatChannel.ts";
 import type { MatrixClient } from "./MatrixClient.ts";
 
+export interface QuestionInput {
+  question: string;
+  sender: string;
+  channel: string;
+  /** Event id of the bot message being quoted. */
+  quotedEventId: string;
+}
+
 export interface MatrixCommandListenerOptions {
   client: MatrixClient;
   kv: KeyValueRepository;
@@ -15,6 +23,8 @@ export interface MatrixCommandListenerOptions {
   allowedSenders?: string[];
   /** Handles a parsed command and returns the reply text. */
   onCommand: (command: ChatCommand) => Promise<string>;
+  /** Handles a follow-up question (reply quoting one of the bot's messages). */
+  onQuestion?: (input: QuestionInput) => Promise<string>;
 }
 
 interface MatrixEvent {
@@ -36,6 +46,7 @@ const SYNC_KEY = "matrix.sync_token";
 const SYNC_TIMEOUT_MS = 30_000;
 const RETRY_DELAY_MS = 5_000;
 const MIN_SYNC_INTERVAL_MS = 250;
+const MAX_TRACKED_OWN_MESSAGES = 200;
 const FILTER = JSON.stringify({
   room: { timeline: { limit: 20, types: ["m.room.message"] } },
 });
@@ -52,8 +63,17 @@ export class MatrixCommandListener implements ChatCommandSource {
   private running = false;
   private abort: AbortController | null = null;
   private userId: string | null = null;
+  private readonly ownMessages = new Set<string>();
+  private readonly ownMessageOrder: string[] = [];
 
-  constructor(private readonly options: MatrixCommandListenerOptions) {}
+  constructor(private readonly options: MatrixCommandListenerOptions) {
+    // Messages the bot sends through the messaging provider (briefs, notices,
+    // re-sends) count as "ours" for follow-up replies too.
+    options.bus.subscribeTopics(["message.text.sent", "message.voice.sent"], (event) => {
+      const eventId = (event.payload as { eventId?: unknown }).eventId;
+      if (typeof eventId === "string") this.trackOwnMessage(eventId);
+    });
+  }
 
   get roomId(): string | undefined {
     return this.options.roomId;
@@ -151,16 +171,27 @@ export class MatrixCommandListener implements ChatCommandSource {
     for (const event of room.timeline?.events ?? []) {
       if (event.type !== "m.room.message") continue;
       if (!event.sender || event.sender === this.userId) continue;
+      if (!event.event_id) continue;
 
       if (this.options.allowedSenders?.length && !this.options.allowedSenders.includes(event.sender)) {
-        logger.warn("ignoring command from non-allowed sender", { sender: event.sender });
+        logger.warn("ignoring message from non-allowed sender", { sender: event.sender });
         continue;
       }
 
       const content = event.content ?? {};
       if (content.msgtype !== "m.text" || typeof content.body !== "string") continue;
 
-      const parsed = parseChatCommand(content.body);
+      const body = stripReplyFallback(content.body);
+      const quotedId = quotedEventIdOf(content);
+
+      // A reply that quotes one of our own messages is a follow-up question.
+      if (quotedId && this.isOwnMessage(quotedId)) {
+        await this.handleQuestion(body, event, quotedId);
+        continue;
+      }
+
+      // Commands are plain messages (not replies).
+      const parsed = quotedId ? null : parseChatCommand(body);
       if (!parsed) continue;
 
       const command: ChatCommand = {
@@ -168,7 +199,7 @@ export class MatrixCommandListener implements ChatCommandSource {
         sender: event.sender,
         command: parsed.command,
         args: parsed.args,
-        raw: content.body.trim(),
+        raw: body.trim(),
       };
 
       bus.publish(
@@ -179,10 +210,12 @@ export class MatrixCommandListener implements ChatCommandSource {
 
       try {
         const reply = await this.options.onCommand(command);
-        await client.sendMessage(command.channel, "m.room.message", {
-          msgtype: "m.text",
-          body: reply,
-        });
+        this.trackOwnMessage(
+          await client.sendMessage(command.channel, "m.room.message", {
+            msgtype: "m.text",
+            body: reply,
+          }),
+        );
         bus.publish(
           "chat.command.handled",
           { channel: command.channel, command: command.command, reply: reply.slice(0, 300) },
@@ -205,6 +238,88 @@ export class MatrixCommandListener implements ChatCommandSource {
       }
     }
   }
+
+  private async handleQuestion(
+    question: string,
+    event: MatrixEvent,
+    quotedId: string,
+  ): Promise<void> {
+    const { roomId, client, bus, logger, onQuestion } = this.options;
+    if (!onQuestion) return;
+
+    const trimmed = question.trim();
+    if (!trimmed) return;
+
+    const sender = event.sender!;
+    const channel = roomId!;
+
+    bus.publish(
+      "chat.question.received",
+      { channel, sender, question: trimmed.slice(0, 500) },
+      { source: "matrix" },
+    );
+
+    try {
+      const answer = await onQuestion({ question: trimmed, sender, channel, quotedEventId: quotedId });
+      this.trackOwnMessage(
+        await client.sendMessage(channel, "m.room.message", {
+          msgtype: "m.text",
+          body: answer,
+          "m.relates_to": { "m.in_reply_to": { event_id: event.event_id! } },
+        }),
+      );
+      bus.publish(
+        "chat.question.answered",
+        { channel, sender, question: trimmed.slice(0, 300), answer: answer.slice(0, 300) },
+        { source: "matrix" },
+      );
+    } catch (error) {
+      const message = errorMessage(error);
+      bus.publish(
+        "chat.question.failed",
+        { channel, sender, question: trimmed.slice(0, 300), error: message },
+        { source: "matrix" },
+      );
+      logger.error("question failed", { error: message });
+      await client
+        .sendMessage(channel, "m.room.message", {
+          msgtype: "m.text",
+          body: `Sorry, I couldn't answer that: ${message}`,
+          "m.relates_to": { "m.in_reply_to": { event_id: event.event_id! } },
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  private isOwnMessage(eventId: string): boolean {
+    return this.ownMessages.has(eventId);
+  }
+
+  private trackOwnMessage(eventId: string): void {
+    this.ownMessages.add(eventId);
+    this.ownMessageOrder.push(eventId);
+    while (this.ownMessageOrder.length > MAX_TRACKED_OWN_MESSAGES) {
+      const oldest = this.ownMessageOrder.shift();
+      if (oldest) this.ownMessages.delete(oldest);
+    }
+  }
+}
+
+/** Matrix reply bodies carry a "> <@user> …" quote fallback; drop it. */
+export function stripReplyFallback(body: string): string {
+  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  let index = 0;
+  while (index < lines.length && lines[index]!.startsWith(">")) index += 1;
+  if (index > 0 && lines[index] === "") index += 1;
+  return lines.slice(index).join("\n").trim();
+}
+
+function quotedEventIdOf(content: Record<string, unknown>): string | undefined {
+  const relatesTo = content["m.relates_to"];
+  if (!relatesTo || typeof relatesTo !== "object") return undefined;
+  const relation = relatesTo as { rel_type?: unknown; event_id?: unknown };
+  if (relation.rel_type !== "m.in_reply_to") return undefined;
+  return typeof relation.event_id === "string" ? relation.event_id : undefined;
 }
 
 export function parseChatCommand(text: string): { command: string; args: string } | null {

@@ -181,6 +181,11 @@ re-execute old commands; the bot ignores its own messages; `MATRIX_ALLOWED_SENDE
 can. Sync errors back off and resume automatically, and a re-login transparently resets the sync
 position.
 
+**Follow-up questions:** reply to (quote) any message the bot sent — the brief summary, a notice,
+or one of its answers — and it searches for an answer (web, Bluesky and past briefs) and replies
+with a short **text** answer, never a voice message. Only direct quotes of the bot's own messages
+trigger this; plain messages are still treated as commands.
+
 ### Web UI
 
 The frontend is built entirely on the [M3 Svelte](https://github.com/KTibow/m3-svelte) Material 3
@@ -189,9 +194,10 @@ baseline palette in light and dark mode (`web/src/app.css`) plus the Google Sans
 Only truly custom pieces are hand-styled (the dense event log and the audio element), and even
 those use the M3 design tokens.
 
-The Briefs view shows the full summary, plays the stored audio, offers **Re-send** to deliver the
-brief to Matrix again (formatted summary + voice), and can **delete** a brief behind an M3
-confirmation dialog.
+The Briefs list shows each brief with colour-coded badges (topic count, source count, audio
+availability). The details view shows the full summary, plays the stored audio, offers
+**Re-send** to deliver the brief to Matrix again (formatted summary + voice), **Generate voice**
+for text-only briefs, and can **delete** a brief behind an M3 confirmation dialog.
 
 ## Topics and scheduled tasks
 
@@ -308,8 +314,9 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 
 Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.*`, `agent.*` (including
 `agent.tool.invoked/succeeded/failed`), `brief.*`, `tts.synthesized`, `message.voice.sent`,
-`hook.received`, `system.*`. Events are persisted in SQLite (`events` table) and read back through
-the webhook via `event.pull` / `event.wait`, which is what makes the Svelte live view resumable.
+`hook.received`, `chat.*` (commands and follow-up Q&A), `system.*`. Events are persisted in SQLite
+(`events` table) and read back through the webhook via `event.pull` / `event.wait`, which is what
+makes the Svelte live view resumable.
 
 Known topics are typed in `src/core/events/AppEvents.ts`. Arbitrary topics (e.g. inbound hooks)
 are supported.

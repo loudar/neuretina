@@ -53,7 +53,10 @@
 
 <div class="app stack">
   <div class="toolbar">
-    <h2>Briefing Engine</h2>
+    <div>
+      <h2>Briefing Engine</h2>
+      <small class="muted">UI build {new Date(__BUILD_STAMP__).toLocaleString()}</small>
+    </div>
     <div class="chips">
       <Chip variant="assist" icon={eventStream.connected ? iconCheck : iconSync}>
         Events {eventStream.connected ? "live" : "reconnecting"}
