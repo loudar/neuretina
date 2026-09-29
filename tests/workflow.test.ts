@@ -239,7 +239,7 @@ describe("BriefingWorkflow", () => {
     expect(events.map((event) => event.topic)).not.toContain("brief.generated");
     expect(events.map((event) => event.topic)).not.toContain("message.voice.sent");
 
-    const researched = events.find((event) => event.topic === "brief.topic.researched");
+    const researched = events.find((event) => event.topic === "brief.research.completed");
     expect(researched?.payload).toMatchObject({ found: false });
   });
 });

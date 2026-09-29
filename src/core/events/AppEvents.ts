@@ -55,12 +55,12 @@ export interface AppEvents {
   "agent.failed": { agent: string; correlationId: string; error: string };
 
   "brief.research.started": { correlationId: string; topics: string[] };
-  "brief.topic.researched": {
+  "brief.research.completed": {
     correlationId: string;
-    topic: string;
+    topics: string[];
     sources: number;
     found: boolean;
-    notes: string;
+    queries: string[];
   };
   "brief.generated": {
     correlationId: string;

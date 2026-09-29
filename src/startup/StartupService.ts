@@ -169,6 +169,11 @@ export class StartupService {
   ): Promise<StartupServiceResult["announce"]> {
     const { config, bus, messaging } = this.deps;
 
+    if (!config.startup.announce) {
+      this.logger.info("startup announcement disabled (set STARTUP_ANNOUNCE=true to enable)");
+      return { status: "skipped", detail: "STARTUP_ANNOUNCE is disabled" };
+    }
+
     if (!configStatus(config).matrix) {
       this.logger.info("startup announcement skipped (Matrix not configured)");
       return { status: "skipped", detail: "Matrix not configured" };

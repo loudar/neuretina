@@ -10,6 +10,8 @@ export interface AppConfig {
   logLevel: LogLevel;
   startup: {
     enabled: boolean;
+    /** Send the validation summary to Matrix on boot (off by default). */
+    announce: boolean;
   };
   defaults: {
     briefCron: string;
@@ -93,6 +95,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     logLevel: str(env, "LOG_LEVEL", "info") as LogLevel,
     startup: {
       enabled: bool(env, "STARTUP_CHECK", true),
+      announce: bool(env, "STARTUP_ANNOUNCE", false),
     },
     defaults: {
       briefCron: str(env, "DEFAULT_BRIEF_CRON", "0 7 * * *")!,

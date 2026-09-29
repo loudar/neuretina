@@ -40,10 +40,15 @@ interface BriefRow {
   markdown: string;
   narration: string;
   sources: string;
-  audio: Uint8Array | null;
+  has_audio: number;
+  audio?: Uint8Array | null;
   audio_mime: string | null;
   audio_duration_ms: number | null;
 }
+
+/** Omits the (potentially large) audio blob; has_audio is computed by SQL. */
+const LIST_COLUMNS =
+  "id, created_at, correlation_id, topics, markdown, narration, sources, audio_mime, audio_duration_ms, (audio IS NOT NULL) AS has_audio";
 
 export class BriefRepository {
   constructor(private readonly db: SqliteDatabase) {}
@@ -88,7 +93,11 @@ export class BriefRepository {
 
   get(id: string, includeAudio = false): BriefWithAudio {
     const row = this.db.raw
-      .query<BriefRow, [string]>("SELECT * FROM briefs WHERE id = ?")
+      .query<BriefRow, [string]>(
+        includeAudio
+          ? "SELECT *, (audio IS NOT NULL) AS has_audio FROM briefs WHERE id = ?"
+          : `SELECT ${LIST_COLUMNS} FROM briefs WHERE id = ?`,
+      )
       .get(id);
     if (!row) throw new NotFoundError(`Brief ${id} not found`);
     return toBrief(row, includeAudio);
@@ -106,14 +115,30 @@ export class BriefRepository {
 
   list(limit = 50): Brief[] {
     const rows = this.db.raw
-      .query<BriefRow, [number]>("SELECT * FROM briefs ORDER BY created_at DESC LIMIT ?")
+      .query<BriefRow, [number]>(
+        `SELECT ${LIST_COLUMNS} FROM briefs ORDER BY created_at DESC LIMIT ?`,
+      )
       .all(limit);
+    return rows.map((row) => toBrief(row, false));
+  }
+
+  /** Searches earlier briefs (markdown + topics); without a query returns the latest. */
+  search(query: string | undefined, limit = 3): Brief[] {
+    const trimmed = query?.trim();
+    if (!trimmed) return this.list(limit);
+
+    const like = `%${trimmed}%`;
+    const rows = this.db.raw
+      .query<BriefRow, [string, string, number]>(
+        `SELECT ${LIST_COLUMNS} FROM briefs WHERE markdown LIKE ? OR topics LIKE ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(like, like, limit);
     return rows.map((row) => toBrief(row, false));
   }
 
   latest(): Brief | null {
     const row = this.db.raw
-      .query<BriefRow, []>("SELECT * FROM briefs ORDER BY created_at DESC LIMIT 1")
+      .query<BriefRow, []>(`SELECT ${LIST_COLUMNS} FROM briefs ORDER BY created_at DESC LIMIT 1`)
       .get();
     return row ? toBrief(row, false) : null;
   }
@@ -130,7 +155,7 @@ function toBrief(row: BriefRow, includeAudio: boolean): BriefWithAudio {
     sources: JSON.parse(row.sources) as BriefSource[],
     audioMime: row.audio_mime ?? undefined,
     audioDurationMs: row.audio_duration_ms ?? undefined,
-    hasAudio: row.audio !== null,
+    hasAudio: row.has_audio === 1 || Boolean(row.audio),
   };
   if (includeAudio && row.audio) brief.audio = row.audio;
   return brief;

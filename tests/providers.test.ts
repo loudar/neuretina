@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
-import { extractJson, stripMarkdown, sanitizeNarration } from "../src/workflows/BriefingWorkflow.ts";
+import { extractJson, stripMarkdown, sanitizeNarration, parseResearchOutcome } from "../src/workflows/BriefingWorkflow.ts";
 
 const fetchSpy = spyOn(globalThis, "fetch");
 
@@ -138,5 +138,26 @@ describe("LLM output parsing", () => {
   test("narration sanitizer leaves clean narration untouched", () => {
     const text = "Rust is quiet today. AI regulation is debated. Worth looking up: the new rules.";
     expect(sanitizeNarration(text)).toBe(text);
+  });
+
+  test("parses the research verdict including missing topics", () => {
+    const outcome = parseResearchOutcome(
+      JSON.stringify({
+        found: true,
+        notes: "notes here",
+        missingTopics: [" quantum computing ", 42, ""],
+      }),
+    );
+
+    expect(outcome.found).toBe(true);
+    expect(outcome.notes).toBe("notes here");
+    expect(outcome.missingTopics).toEqual(["quantum computing"]);
+  });
+
+  test("research verdict falls back to prose as found", () => {
+    const outcome = parseResearchOutcome("Just some notes without JSON.");
+    expect(outcome.found).toBe(true);
+    expect(outcome.notes).toContain("Just some notes");
+    expect(outcome.missingTopics).toEqual([]);
   });
 });

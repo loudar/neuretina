@@ -98,4 +98,25 @@ describe("BriefRepository", () => {
     expect(repo.latest()?.id).toBe(brief.id);
     expect(repo.list()).toHaveLength(1);
   });
+
+  test("search matches markdown and topics, and returns latest without a query", () => {
+    const repo = new BriefRepository(db());
+    const rust = repo.create({
+      topics: ["Rust"],
+      markdown: "# Rust\nOwnership news",
+      narration: "n",
+      sources: [],
+    });
+    const ai = repo.create({
+      topics: ["AI regulation"],
+      markdown: "# AI\nNew rules coming",
+      narration: "n",
+      sources: [],
+    });
+
+    expect(repo.search("Ownership").map((brief) => brief.id)).toEqual([rust.id]);
+    expect(repo.search("regulation").map((brief) => brief.id)).toEqual([ai.id]);
+    expect(repo.search(undefined, 1)[0]?.id).toBe(ai.id);
+    expect(repo.search(undefined, 10)).toHaveLength(2);
+  });
 });

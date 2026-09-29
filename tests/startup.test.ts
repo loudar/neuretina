@@ -127,7 +127,7 @@ function buildService(overrides: {
   const bus = overrides.bus ?? setupBus();
   const messaging = overrides.messaging ?? new StubMessaging();
   const service = new StartupService({
-    config: overrides.config ?? testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true" }),
+    config: overrides.config ?? testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
     bus,
     logger: log,
     webSearch: stubSearch("perplexity", "web", [{ title: "t", url: "https://example.com", snippet: "s", source: "example.com" }]),
@@ -209,6 +209,20 @@ describe("StartupService", () => {
     expect((messaging as StubMessaging).sent).toHaveLength(0);
   });
 
+  test("does not announce by default even when Matrix is configured", async () => {
+    okMockFetch();
+    const { service, messaging } = buildService({
+      config: testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true" }),
+    });
+
+    const result = await service.run();
+
+    expect(result.report.ok).toBe(true);
+    expect(result.announce.status).toBe("skipped");
+    expect(result.announce.detail).toContain("STARTUP_ANNOUNCE");
+    expect((messaging as StubMessaging).sent).toHaveLength(0);
+  });
+
   test("captures announcement failures without crashing", async () => {
     okMockFetch();
     const failingMessaging: MessagingProvider = {
@@ -238,7 +252,7 @@ describe("kernel startup validation", () => {
     const messaging = new StubMessaging();
 
     const kernel = await createKernel({
-      config: testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true" }),
+      config: testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
       logger: log,
       webSearch: stubSearch("perplexity", "web"),
       socialSearch: stubSearch("bluesky", "social"),

@@ -272,7 +272,8 @@ Built-in message types: `config.get`, `topic.list/create/delete`, `job.list/crea
 ## Startup validation
 
 On boot (controlled by `STARTUP_CHECK`, default `true`) the engine validates every configured
-integration and sends the result as a **startup message to the Matrix room**:
+integration. The results are logged and shown in the activity feed; with `STARTUP_ANNOUNCE=true`
+(default **off**) a summary is also sent as a text message to the Matrix room:
 
 - `llm` — `GET /models` on the LLM endpoint (no tokens spent)
 - `perplexity` — one `search_type: "fast"` probe query
@@ -281,9 +282,8 @@ integration and sends the result as a **startup message to the Matrix room**:
 - `web-search` — one result through the configured search provider
 - `matrix` — active pre-flight: resolves credentials (login if needed), `whoami`, and confirms
   the bot is **joined to the target room**
-- then it announces the summary to the room (unless Matrix is unconfigured)
+- unconfigured integrations are reported as `skipped` (not failures); each check has a 20s timeout
 
-Unconfigured integrations are reported as `skipped` (not failures); each check has a 20s timeout.
 Every check and the summary are published as events (`system.check.completed`,
 `system.validation.completed`, `system.startup.announced` / `system.startup.announce_failed`), so
 they show up in the Live events view. A failed Matrix announce does not crash the boot.
