@@ -9,6 +9,7 @@
     "build:web": "vite build web",
     "start": "bun src/index.ts",
     "typecheck": "tsc --noEmit",
+    "check:llm": "bun scripts/check-llm.ts",
     "test": "bun test"
   },
   "dependencies": {

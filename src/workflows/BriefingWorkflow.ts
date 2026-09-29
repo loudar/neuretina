@@ -269,6 +269,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       ],
       responseFormat: "json",
       temperature: 0.3,
+      sessionId: context.correlationId,
     });
 
     const parsed = extractJson<{ markdown?: unknown; narration?: unknown }>(completion.text);

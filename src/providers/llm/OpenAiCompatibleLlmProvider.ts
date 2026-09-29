@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
+import { APP_USER_AGENT } from "../../version.ts";
 import type {
   LlmCompletionRequest,
   LlmCompletionResult,
@@ -14,11 +15,15 @@ export interface OpenAiCompatibleLlmOptions {
   defaultModel: string;
   name?: string;
   timeoutMs?: number;
+  sessionId?: string;
+  userAgent?: string;
 }
 
 export class OpenAiCompatibleLlmProvider implements LlmProvider {
   readonly name: string;
   readonly defaultModel: string;
+  readonly sessionId: string;
+  readonly userAgent: string;
 
   private readonly apiKey?: string;
   private readonly client: OpenAI | null;
@@ -27,6 +32,8 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
     this.name = options.name ?? "openai-compatible";
     this.defaultModel = options.defaultModel;
     this.apiKey = options.apiKey;
+    this.sessionId = options.sessionId ?? crypto.randomUUID();
+    this.userAgent = options.userAgent ?? APP_USER_AGENT;
     this.client = options.apiKey
       ? new OpenAI({
           apiKey: options.apiKey,
@@ -48,27 +55,35 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
     }
 
     try {
-      const completion = await this.client.chat.completions.create({
-        model: request.model ?? this.defaultModel,
-        messages: request.messages.map(toOpenAiMessage),
-        ...(request.tools && request.tools.length > 0
-          ? {
-              tools: request.tools.map((tool) => ({
-                type: "function" as const,
-                function: {
-                  name: tool.name,
-                  description: tool.description,
-                  parameters: tool.parameters,
-                },
-              })),
-            }
-          : {}),
-        ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
-        ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
-        ...(request.responseFormat === "json"
-          ? { response_format: { type: "json_object" as const } }
-          : {}),
-      });
+      const completion = await this.client.chat.completions.create(
+        {
+          model: request.model ?? this.defaultModel,
+          messages: request.messages.map(toOpenAiMessage),
+          ...(request.tools && request.tools.length > 0
+            ? {
+                tools: request.tools.map((tool) => ({
+                  type: "function" as const,
+                  function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                  },
+                })),
+              }
+            : {}),
+          ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
+          ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
+          ...(request.responseFormat === "json"
+            ? { response_format: { type: "json_object" as const } }
+            : {}),
+        },
+        {
+          headers: {
+            "x-opencode-session": request.sessionId ?? this.sessionId,
+            "user-agent": this.userAgent,
+          },
+        },
+      );
 
       const choice = completion.choices[0];
       const message = choice?.message;

@@ -6,6 +6,7 @@ import type { Logger } from "../core/logger.ts";
 import { StartupValidator } from "../core/startup/StartupValidator.ts";
 import type { CheckOutcome, StartupCheck, StartupReport } from "../core/startup/StartupValidator.ts";
 import { requestJson } from "../infra/http/request.ts";
+import { APP_USER_AGENT } from "../version.ts";
 import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import { isVerifiable } from "../capabilities/messaging/MessagingProvider.ts";
@@ -62,7 +63,11 @@ export class StartupService {
           }
           const url = `${stripTrailingSlash(config.llm.baseUrl)}/models`;
           const response = await requestJson<{ data?: unknown[] }>("startup", url, {
-            headers: { Authorization: `Bearer ${config.llm.apiKey}` },
+            headers: {
+              Authorization: `Bearer ${config.llm.apiKey}`,
+              "x-opencode-session": config.llm.sessionId ?? "briefing-engine-startup",
+              "user-agent": APP_USER_AGENT,
+            },
           });
           const models = Array.isArray(response.data) ? response.data.length : undefined;
           return {

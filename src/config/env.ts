@@ -21,6 +21,7 @@ export interface AppConfig {
     apiKey?: string;
     baseUrl: string;
     model: string;
+    sessionId?: string;
   };
   perplexity: {
     apiKey?: string;
@@ -103,6 +104,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       apiKey: str(env, "OPENCODE_API_KEY"),
       baseUrl: str(env, "LLM_BASE_URL", "https://opencode.ai/zen/go/v1")!,
       model: str(env, "LLM_MODEL", "deepseek-v4-flash")!,
+      sessionId: str(env, "LLM_SESSION_ID"),
     },
     perplexity: {
       apiKey: str(env, "KEY_PERPLEXITY"),

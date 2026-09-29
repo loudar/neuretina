@@ -1,5 +1,3 @@
-import { eventStream } from "./events.svelte";
-
 export interface Topic {
   id: string;
   name: string;
@@ -150,3 +148,4 @@ export const commands = {
       send<{ started: boolean }>("workflow.run", { id, input }),
   },
 };
+

@@ -103,6 +103,7 @@ export class Agent {
           })),
           model: this.model,
           temperature: this.temperature,
+          sessionId: correlationId,
         });
 
         if (completion.toolCalls.length === 0) {

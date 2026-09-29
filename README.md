@@ -70,6 +70,11 @@ bun test
 - Subscribe to Go at https://opencode.ai/auth and copy the API key → `OPENCODE_API_KEY`.
 - Defaults: `LLM_BASE_URL=https://opencode.ai/zen/go/v1`, `LLM_MODEL=deepseek-v4-flash`
   (OpenAI-compatible `/chat/completions`).
+- OpenCode Go requires a client user agent and a stable `x-opencode-session` id per conversation.
+  The engine sends both automatically: the session id is the id of the workflow run (agent tool
+  loop and compiler share one conversation), falling back to `LLM_SESSION_ID` if set, then to a
+  per-process uuid. Pin `LLM_SESSION_ID` if you want one routing/cache session across runs.
+- `bun run check:llm` sends one tiny completion to verify the key/endpoint end-to-end.
 
 ### Perplexity (web search)
 

@@ -73,6 +73,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       baseUrl: config.llm.baseUrl,
       defaultModel: config.llm.model,
       name: "opencode-go",
+      sessionId: config.llm.sessionId,
     });
 
   const webSearch =

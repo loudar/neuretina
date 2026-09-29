@@ -26,6 +26,7 @@ export interface LlmCompletionRequest {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: "text" | "json";
+  sessionId?: string;
 }
 
 export interface LlmUsage {
