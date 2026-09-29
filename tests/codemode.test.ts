@@ -169,6 +169,63 @@ describe("CodeModeTool", () => {
     ).rejects.toThrow(/timed out/);
   });
 
+  test("does not count tool execution time against the idle timeout", async () => {
+    const slow = stubTool({
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        return { provider: "stub", results: [] };
+      },
+    });
+    const tool = new CodeModeTool({
+      tools: [slow],
+      idleTimeoutMs: 300,
+      timeoutMs: 5000,
+    });
+
+    const result = await tool.execute(
+      { code: `async () => { await lookup({ query: "slow" }); return "done"; }` },
+      toolContext(),
+    );
+
+    expect(result.result).toBe("done");
+  });
+
+  test("stalls a program that stops making progress", async () => {
+    const tool = new CodeModeTool({
+      tools: [stubTool()],
+      idleTimeoutMs: 300,
+      timeoutMs: 5000,
+    });
+
+    await expect(
+      tool.execute(
+        { code: `async () => { await new Promise((resolve) => setTimeout(resolve, 5000)); }` },
+        toolContext(),
+      ),
+    ).rejects.toThrow(/stalled/);
+  });
+
+  test("caps a program that keeps making tool calls forever", async () => {
+    const tool = new CodeModeTool({
+      tools: [stubTool()],
+      timeoutMs: 800,
+      idleTimeoutMs: 5000,
+    });
+
+    await expect(
+      tool.execute(
+        {
+          code: `async () => {
+            while (true) {
+              try { await lookup({ query: "x" }); } catch {}
+            }
+          }`,
+        },
+        toolContext(),
+      ),
+    ).rejects.toThrow(/timed out after 800ms/);
+  });
+
   test("requires code", async () => {
     const tool = new CodeModeTool({ tools: [stubTool()] });
     await expect(tool.execute({}, toolContext())).rejects.toThrow("`code` is required");

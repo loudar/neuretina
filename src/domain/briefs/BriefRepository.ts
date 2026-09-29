@@ -1,6 +1,6 @@
-import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import type { SearchMedia } from "../../capabilities/search/SearchProvider.ts";
 import { NotFoundError } from "../../core/errors.ts";
+import type { Artifact, ArtifactRepository } from "../artifacts/ArtifactRepository.ts";
 
 export interface BriefSource {
   title: string;
@@ -12,14 +12,24 @@ export interface BriefSource {
   media?: SearchMedia[];
 }
 
+/**
+ * A brief as stored: a typed view over the generic artifacts table. The
+ * brief itself is a `brief` artifact (markdown content, topics/narration/
+ * sources in metadata); its audio is a separate `audio` artifact referencing
+ * the brief as parent and referenced back through `audioArtifactId`.
+ */
 export interface Brief {
   id: string;
+  /** Id of the underlying artifact (the brief's canonical reference). */
+  artifactId: string;
   createdAt: number;
   correlationId?: string;
+  workflow?: string;
   topics: string[];
   markdown: string;
   narration: string;
   sources: BriefSource[];
+  audioArtifactId?: string;
   audioMime?: string;
   audioDurationMs?: number;
   hasAudio: boolean;
@@ -31,143 +41,156 @@ export interface BriefWithAudio extends Brief {
 
 export interface CreateBriefInput {
   correlationId?: string;
+  workflow?: string;
   topics: string[];
   markdown: string;
   narration: string;
   sources: BriefSource[];
 }
 
-interface BriefRow {
-  id: string;
-  created_at: number;
-  correlation_id: string | null;
-  topics: string;
-  markdown: string;
-  narration: string;
-  sources: string;
-  has_audio: number;
-  audio?: Uint8Array | null;
-  audio_mime: string | null;
-  audio_duration_ms: number | null;
-}
-
-/** Omits the (potentially large) audio blob; has_audio is computed by SQL. */
-const LIST_COLUMNS =
-  "id, created_at, correlation_id, topics, markdown, narration, sources, audio_mime, audio_duration_ms, (audio IS NOT NULL) AS has_audio";
+const BRIEF_KIND = "brief";
+const AUDIO_KIND = "audio";
+const MARKDOWN_TYPE = "text/markdown";
 
 export class BriefRepository {
-  constructor(private readonly db: SqliteDatabase) {}
+  constructor(private readonly artifacts: ArtifactRepository) {}
 
   create(input: CreateBriefInput): Brief {
-    const id = crypto.randomUUID();
-    const createdAt = Date.now();
-
-    this.db.raw
-      .query(
-        `INSERT INTO briefs (id, created_at, correlation_id, topics, markdown, narration, sources)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        createdAt,
-        input.correlationId ?? null,
-        JSON.stringify(input.topics),
-        input.markdown,
-        input.narration,
-        JSON.stringify(input.sources),
-      );
-
-    return {
-      id,
-      createdAt,
+    const artifact = this.artifacts.create({
+      kind: BRIEF_KIND,
+      name: input.topics.join(", ") || undefined,
+      contentType: MARKDOWN_TYPE,
+      content: input.markdown,
+      metadata: {
+        topics: input.topics,
+        narration: input.narration,
+        sources: input.sources,
+      },
+      workflow: input.workflow,
       correlationId: input.correlationId,
-      topics: input.topics,
-      markdown: input.markdown,
-      narration: input.narration,
-      sources: input.sources,
-      hasAudio: false,
-    };
+    });
+    return toBrief(artifact);
   }
 
-  attachAudio(id: string, audio: Uint8Array, mimeType: string, durationMs?: number): void {
-    const result = this.db.raw
-      .query("UPDATE briefs SET audio = ?, audio_mime = ?, audio_duration_ms = ? WHERE id = ?")
-      .run(audio, mimeType, durationMs ?? null, id);
-    if (result.changes === 0) throw new NotFoundError(`Brief ${id} not found`);
-  }
+  /**
+   * Stores the brief's speech as a generic audio artifact referencing the
+   * brief, and points the brief back at it. Returns the audio artifact id.
+   */
+  attachAudio(id: string, audio: Uint8Array, mimeType: string, durationMs?: number): string {
+    const brief = this.loadBriefArtifact(id);
+    const existing = stringField(brief.metadata, "audioArtifactId");
+    const audioDuration = durationMs !== undefined ? { durationMs } : {};
+    const briefDuration = durationMs !== undefined ? { audioDurationMs: durationMs } : {};
 
-  remove(id: string): Brief {
-    const brief = this.get(id);
-    this.db.raw.query("DELETE FROM briefs WHERE id = ?").run(id);
-    return brief;
+    if (existing) {
+      this.artifacts.replaceData(existing, audio, mimeType);
+      this.artifacts.updateMetadata(existing, { briefId: id, mime: mimeType, ...audioDuration });
+      this.artifacts.updateMetadata(id, { audioMime: mimeType, ...briefDuration });
+      return existing;
+    }
+
+    const created = this.artifacts.create({
+      kind: AUDIO_KIND,
+      name: brief.name ? `${brief.name} (audio)` : "brief audio",
+      contentType: mimeType,
+      data: audio,
+      parentId: id,
+      workflow: brief.workflow,
+      correlationId: brief.correlationId,
+      metadata: { briefId: id, ...audioDuration },
+    });
+    this.artifacts.updateMetadata(id, {
+      audioArtifactId: created.id,
+      audioMime: mimeType,
+      ...briefDuration,
+    });
+    return created.id;
   }
 
   get(id: string, includeAudio = false): BriefWithAudio {
-    const row = this.db.raw
-      .query<BriefRow, [string]>(
-        includeAudio
-          ? "SELECT *, (audio IS NOT NULL) AS has_audio FROM briefs WHERE id = ?"
-          : `SELECT ${LIST_COLUMNS} FROM briefs WHERE id = ?`,
-      )
-      .get(id);
-    if (!row) throw new NotFoundError(`Brief ${id} not found`);
-    return toBrief(row, includeAudio);
+    const brief: BriefWithAudio = toBrief(this.loadBriefArtifact(id));
+    if (includeAudio && brief.audioArtifactId) {
+      const audio = this.artifacts.get(brief.audioArtifactId, { includeData: true });
+      if (audio.data) brief.audio = audio.data;
+    }
+    return brief;
   }
 
   getAudio(id: string): { audio: Uint8Array; mimeType: string } | null {
-    const row = this.db.raw
-      .query<Pick<BriefRow, "audio" | "audio_mime">, [string]>(
-        "SELECT audio, audio_mime FROM briefs WHERE id = ?",
-      )
-      .get(id);
-    if (!row?.audio) return null;
-    return { audio: row.audio, mimeType: row.audio_mime ?? "application/octet-stream" };
+    let artifact: Artifact;
+    try {
+      artifact = this.artifacts.get(id);
+    } catch {
+      return null;
+    }
+    if (artifact.kind !== BRIEF_KIND) return null;
+
+    const audioArtifactId = stringField(artifact.metadata, "audioArtifactId");
+    if (!audioArtifactId) return null;
+
+    const audio = this.artifacts.get(audioArtifactId, { includeData: true });
+    if (!audio.data) return null;
+    return { audio: audio.data, mimeType: audio.contentType };
   }
 
   list(limit = 50): Brief[] {
-    const rows = this.db.raw
-      .query<BriefRow, [number]>(
-        `SELECT ${LIST_COLUMNS} FROM briefs ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(limit);
-    return rows.map((row) => toBrief(row, false));
+    return this.artifacts.list({ kind: BRIEF_KIND, limit }).map(toBrief);
   }
 
   /** Searches earlier briefs (markdown + topics); without a query returns the latest. */
   search(query: string | undefined, limit = 3): Brief[] {
-    const trimmed = query?.trim();
-    if (!trimmed) return this.list(limit);
-
-    const like = `%${trimmed}%`;
-    const rows = this.db.raw
-      .query<BriefRow, [string, string, number]>(
-        `SELECT ${LIST_COLUMNS} FROM briefs WHERE markdown LIKE ? OR topics LIKE ? ORDER BY created_at DESC LIMIT ?`,
-      )
-      .all(like, like, limit);
-    return rows.map((row) => toBrief(row, false));
+    return this.artifacts.search(query, { kind: BRIEF_KIND, limit }).map(toBrief);
   }
 
   latest(): Brief | null {
-    const row = this.db.raw
-      .query<BriefRow, []>(`SELECT ${LIST_COLUMNS} FROM briefs ORDER BY created_at DESC LIMIT 1`)
-      .get();
-    return row ? toBrief(row, false) : null;
+    return this.list(1)[0] ?? null;
+  }
+
+  remove(id: string): Brief {
+    const brief = toBrief(this.loadBriefArtifact(id));
+    this.artifacts.remove(id);
+    return brief;
+  }
+
+  private loadBriefArtifact(id: string): Artifact {
+    const artifact = this.artifacts.get(id);
+    if (artifact.kind !== BRIEF_KIND) throw new NotFoundError(`Brief ${id} not found`);
+    return artifact;
   }
 }
 
-function toBrief(row: BriefRow, includeAudio: boolean): BriefWithAudio {
-  const brief: BriefWithAudio = {
-    id: row.id,
-    createdAt: row.created_at,
-    correlationId: row.correlation_id ?? undefined,
-    topics: JSON.parse(row.topics) as string[],
-    markdown: row.markdown,
-    narration: row.narration,
-    sources: JSON.parse(row.sources) as BriefSource[],
-    audioMime: row.audio_mime ?? undefined,
-    audioDurationMs: row.audio_duration_ms ?? undefined,
-    hasAudio: row.has_audio === 1 || Boolean(row.audio),
+function toBrief(artifact: Artifact): Brief {
+  const audioArtifactId = stringField(artifact.metadata, "audioArtifactId");
+  return {
+    id: artifact.id,
+    artifactId: artifact.id,
+    createdAt: artifact.createdAt,
+    correlationId: artifact.correlationId,
+    workflow: artifact.workflow,
+    topics: stringArray(artifact.metadata.topics),
+    markdown: artifact.content ?? "",
+    narration: stringField(artifact.metadata, "narration") ?? "",
+    sources: Array.isArray(artifact.metadata.sources)
+      ? (artifact.metadata.sources as BriefSource[])
+      : [],
+    audioArtifactId,
+    audioMime: stringField(artifact.metadata, "audioMime"),
+    audioDurationMs: numberField(artifact.metadata, "audioDurationMs"),
+    hasAudio: Boolean(audioArtifactId),
   };
-  if (includeAudio && row.audio) brief.audio = row.audio;
-  return brief;
+}
+
+function stringField(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function numberField(metadata: Record<string, unknown>, key: string): number | undefined {
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }

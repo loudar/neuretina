@@ -55,6 +55,15 @@ export interface AppEvents {
   };
   "agent.failed": { agent: string; correlationId: string; error: string };
 
+  "artifact.created": {
+    artifactId: string;
+    kind: string;
+    workflow?: string;
+    parentId?: string;
+    correlationId?: string;
+  };
+  "artifact.deleted": { artifactId: string; kind: string };
+
   "brief.research.started": { correlationId: string; topics: string[] };
   "brief.research.completed": {
     correlationId: string;
@@ -67,6 +76,7 @@ export interface AppEvents {
   "brief.generated": {
     correlationId: string;
     briefId: string;
+    artifactId: string;
     topics: string[];
     sources: number;
     characters: number;
@@ -82,6 +92,8 @@ export interface AppEvents {
   "tts.synthesized": {
     correlationId: string;
     briefId: string;
+    artifactId?: string;
+    audioArtifactId?: string;
     characters: number;
     bytes: number;
     durationMs: number;

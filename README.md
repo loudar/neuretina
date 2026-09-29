@@ -33,7 +33,7 @@ scheduler (Bun.cron, jobs in SQLite)
 | Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, logger, errors |
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
 | Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, ElevenLabs, Matrix) |
-| Domain | `src/domain` | SQLite repositories: topics, briefs, scheduled jobs |
+| Domain | `src/domain` | SQLite repositories: generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` orchestrating research → compile → TTS → delivery |
 | Command handlers | `src/commands` | application message handlers (topics, jobs, briefs, workflows) |
@@ -55,13 +55,40 @@ findings enter the model context. This is the pattern behind Cloudflare's Code M
 paper: it removes the per-search model round-trip (and the intermediate results) that dominate token
 and latency cost.
 
-Guardrails: a wall-clock timeout per program, a tool-call budget (12 per program, plus the agent's
-own), clipped result and log sizes, and a screen that rejects code touching `fetch`, `process`,
+Guardrails: an inactivity timeout (60 s without progress) plus a hard wall-clock cap (3 min), a
+tool-call budget (12 per program, plus the agent's own), clipped result and log sizes, and a screen
+that rejects code touching `fetch`, `process`,
 `Bun`, dynamic imports, `eval` and friends. The subprocess gets a stripped environment (no API keys)
 and the worker removes network/process globals before evaluating the program. This is a sandbox of
 convenience, not a hardened security boundary — model code still runs with the engine user's file
 permissions, so the screening, budgets and timeout are the real controls. The follow-up Q&A agent
 keeps direct tool calls, since it only needs one or two simple lookups.
+
+### Artifacts (generic outputs)
+
+Every workflow output is stored as a generic **artifact** in one `artifacts` table — text payloads
+(markdown, JSON, plain text) and binary payloads (audio) alike. An artifact carries its `kind`,
+`name`, `content_type`, `metadata` (JSON), the `workflow` and `correlationId` of the run that
+produced it, and an optional `parentId` pointing at the artifact it belongs to. Nothing in the
+storage layer is brief-specific; any future research workflow can persist its outputs the same way.
+
+Briefs are the first typed view over that storage (`src/domain/briefs/BriefRepository.ts`):
+
+- the brief is a `brief` artifact: markdown as `content`, topics/narration/sources in `metadata`;
+- its speech is an `audio` artifact whose `parentId` is the brief, with `briefId`/`durationMs` in
+  metadata;
+- the brief artifact references it back through `metadata.audioArtifactId`, and `brief.get` /
+  `brief.list` expose both ids (`artifactId`, `audioArtifactId`), so everything is traceable
+  end-to-end: workflow run → brief artifact → audio artifact;
+- deleting the brief artifact cascades to its audio.
+
+The generic surface is available over the webhook: `artifact.list` (filter by `kind`, `workflow`,
+`parentId`), `artifact.get`, `artifact.content`, `artifact.data` (base64 data URL) and
+`artifact.delete`. `artifact.created` / `artifact.deleted` events carry the artifact id, kind and
+parent, so the event log records every output of every run. The existing `brief.*` commands are a
+convenience view over the same rows. There is no migration from the old `briefs` table — nothing is
+deployed yet, so pre-artifacts databases are rejected at boot: delete the database file and start
+fresh.
 
 ## Quick start
 
@@ -307,7 +334,8 @@ itself.
 
 Built-in message types: `config.get`, `topic.list/create/update/delete`,
 `job.list/create/update/delete/run`, `workflow.list/run`,
-`brief.list/get/audio/audio.generate/send/delete`, `event.pull/wait`. Adding one is
+`brief.list/get/audio/audio.generate/send/delete`,
+`artifact.list/get/content/data/delete`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
 ## Live activity feed (WebSocket)
@@ -352,10 +380,10 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 ## Events
 
 Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.*`, `agent.*` (including
-`agent.tool.invoked/succeeded/failed`), `brief.*`, `tts.synthesized`, `message.voice.sent`,
-`hook.received`, `chat.*` (commands and follow-up Q&A), `system.*`. Events are persisted in SQLite
-(`events` table) and read back through the webhook via `event.pull` / `event.wait`, which is what
-makes the Svelte live view resumable.
+`agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `brief.*`, `tts.synthesized`,
+`message.voice.sent`, `hook.received`, `chat.*` (commands and follow-up Q&A), `system.*`. Events are
+persisted in SQLite (`events` table) and read back through the webhook via `event.pull` /
+`event.wait`, which is what makes the Svelte live view resumable.
 
 Known topics are typed in `src/core/events/AppEvents.ts`. Arbitrary topics (e.g. inbound hooks)
 are supported.

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { QuestionAnswerer } from "../src/qa/QuestionAnswerer.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
+import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
@@ -57,7 +58,7 @@ describe("QuestionAnswerer", () => {
       llm,
       webSearch,
       socialSearch,
-      briefs: new BriefRepository(db),
+      briefs: new BriefRepository(new ArtifactRepository(db)),
       defaults: { recency: "week", resultsPerProvider: 3 },
     });
 

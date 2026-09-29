@@ -5,10 +5,13 @@ export interface RetryOptions {
   retries?: number;
   retryStatuses?: number[];
   baseDelayMs?: number;
+  /** Abort a single attempt after this long (default 90s). */
+  timeoutMs?: number;
 }
 
 /** Statuses that are safe to retry: transient auth/rate-limit/server errors. */
 const DEFAULT_RETRY_STATUSES = [401, 408, 425, 429, 500, 502, 503, 504];
+const DEFAULT_TIMEOUT_MS = 90_000;
 
 export async function requestRaw(
   provider: string,
@@ -19,13 +22,17 @@ export async function requestRaw(
   const retries = retry.retries ?? 0;
   const retryStatuses = retry.retryStatuses ?? DEFAULT_RETRY_STATUSES;
   const baseDelayMs = retry.baseDelayMs ?? 700;
+  const timeoutMs = retry.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   let lastError: ProviderError | undefined;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     let response: Response;
     try {
-      response = await fetch(url, init);
+      // Providers must never hang a workflow run: each attempt is bounded.
+      const timeout = AbortSignal.timeout(timeoutMs);
+      const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+      response = await fetch(url, { ...init, signal });
     } catch (cause) {
       const error = new ProviderError(provider, `network request failed: ${url}`, { cause });
       if (attempt < retries) {

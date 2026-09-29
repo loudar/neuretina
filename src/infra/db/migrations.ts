@@ -38,25 +38,6 @@ export const migrations: Migration[] = [
   },
   {
     id: 3,
-    name: "briefs",
-    sql: `
-      CREATE TABLE IF NOT EXISTS briefs (
-        id             TEXT PRIMARY KEY,
-        created_at     INTEGER NOT NULL,
-        correlation_id TEXT,
-        topics         TEXT NOT NULL,
-        markdown       TEXT NOT NULL,
-        narration      TEXT NOT NULL,
-        sources        TEXT NOT NULL,
-        audio          BLOB,
-        audio_mime     TEXT,
-        audio_duration_ms INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_briefs_created_at ON briefs (created_at);
-    `,
-  },
-  {
-    id: 4,
     name: "scheduled_jobs",
     sql: `
       CREATE TABLE IF NOT EXISTS scheduled_jobs (
@@ -75,7 +56,7 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: 5,
+    id: 4,
     name: "kv",
     sql: `
       CREATE TABLE IF NOT EXISTS kv (
@@ -86,10 +67,32 @@ export const migrations: Migration[] = [
     `,
   },
   {
-    id: 6,
+    id: 5,
     name: "topic-muted",
     sql: `
       ALTER TABLE topics ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    id: 6,
+    name: "artifacts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id             TEXT PRIMARY KEY,
+        kind           TEXT NOT NULL,
+        name           TEXT,
+        content_type   TEXT NOT NULL,
+        content        TEXT,
+        data           BLOB,
+        metadata       TEXT NOT NULL DEFAULT '{}',
+        parent_id      TEXT,
+        workflow       TEXT,
+        correlation_id TEXT,
+        created_at     INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_artifacts_kind_created ON artifacts (kind, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_parent ON artifacts (parent_id);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_correlation ON artifacts (correlation_id);
     `,
   },
 ];
@@ -102,6 +105,19 @@ export function runMigrations(db: BunDatabaseType): void {
       applied_at INTEGER NOT NULL
     );
   `);
+
+  // The old briefs table predates the artifacts schema. Nothing is deployed
+  // yet, so there is no upgrade path: wipe the database instead of half-migrating.
+  const legacy = db
+    .query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'briefs'",
+    )
+    .get();
+  if (legacy) {
+    throw new Error(
+      "This database predates the artifacts schema. Delete the database file and start fresh.",
+    );
+  }
 
   const applied = new Set(
     db

@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { BriefGetTool } from "../src/agents/tools/BriefGetTool.ts";
 import { BriefSearchTool } from "../src/agents/tools/BriefSearchTool.ts";
+import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 
 function setup(): BriefRepository {
   const db = new SqliteDatabase(":memory:");
-  const briefs = new BriefRepository(db);
+  const briefs = new BriefRepository(new ArtifactRepository(db));
   briefs.create({
     topics: ["Rust"],
     markdown: "Rust 1.90 shipped with async closures.",

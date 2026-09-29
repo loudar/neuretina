@@ -6,8 +6,10 @@ import type { Tool, ToolContext } from "../Tool.ts";
 export interface CodeModeToolOptions {
   /** Tools the sandbox can call; each is exposed as an async function by name. */
   tools: Tool[];
-  /** Wall-clock limit for one program. */
+  /** Absolute wall-clock limit for one program, tool calls included. */
   timeoutMs?: number;
+  /** Killed when the program produces no activity for this long (runaway loops). */
+  idleTimeoutMs?: number;
   /** Upper bound on tool invocations inside one program. */
   maxToolCalls?: number;
   /** The returned value is clipped to this many characters of JSON. */
@@ -97,7 +99,11 @@ export class CodeModeTool implements Tool<CodeModeResult> {
     this.maxResultChars = options.maxResultChars ?? 4000;
     this.maxLogChars = options.maxLogChars ?? 1500;
     this.executor =
-      options.executor ?? createSubprocessExecutor({ timeoutMs: options.timeoutMs });
+      options.executor ??
+      createSubprocessExecutor({
+        timeoutMs: options.timeoutMs,
+        idleTimeoutMs: options.idleTimeoutMs,
+      });
   }
 
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<CodeModeResult> {

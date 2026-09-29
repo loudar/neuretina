@@ -10,6 +10,7 @@ import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
+import type { ArtifactRepository } from "../domain/artifacts/ArtifactRepository.ts";
 import type { BriefRepository } from "../domain/briefs/BriefRepository.ts";
 import type { CreateJobInput, JobRepository, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
@@ -18,6 +19,7 @@ import type { TopicRepository } from "../domain/topics/TopicRepository.ts";
 export interface CommandDeps {
   config: AppConfig;
   bus: EventBus;
+  artifacts: ArtifactRepository;
   topics: TopicRepository;
   briefs: BriefRepository;
   jobs: JobRepository;
@@ -29,7 +31,7 @@ export interface CommandDeps {
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
+  const { bus, artifacts, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -209,6 +211,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const id = requireString(asRecord(payload), "id");
     const brief = briefs.remove(id);
     bus.publish(
+      "artifact.deleted",
+      { artifactId: brief.artifactId, kind: "brief" },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    bus.publish(
       "brief.deleted",
       { correlationId: context.correlationId, briefId: brief.id },
       { source: "commands", correlationId: context.correlationId },
@@ -229,6 +236,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     let audio = briefs.getAudio(id);
     let durationMs = brief.audioDurationMs;
     let generated = false;
+    let audioArtifactId = brief.audioArtifactId;
 
     if (!audio || regenerate) {
       const status = statuses.begin(`${context.correlationId}:tts`, "Generating voice", {
@@ -238,7 +246,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       try {
         status.update("Waiting for ElevenLabs");
         const speech = await tts.synthesize({ text: brief.narration });
-        briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
+        audioArtifactId = briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
         audio = { audio: speech.data, mimeType: speech.mimeType };
         durationMs = speech.durationMs;
         generated = true;
@@ -248,10 +256,22 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
           })`,
         );
         bus.publish(
+          "artifact.created",
+          {
+            artifactId: audioArtifactId,
+            kind: "audio",
+            parentId: brief.artifactId,
+            correlationId: context.correlationId,
+          },
+          { source: "commands", correlationId: context.correlationId },
+        );
+        bus.publish(
           "tts.synthesized",
           {
             correlationId: context.correlationId,
             briefId: id,
+            artifactId: brief.artifactId,
+            audioArtifactId,
             characters: brief.narration.length,
             bytes: speech.data.byteLength,
             durationMs: speech.durationMs ?? 0,
@@ -347,6 +367,52 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return { briefId: id, sent };
   });
 
+  router.register("artifact.list", (payload) => {
+    const record = asRecord(payload);
+    return artifacts.list({
+      kind: optionalString(record, "kind"),
+      workflow: optionalString(record, "workflow"),
+      parentId: optionalString(record, "parentId"),
+      limit: typeof record.limit === "number" ? record.limit : undefined,
+    });
+  });
+
+  router.register("artifact.get", (payload) => {
+    return artifacts.get(requireString(asRecord(payload), "id"));
+  });
+
+  router.register("artifact.content", (payload) => {
+    const artifact = artifacts.get(requireString(asRecord(payload), "id"));
+    return {
+      id: artifact.id,
+      kind: artifact.kind,
+      contentType: artifact.contentType,
+      content: artifact.content ?? null,
+    };
+  });
+
+  router.register("artifact.data", (payload) => {
+    const artifact = artifacts.get(requireString(asRecord(payload), "id"), { includeData: true });
+    if (!artifact.data) return null;
+    return {
+      id: artifact.id,
+      kind: artifact.kind,
+      contentType: artifact.contentType,
+      byteSize: artifact.data.byteLength,
+      dataUrl: `data:${artifact.contentType};base64,${Buffer.from(artifact.data).toString("base64")}`,
+    };
+  });
+
+  router.register("artifact.delete", (payload, context) => {
+    const artifact = artifacts.remove(requireString(asRecord(payload), "id"));
+    bus.publish(
+      "artifact.deleted",
+      { artifactId: artifact.id, kind: artifact.kind },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    return { ok: true, artifactId: artifact.id, kind: artifact.kind };
+  });
+
   router.register("event.pull", (payload) => {
     const record = asRecord(payload);
     const since = typeof record.since === "number" ? record.since : 0;
@@ -391,6 +457,10 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "brief.list",
     "brief.get",
     "brief.audio",
+    "artifact.list",
+    "artifact.get",
+    "artifact.content",
+    "artifact.data",
     "event.pull",
     "event.wait",
   ];

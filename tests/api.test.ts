@@ -349,6 +349,53 @@ describe("webhook gateway", () => {
     expect(missing.body.error).toContain("not found");
   });
 
+  test("exposes briefs and their audio as referenced generic artifacts", async () => {
+    const brief = kernel.briefs.create({
+      correlationId: "c-artifact",
+      workflow: "briefing",
+      topics: ["Rust"],
+      markdown: "# Rust\n\nAll quiet.",
+      narration: "Rust is quiet",
+      sources: [],
+    });
+    const audioArtifactId = kernel.briefs.attachAudio(
+      brief.id,
+      new Uint8Array([7, 7]),
+      "audio/ogg",
+      1500,
+    );
+
+    const list = await call<
+      Array<{ id: string; kind: string; workflow?: string; correlationId?: string }>
+    >("artifact.list", { kind: "brief" });
+    const listed = list.find((entry) => entry.id === brief.id);
+    expect(listed?.kind).toBe("brief");
+    expect(listed?.workflow).toBe("briefing");
+    expect(listed?.correlationId).toBe("c-artifact");
+
+    const content = await call<{ content: string | null }>("artifact.content", { id: brief.id });
+    expect(content.content).toContain("All quiet");
+
+    const audio = await call<{ parentId?: string }>("artifact.get", { id: audioArtifactId });
+    expect(audio.parentId).toBe(brief.id);
+
+    const data = await call<{ contentType: string; dataUrl: string } | null>("artifact.data", {
+      id: audioArtifactId,
+    });
+    expect(data?.contentType).toBe("audio/ogg");
+    expect(data?.dataUrl.startsWith("data:audio/ogg;base64,")).toBe(true);
+
+    const deleted = await call<{ ok: boolean; artifactId: string; kind: string }>(
+      "artifact.delete",
+      { id: brief.id },
+    );
+    expect(deleted).toEqual({ ok: true, artifactId: brief.id, kind: "brief" });
+
+    // The audio child artifact is removed with its parent.
+    const gone = await post({ type: "artifact.get", payload: { id: audioArtifactId } });
+    expect(gone.status).toBe(404);
+  });
+
   test("generates voice on demand and sends it to Matrix", async () => {
     const brief = kernel.briefs.create({
       topics: ["Rust"],

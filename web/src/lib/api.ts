@@ -27,15 +27,35 @@ export interface BriefSource {
 
 export interface Brief {
   id: string;
+  /** Id of the underlying generic artifact. */
+  artifactId: string;
   createdAt: number;
   correlationId?: string;
+  workflow?: string;
   topics: string[];
   markdown: string;
   narration: string;
   sources: BriefSource[];
+  audioArtifactId?: string;
   hasAudio: boolean;
   audioMime?: string;
   audioDurationMs?: number;
+}
+
+export interface ArtifactInfo {
+  id: string;
+  kind: string;
+  name?: string;
+  contentType: string;
+  content?: string;
+  metadata: Record<string, unknown>;
+  parentId?: string;
+  workflow?: string;
+  correlationId?: string;
+  createdAt: number;
+  hasContent: boolean;
+  hasData: boolean;
+  byteSize?: number;
 }
 
 export interface BriefAudio {
@@ -177,6 +197,27 @@ export const commands = {
     list: () => send<WorkflowInfo[]>("workflow.list"),
     run: (id: string, input: Record<string, unknown> = {}) =>
       send<{ started: boolean }>("workflow.run", { id, input }),
+  },
+
+  artifacts: {
+    list: (options: { kind?: string; workflow?: string; parentId?: string; limit?: number } = {}) =>
+      send<ArtifactInfo[]>("artifact.list", options),
+    get: (id: string) => send<ArtifactInfo>("artifact.get", { id }),
+    content: (id: string) =>
+      send<{ id: string; kind: string; contentType: string; content: string | null }>(
+        "artifact.content",
+        { id },
+      ),
+    data: (id: string) =>
+      send<{
+        id: string;
+        kind: string;
+        contentType: string;
+        byteSize: number;
+        dataUrl: string;
+      } | null>("artifact.data", { id }),
+    remove: (id: string) =>
+      send<{ ok: boolean; artifactId: string; kind: string }>("artifact.delete", { id }),
   },
 };
 

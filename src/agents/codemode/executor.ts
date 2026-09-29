@@ -8,7 +8,9 @@ import type {
 } from "./types.ts";
 
 export interface SubprocessExecutorOptions {
-  /** Hard wall-clock limit for one program; the process is killed past it. */
+  /** Killed when the program produces no activity for this long (runaway loops). */
+  idleTimeoutMs?: number;
+  /** Absolute wall-clock limit for one program, tool calls included. */
   timeoutMs?: number;
   /** Total sandbox stdout (including tool results) accepted before killing it. */
   maxOutputChars?: number;
@@ -23,14 +25,16 @@ const WORKER_PATH = fileURLToPath(new URL("./worker.ts", import.meta.url));
 export function createSubprocessExecutor(
   options: SubprocessExecutorOptions = {},
 ): CodeModeExecutor {
-  const timeoutMs = options.timeoutMs ?? 30_000;
+  const timeoutMs = options.timeoutMs ?? 180_000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 60_000;
   const maxOutputChars = options.maxOutputChars ?? 512_000;
-  return { run: (job) => runInSubprocess(job, timeoutMs, maxOutputChars) };
+  return { run: (job) => runInSubprocess(job, timeoutMs, idleTimeoutMs, maxOutputChars) };
 }
 
 async function runInSubprocess(
   job: CodeModeJob,
   timeoutMs: number,
+  idleTimeoutMs: number,
   maxOutputChars: number,
 ): Promise<CodeModeOutcome> {
   const child = Bun.spawn({
@@ -46,12 +50,15 @@ async function runInSubprocess(
   let stderrText = "";
   let settled = false;
   let outputChars = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let activeCalls = 0;
 
   return await new Promise<CodeModeOutcome>((resolve, reject) => {
     const finish = (action: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(idleTimer);
       child.kill();
       action();
     };
@@ -60,10 +67,22 @@ async function runInSubprocess(
       finish(() => reject(new Error(`Code execution timed out after ${timeoutMs}ms`)));
     }, timeoutMs);
 
+    // Tool execution is host work, not sandbox work: while a call is in flight
+    // the idle timer stays off, so slow searches/finance lookups never count
+    // as a stall. It only fires when the program itself stops progressing.
+    const resetIdle = () => {
+      if (settled || activeCalls > 0) return;
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        finish(() => reject(new Error(`Code execution stalled (no activity for ${idleTimeoutMs}ms)`)));
+      }, idleTimeoutMs);
+    };
+
     const send = (message: unknown) => {
+      if (settled) return;
       try {
         child.stdin.write(`${JSON.stringify(message)}\n`);
-        void child.stdin.flush();
+        void Promise.resolve(child.stdin.flush()).catch(() => undefined);
       } catch {
         // The child is gone; exit handling reports it.
       }
@@ -77,6 +96,7 @@ async function runInSubprocess(
       const tool = job.tools.get(message.name);
       if (!tool) {
         send({ type: "result", id: message.id, error: `Unknown tool "${message.name}"` });
+        resetIdle();
         return;
       }
       if (startedCalls >= job.maxToolCalls) {
@@ -85,9 +105,12 @@ async function runInSubprocess(
           id: message.id,
           error: "Tool budget exhausted. Return what you already have.",
         });
+        resetIdle();
         return;
       }
       startedCalls += 1;
+      activeCalls += 1;
+      clearTimeout(idleTimer);
 
       const agent = job.context.agent ?? "codemode";
       const source = job.context.agent ? `agent:${job.context.agent}` : "codemode";
@@ -105,6 +128,7 @@ async function runInSubprocess(
 
       try {
         const result = await tool.execute(message.args, job.context);
+        if (settled) return;
         const durationMs = Date.now() - started;
         calls.push({ tool: message.name, args: message.args, result, durationMs });
         job.context.bus.publish(
@@ -120,6 +144,7 @@ async function runInSubprocess(
         );
         send({ type: "result", id: message.id, result });
       } catch (error) {
+        if (settled) return;
         const durationMs = Date.now() - started;
         const message2 = errorMessage(error);
         calls.push({ tool: message.name, args: message.args, error: message2, durationMs });
@@ -138,6 +163,9 @@ async function runInSubprocess(
           error: message2,
         });
         send({ type: "result", id: message.id, error: message2 });
+      } finally {
+        activeCalls -= 1;
+        resetIdle();
       }
     };
 
@@ -173,7 +201,7 @@ async function runInSubprocess(
           if (message.type === "call") {
             void handleCall(
               message as unknown as { id: number; name: string; args: Record<string, unknown> },
-            );
+            ).catch(() => undefined);
           } else if (message.type === "done") {
             const logs = Array.isArray(message.logs)
               ? message.logs.filter((item): item is string => typeof item === "string")
@@ -208,6 +236,7 @@ async function runInSubprocess(
     });
 
     send({ type: "job", code: job.code, tools: [...job.tools.keys()] });
+    resetIdle();
   });
 }
 

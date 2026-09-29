@@ -230,6 +230,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     const brief = this.deps.briefs.create({
       correlationId,
+      workflow: this.id,
       topics: topicNames,
       markdown: compiled.markdown,
       narration: compiled.narration,
@@ -237,10 +238,21 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     });
 
     bus.publish(
+      "artifact.created",
+      {
+        artifactId: brief.artifactId,
+        kind: "brief",
+        workflow: this.id,
+        correlationId,
+      },
+      { source: `workflow:${this.id}`, correlationId },
+    );
+    bus.publish(
       "brief.generated",
       {
         correlationId,
         briefId: brief.id,
+        artifactId: brief.artifactId,
         topics: topicNames,
         sources: uniqueSources.length,
         characters: compiled.markdown.length,
@@ -290,14 +302,32 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         return output;
       }
 
-      this.deps.briefs.attachAudio(brief.id, speech.data, speech.mimeType, speech.durationMs);
+      const audioArtifactId = this.deps.briefs.attachAudio(
+        brief.id,
+        speech.data,
+        speech.mimeType,
+        speech.durationMs,
+      );
       output.audioBytes = speech.data.byteLength;
 
+      bus.publish(
+        "artifact.created",
+        {
+          artifactId: audioArtifactId,
+          kind: "audio",
+          workflow: this.id,
+          parentId: brief.artifactId,
+          correlationId,
+        },
+        { source: `workflow:${this.id}`, correlationId },
+      );
       bus.publish(
         "tts.synthesized",
         {
           correlationId,
           briefId: brief.id,
+          artifactId: brief.artifactId,
+          audioArtifactId,
           characters: compiled.narration.length,
           bytes: speech.data.byteLength,
           durationMs: speech.durationMs ?? 0,

@@ -3,10 +3,15 @@ import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
+import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 
 function db(): SqliteDatabase {
   return new SqliteDatabase(":memory:");
+}
+
+function briefsRepo(): BriefRepository {
+  return new BriefRepository(new ArtifactRepository(db()));
 }
 
 describe("KeyValueRepository", () => {
@@ -106,7 +111,7 @@ describe("JobRepository", () => {
 
 describe("BriefRepository", () => {
   test("stores briefs with audio and returns them without the blob by default", () => {
-    const repo = new BriefRepository(db());
+    const repo = briefsRepo();
 
     const brief = repo.create({
       correlationId: "corr-1",
@@ -122,6 +127,8 @@ describe("BriefRepository", () => {
     expect(stored.hasAudio).toBe(true);
     expect(stored.audio).toBeUndefined();
     expect(stored.audioDurationMs).toBe(4200);
+    expect(stored.artifactId).toBe(brief.id);
+    expect(stored.audioArtifactId).toBeTruthy();
 
     const withAudio = repo.get(brief.id, true);
     expect(withAudio.audio).toEqual(new Uint8Array([9, 9, 9]));
@@ -135,7 +142,7 @@ describe("BriefRepository", () => {
   });
 
   test("search matches markdown and topics, and returns latest without a query", () => {
-    const repo = new BriefRepository(db());
+    const repo = briefsRepo();
     const rust = repo.create({
       topics: ["Rust"],
       markdown: "# Rust\nOwnership news",
@@ -156,7 +163,7 @@ describe("BriefRepository", () => {
   });
 
   test("removes briefs and reports missing ones", () => {
-    const repo = new BriefRepository(db());
+    const repo = briefsRepo();
     const brief = repo.create({
       topics: ["Rust"],
       markdown: "# Rust",

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BriefingWorkflow } from "../src/workflows/BriefingWorkflow.ts";
+import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
@@ -36,7 +37,7 @@ function setup(options: SetupOptions = {}) {
   const db = new SqliteDatabase(":memory:");
   const bus = new EventBus(new EventStore(db), log);
   const topics = new TopicRepository(db);
-  const briefs = new BriefRepository(db);
+  const briefs = new BriefRepository(new ArtifactRepository(db));
   let compilerCalls = 0;
 
   const llm = stubLlm((request) => {

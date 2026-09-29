@@ -9,6 +9,7 @@ import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
+import { ArtifactRepository } from "../domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../domain/briefs/BriefRepository.ts";
 import { JobRepository } from "../domain/jobs/JobRepository.ts";
 import { TopicRepository } from "../domain/topics/TopicRepository.ts";
@@ -50,6 +51,7 @@ export interface Kernel {
   db: SqliteDatabase;
   bus: EventBus;
   store: EventStore;
+  artifacts: ArtifactRepository;
   topics: TopicRepository;
   briefs: BriefRepository;
   jobs: JobRepository;
@@ -71,8 +73,9 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const store = new EventStore(db);
   const bus = new EventBus(store, logger.child("events"));
 
+  const artifacts = new ArtifactRepository(db);
   const topics = new TopicRepository(db);
-  const briefs = new BriefRepository(db);
+  const briefs = new BriefRepository(artifacts);
   const jobs = new JobRepository(db);
 
   const llm =
@@ -186,6 +189,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   registerCommands(commands, {
     config,
     bus,
+    artifacts,
     topics,
     briefs,
     jobs,
@@ -290,6 +294,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     db,
     bus,
     store,
+    artifacts,
     topics,
     briefs,
     jobs,
