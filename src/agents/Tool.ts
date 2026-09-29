@@ -5,6 +5,8 @@ export interface ToolContext {
   correlationId: string;
   bus: EventBus;
   logger: Logger;
+  /** Name of the agent invoking the tool, when it comes from an Agent. */
+  agent?: string;
 }
 
 export interface Tool<TResult = unknown> {

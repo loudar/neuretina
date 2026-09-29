@@ -28,8 +28,8 @@ interface SetupOptions {
   researchVerdict?: boolean;
   /** Makes the first compiler call return a draft far over the word budget. */
   longCompilerOutput?: boolean;
-  /** Tools the stub researcher calls, in order, before its verdict. */
-  researchTools?: string[];
+  /** The stub researcher's program calls only the finance lookup. */
+  financeOnly?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -56,11 +56,20 @@ function setup(options: SetupOptions = {}) {
     }
 
     const toolMessages = request.messages.filter((message) => message.role === "tool").length;
-    const sequence = options.researchTools ?? ["perplexity_search", "bluesky_search"];
-    if (toolMessages < sequence.length) {
-      const name = sequence[toolMessages]!;
-      const args = name === "perplexity_finance" ? { question: "NVDA quote" } : { query: "t" };
-      return completion("", [{ id: `call-${toolMessages + 1}`, name, arguments: args }]);
+    if (toolMessages === 0) {
+      const code = options.financeOnly
+        ? `async () => {
+            const finance = await perplexity_finance({ question: "NVDA quote" });
+            return { finance: finance.answer };
+          }`
+        : `async () => {
+            const [web, social] = await Promise.all([
+              perplexity_search({ query: "t" }),
+              bluesky_search({ query: "t" }),
+            ]);
+            return { web: web.results.length, social: social.results.length };
+          }`;
+      return completion("", [{ id: "call-1", name: "run_code", arguments: { code } }]);
     }
     return completion(
       JSON.stringify({
@@ -343,7 +352,7 @@ describe("BriefingWorkflow", () => {
       },
     ];
     const { workflow, topics, briefs, bus, statuses } = setup({
-      researchTools: ["perplexity_finance"],
+      financeOnly: true,
       financeResults,
     });
     topics.add({ name: "Nvidia" });

@@ -11,10 +11,11 @@ event bus that every subsystem publishes to from the ground up.
 ```
 scheduler (Bun.cron, jobs in SQLite)
    └─> workflow run ────────────────────────────────────────────────┐
-        research agent (LLM tool-calling loop)                      │
-          ├─ web_search      → Perplexity Search API                │
-          ├─ finance         → Perplexity Agent API (finance_search)│
-          └─ bluesky_search  → AT Protocol app.bsky.feed.searchPosts│
+        research agent (code mode: writes one program per run)      │
+          └─ run_code ─┬─ web_search      → Perplexity Search API   │
+                       ├─ finance         → Perplexity Agent API    │
+                       ├─ bluesky_search  → AT Protocol searchPosts │
+                       └─ past_briefs     → SQLite brief history    │
         compiler LLM → neutral markdown brief + spoken narration    │
         ElevenLabs   → speech audio (eleven_v4)                     │
         Matrix       → voice message (MSC3245)                      │
@@ -33,7 +34,7 @@ scheduler (Bun.cron, jobs in SQLite)
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
 | Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, ElevenLabs, Matrix) |
 | Domain | `src/domain` | SQLite repositories: topics, briefs, scheduled jobs |
-| Agents | `src/agents` | generic `Agent` tool-calling runtime + `SearchTool` that wraps any `SearchProvider` |
+| Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` orchestrating research → compile → TTS → delivery |
 | Command handlers | `src/commands` | application message handlers (topics, jobs, briefs, workflows) |
 | API | `src/api` | single webhook gateway + static UI (no other endpoints) |
@@ -41,6 +42,26 @@ scheduler (Bun.cron, jobs in SQLite)
 
 Adding a provider means implementing one interface and wiring it in `src/kernel/Kernel.ts`.
 Adding an agent capability means implementing `Tool` and passing it to an `Agent`.
+
+### Code mode (efficient tool use)
+
+The researcher does not call search tools one by one. It gets a single `run_code` tool and writes one
+small JavaScript program per run. The program executes in a sandboxed Bun subprocess where the tools
+are exposed as async functions — `perplexity_search`, `bluesky_search`, `perplexity_finance`,
+`past_briefs` — and reaches the engine's real providers over a stdio bridge. Only the program's
+return value and captured `console.log` output come back to the model, so searches run in parallel
+with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact findings
+enter the model context. This is the pattern behind Cloudflare's Code Mode and the CodeAct paper:
+it removes the per-search model round-trip (and the intermediate results) that dominate token and
+latency cost.
+
+Guardrails: a wall-clock timeout per program, a tool-call budget (12 per program, plus the agent's
+own), clipped result and log sizes, and a screen that rejects code touching `fetch`, `process`,
+`Bun`, dynamic imports, `eval` and friends. The subprocess gets a stripped environment (no API keys)
+and the worker removes network/process globals before evaluating the program. This is a sandbox of
+convenience, not a hardened security boundary — model code still runs with the engine user's file
+permissions, so the screening, budgets and timeout are the real controls. The follow-up Q&A agent
+keeps direct tool calls, since it only needs one or two simple lookups.
 
 ## Quick start
 
@@ -299,7 +320,8 @@ Built-in message types: `config.get`, `topic.list/create/update/delete`,
   `Waiting for <tool>`, `Researching "<topic>"`, `Compiling brief` / `Waiting for the compiler
   model`, `Generating speech` / `Waiting for ElevenLabs`, `Sending voice message` /
   `Waiting for Matrix`, plus job lifecycle entries (`Running job "…"`, finished/failed) and
-  skipped/failed notices.
+  skipped/failed notices. Code-mode runs show `run_code` plus one `agent.tool.*` event for every
+  function the program calls inside the sandbox, so each real search stays visible.
 - Running entries show an animated M3 spinner and are **grouped at the bottom of the list**, so
   parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
   Running entries keep a stable order even while their status text updates repeatedly.

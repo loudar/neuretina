@@ -246,7 +246,7 @@ export class Agent {
     }
 
     try {
-      const result = await tool.execute(args, { correlationId, bus, logger });
+      const result = await tool.execute(args, { correlationId, bus, logger, agent: this.name });
       const durationMs = Date.now() - started;
       const summary = summarizeResult(result);
       status?.done(`Tool ${name} returned (${summary})`);

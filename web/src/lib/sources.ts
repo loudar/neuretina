@@ -1,0 +1,52 @@
+import type { BriefSource } from "./api";
+
+export interface SourceGroup {
+  /** Hostname without a leading www (or "other" for unparseable URLs). */
+  domain: string;
+  sources: BriefSource[];
+  /** Distinct providers in the group, in first-seen order. */
+  providers: string[];
+}
+
+/** Hostname used to group sources; strips a leading www. */
+export function sourceDomain(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return host || "other";
+  } catch {
+    return "other";
+  }
+}
+
+/** Groups sources by domain, keeping the research order of first appearance. */
+export function groupSourcesByDomain(sources: BriefSource[]): SourceGroup[] {
+  const groups = new Map<string, SourceGroup>();
+  for (const source of sources) {
+    const domain = sourceDomain(source.url);
+    let group = groups.get(domain);
+    if (!group) {
+      group = { domain, sources: [], providers: [] };
+      groups.set(domain, group);
+    }
+    group.sources.push(source);
+    if (!group.providers.includes(source.provider)) group.providers.push(source.provider);
+  }
+  return [...groups.values()];
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  perplexity: "Perplexity",
+  bluesky: "Bluesky",
+};
+
+export function providerLabel(provider: string): string {
+  return (
+    PROVIDER_LABELS[provider] ??
+    (provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : provider)
+  );
+}
+
+/** First letter shown in the domain monogram. */
+export function domainInitial(domain: string): string {
+  return (domain.match(/[a-z0-9]/i)?.[0] ?? "?").toUpperCase();
+}
