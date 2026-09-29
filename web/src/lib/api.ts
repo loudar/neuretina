@@ -2,6 +2,7 @@ export interface Topic {
   id: string;
   name: string;
   description?: string;
+  muted: boolean;
   createdAt: number;
 }
 
@@ -117,6 +118,8 @@ export const commands = {
   topics: {
     list: () => send<Topic[]>("topic.list"),
     create: (input: { name: string; description?: string }) => send<Topic>("topic.create", input),
+    update: (id: string, patch: { name?: string; description?: string; muted?: boolean }) =>
+      send<Topic>("topic.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("topic.delete", { id }),
   },
 
@@ -130,8 +133,10 @@ export const commands = {
       input?: Record<string, unknown>;
       enabled?: boolean;
     }) => send<ScheduledJob>("job.create", input),
-    update: (id: string, patch: Partial<Pick<ScheduledJob, "name" | "cron" | "enabled">>) =>
-      send<ScheduledJob>("job.update", { id, ...patch }),
+    update: (
+      id: string,
+      patch: Partial<Pick<ScheduledJob, "name" | "cron" | "enabled" | "input">>,
+    ) => send<ScheduledJob>("job.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("job.delete", { id }),
     run: (id: string) => send<{ started: boolean }>("job.run", { id }),
   },
@@ -140,6 +145,7 @@ export const commands = {
     list: () => send<Brief[]>("brief.list"),
     get: (id: string) => send<Brief>("brief.get", { id }),
     audio: (id: string) => send<BriefAudio | null>("brief.audio", { id }),
+    remove: (id: string) => send<{ ok: boolean; briefId: string }>("brief.delete", { id }),
     send: (id: string) =>
       send<{ briefId: string; sent: Array<{ kind: string; eventId: string }> }>("brief.send", {
         id,

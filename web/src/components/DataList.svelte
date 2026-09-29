@@ -12,8 +12,19 @@
 {#if items.length === 0}
   <p class="muted">{empty}</p>
 {:else}
-  {#each items as item, index (item.id)}
-    {#if index > 0}<Divider />{/if}
-    {@render children(item)}
-  {/each}
+  <div class="list">
+    {#each items as item, index (item.id)}
+      {#if index > 0}<Divider />{/if}
+      {@render children(item)}
+    {/each}
+  </div>
 {/if}
+
+<style>
+  /* Keeps rows flush; the parent stack gap must not stretch the list. */
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+</style>

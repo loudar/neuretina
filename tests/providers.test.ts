@@ -78,6 +78,38 @@ describe("ElevenLabs output formats", () => {
     expect(audio.data).toEqual(new Uint8Array([1, 2, 3]));
     expect(audio.mimeType).toBe("audio/ogg");
   });
+
+  test("sends the configured speed and omits it at the default", async () => {
+    const bodies: string[] = [];
+    mockFetch(async (_input, init) => {
+      bodies.push(String(init?.body));
+      return new Response(new Uint8Array([1]), { status: 200 });
+    });
+
+    const fast = new ElevenLabsTtsProvider({
+      apiKey: "key",
+      baseUrl: "https://api.elevenlabs.io",
+      modelId: "eleven_turbo_v2_5",
+      voiceId: "voice",
+      outputFormat: "opus_48000_128",
+      speed: 1.2,
+    });
+    await fast.synthesize({ text: "hello" });
+    expect((JSON.parse(bodies[0]!) as { voice_settings?: unknown }).voice_settings).toEqual({
+      speed: 1.2,
+    });
+
+    const normal = new ElevenLabsTtsProvider({
+      apiKey: "key",
+      baseUrl: "https://api.elevenlabs.io",
+      modelId: "eleven_v4",
+      voiceId: "voice",
+      outputFormat: "opus_48000_128",
+      speed: 1,
+    });
+    await normal.synthesize({ text: "hello" });
+    expect((JSON.parse(bodies[1]!) as { voice_settings?: unknown }).voice_settings).toBeUndefined();
+  });
 });
 
 describe("Matrix voice message content", () => {
@@ -138,6 +170,10 @@ describe("LLM output parsing", () => {
   test("narration sanitizer leaves clean narration untouched", () => {
     const text = "Rust is quiet today. AI regulation is debated. Worth looking up: the new rules.";
     expect(sanitizeNarration(text)).toBe(text);
+  });
+
+  test("narration sanitizer turns symbols into speakable forms", () => {
+    expect(sanitizeNarration("Up 30% & rising")).toBe("Up 30 percent and rising");
   });
 
   test("parses the research verdict including missing topics", () => {

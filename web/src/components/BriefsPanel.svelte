@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Button, Chip, Icon, ListItem } from "m3-svelte";
+  import { Button, Chip, Dialog, Icon, ListItem, Select } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
+  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
@@ -15,6 +16,14 @@
   let audioUrl = $state<string | null>(null);
   let busy = $state(false);
   let resending = $state(false);
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
+  let runDelivery = $state("voice");
+
+  const deliveryOptions = [
+    { text: "Voice + text", value: "voice" },
+    { text: "Text only", value: "text" },
+  ];
 
   async function refreshList(): Promise<void> {
     try {
@@ -41,7 +50,7 @@
   async function runNow(): Promise<void> {
     busy = true;
     try {
-      await commands.workflows.run("briefing");
+      await commands.workflows.run("briefing", { generateAudio: runDelivery === "voice" });
     } catch (error) {
       reportError(error);
     } finally {
@@ -62,9 +71,32 @@
     }
   }
 
-  useRefresh(["brief.generated", "tts.synthesized", "message.voice.sent"], async () => {
+  async function deleteSelected(): Promise<void> {
+    if (!selected || deleting) return;
+    deleting = true;
+    try {
+      await commands.briefs.remove(selected.id);
+      selected = null;
+      audioUrl = null;
+      confirmingDelete = false;
+      reportSuccess("Brief deleted");
+    } catch (error) {
+      reportError(error);
+    } finally {
+      deleting = false;
+    }
+  }
+
+  useRefresh(["brief.generated", "tts.synthesized", "message.voice.sent", "brief.deleted"], async () => {
     await refreshList();
-    if (selected) await select(selected.id);
+    if (!selected) return;
+    // The selected brief may have been deleted (here or elsewhere).
+    if (!briefs.some((brief) => brief.id === selected?.id)) {
+      selected = null;
+      audioUrl = null;
+      return;
+    }
+    await select(selected.id);
   });
 
   function listItemSupporting(brief: Brief): string {
@@ -78,22 +110,27 @@
   <Panel>
     <div class="toolbar">
       <h2>Briefs</h2>
-      <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
-        <Icon icon={iconPlay} /> Run briefing now
-      </Button>
+      <div class="actions">
+        <Select label="Delivery" options={deliveryOptions} bind:value={runDelivery} />
+        <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
+          <Icon icon={iconPlay} /> Run briefing now
+        </Button>
+      </div>
     </div>
 
     <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
       {#snippet children(brief)}
-        <ListItem
-          onclick={() => select(brief.id)}
-          headline={formatDateTime(brief.createdAt)}
-          supporting={listItemSupporting(brief)}
-        >
-          {#snippet leading()}
-            <Icon icon={iconArticle} />
-          {/snippet}
-        </ListItem>
+        <div class="entry" class:selected={selected?.id === brief.id}>
+          <ListItem
+            onclick={() => select(brief.id)}
+            headline={formatDateTime(brief.createdAt)}
+            supporting={listItemSupporting(brief)}
+          >
+            {#snippet leading()}
+              <Icon icon={iconArticle} />
+            {/snippet}
+          </ListItem>
+        </div>
       {/snippet}
     </DataList>
   </Panel>
@@ -102,9 +139,19 @@
     {#if selected}
       <div class="toolbar">
         <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
-        <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
-          <Icon icon={iconSend} /> Re-send
-        </Button>
+        <div class="actions">
+          <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
+            <Icon icon={iconSend} /> Re-send
+          </Button>
+          <Button
+            variant="text"
+            iconType="full"
+            onclick={() => (confirmingDelete = true)}
+            disabled={deleting}
+          >
+            <Icon icon={iconDelete} />
+          </Button>
+        </div>
       </div>
       <p class="muted">
         {formatDateTime(selected.createdAt)} · {selected.sources.length} sources
@@ -137,9 +184,33 @@
   </Panel>
 </div>
 
+<Dialog headline="Delete this brief?" bind:open={confirmingDelete}>
+  <p>
+    "{selected?.topics.join(", ") || "Untitled brief"}" from
+    {formatDateTime(selected?.createdAt)} will be permanently removed, including its audio. This
+    cannot be undone.
+  </p>
+  {#snippet buttons()}
+    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
+      Cancel
+    </Button>
+    <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
+  {/snippet}
+</Dialog>
+
 <style>
   audio {
     width: 100%;
+  }
+
+  .entry {
+    border-radius: var(--m3-shape-medium);
+    transition: background-color 150ms;
+  }
+
+  .entry.selected {
+    background-color: var(--m3c-secondary-container);
+    color: var(--m3c-on-secondary-container);
   }
 
   .brief-text {

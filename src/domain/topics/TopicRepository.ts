@@ -5,6 +5,8 @@ export interface Topic {
   id: string;
   name: string;
   description?: string;
+  /** Muted topics are excluded from briefings until unmuted. */
+  muted: boolean;
   createdAt: number;
 }
 
@@ -12,6 +14,7 @@ interface TopicRow {
   id: string;
   name: string;
   description: string | null;
+  muted: number;
   created_at: number;
 }
 
@@ -25,6 +28,11 @@ export class TopicRepository {
     return rows.map(toTopic);
   }
 
+  /** Topics that participate in briefings (muted ones are excluded). */
+  listActive(): Topic[] {
+    return this.list().filter((topic) => !topic.muted);
+  }
+
   get(id: string): Topic {
     const row = this.db.raw.query<TopicRow, [string]>("SELECT * FROM topics WHERE id = ?").get(id);
     if (!row) throw new NotFoundError(`Topic ${id} not found`);
@@ -36,13 +44,14 @@ export class TopicRepository {
       id: crypto.randomUUID(),
       name: input.name.trim(),
       description: input.description?.trim() || undefined,
+      muted: false,
       createdAt: Date.now(),
     };
 
     try {
       this.db.raw
-        .query("INSERT INTO topics (id, name, description, created_at) VALUES (?, ?, ?, ?)")
-        .run(topic.id, topic.name, topic.description ?? null, topic.createdAt);
+        .query("INSERT INTO topics (id, name, description, muted, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(topic.id, topic.name, topic.description ?? null, 0, topic.createdAt);
     } catch (error) {
       if (error instanceof Error && error.message.includes("UNIQUE")) {
         throw new ValidationError(`A topic named "${topic.name}" already exists`);
@@ -51,6 +60,27 @@ export class TopicRepository {
     }
 
     return topic;
+  }
+
+  update(id: string, patch: { name?: string; description?: string; muted?: boolean }): Topic {
+    const existing = this.get(id);
+    const name = patch.name?.trim() || existing.name;
+    const description =
+      patch.description !== undefined ? patch.description.trim() || undefined : existing.description;
+    const muted = patch.muted ?? existing.muted;
+
+    try {
+      this.db.raw
+        .query("UPDATE topics SET name = ?, description = ?, muted = ? WHERE id = ?")
+        .run(name, description ?? null, muted ? 1 : 0, id);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("UNIQUE")) {
+        throw new ValidationError(`A topic named "${name}" already exists`);
+      }
+      throw error;
+    }
+
+    return this.get(id);
   }
 
   remove(id: string): Topic {
@@ -65,6 +95,7 @@ function toTopic(row: TopicRow): Topic {
     id: row.id,
     name: row.name,
     description: row.description ?? undefined,
+    muted: row.muted === 1,
     createdAt: row.created_at,
   };
 }

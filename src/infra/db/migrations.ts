@@ -85,6 +85,13 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    id: 6,
+    name: "topic-muted",
+    sql: `
+      ALTER TABLE topics ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

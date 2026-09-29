@@ -106,6 +106,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       modelId: config.elevenlabs.modelId,
       voiceId: config.elevenlabs.voiceId,
       outputFormat: config.elevenlabs.outputFormat,
+      speed: config.elevenlabs.speed,
       maxCharsPerRequest: config.elevenlabs.maxCharsPerRequest,
     });
 
@@ -159,6 +160,12 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   });
 
   seedDefaultJobIfEmpty(jobs, config, logger);
+  if (config.elevenlabs.modelId.startsWith("eleven_v4") && config.elevenlabs.speed !== 1) {
+    logger.warn("ELEVENLABS_SPEED is set but the configured speech model ignores speed", {
+      modelId: config.elevenlabs.modelId,
+      hint: "set ELEVENLABS_MODEL_ID=eleven_turbo_v2_5 to apply ELEVENLABS_SPEED",
+    });
+  }
   scheduler.reload();
 
   const commands = new CommandRouter({ bus, logger: logger.child("commands") });

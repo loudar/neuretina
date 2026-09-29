@@ -91,6 +91,12 @@ export class BriefRepository {
     if (result.changes === 0) throw new NotFoundError(`Brief ${id} not found`);
   }
 
+  remove(id: string): Brief {
+    const brief = this.get(id);
+    this.db.raw.query("DELETE FROM briefs WHERE id = ?").run(id);
+    return brief;
+  }
+
   get(id: string, includeAudio = false): BriefWithAudio {
     const row = this.db.raw
       .query<BriefRow, [string]>(

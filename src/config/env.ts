@@ -35,6 +35,8 @@ export interface AppConfig {
     modelId: string;
     voiceId: string;
     outputFormat: string;
+    /** Speaking rate for models that support it (Eleven v4 ignores this). */
+    speed: number;
     maxCharsPerRequest: number;
   };
   bluesky: {
@@ -119,6 +121,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       modelId: str(env, "ELEVENLABS_MODEL_ID", "eleven_v4")!,
       voiceId: str(env, "ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")!,
       outputFormat: str(env, "ELEVENLABS_OUTPUT_FORMAT", "opus_48000_128")!,
+      speed: num(env, "ELEVENLABS_SPEED", 1.15),
       maxCharsPerRequest: num(env, "ELEVENLABS_MAX_CHARS", 2600),
     },
     bluesky: {

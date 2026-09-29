@@ -106,8 +106,25 @@ describe("webhook gateway", () => {
     });
     expect(created.name).toBe("Webhook topic");
 
-    const listed = await call<Array<{ id: string }>>("topic.list");
-    expect(listed.some((topic) => topic.id === created.id)).toBe(true);
+    const updatedEvent = waitForEvent(
+      kernel.bus,
+      "topic.updated",
+      (event) => (event.payload as { id: string }).id === created.id,
+    );
+    const updated = await call<{ name: string; description?: string }>("topic.update", {
+      id: created.id,
+      name: "Webhook topic v2",
+      description: "updated context",
+    });
+    expect(updated.name).toBe("Webhook topic v2");
+    expect(updated.description).toBe("updated context");
+    await updatedEvent;
+
+    const muted = await call<{ muted: boolean }>("topic.update", { id: created.id, muted: true });
+    expect(muted.muted).toBe(true);
+
+    const listed = await call<Array<{ id: string; name: string }>>("topic.list");
+    expect(listed.some((topic) => topic.id === created.id && topic.name === "Webhook topic v2")).toBe(true);
 
     await call("topic.delete", { id: created.id });
     const after = await call<Array<{ id: string }>>("topic.list");
@@ -160,12 +177,17 @@ describe("webhook gateway", () => {
   });
 
   test("manages jobs through the gateway", async () => {
-    const job = await call<{ id: string; enabled: boolean }>("job.create", {
-      name: "webhook job",
-      cron: "0 6 * * *",
-      workflow: "briefing",
-    });
+    const job = await call<{ id: string; enabled: boolean; input: Record<string, unknown> }>(
+      "job.create",
+      {
+        name: "webhook job",
+        cron: "0 6 * * *",
+        workflow: "briefing",
+        input: { generateAudio: false },
+      },
+    );
     expect(job.enabled).toBe(true);
+    expect(job.input).toEqual({ generateAudio: false });
 
     const run = await call<{ started: boolean }>("job.run", { id: job.id });
     expect(run.started).toBe(true);
@@ -267,7 +289,11 @@ describe("webhook gateway", () => {
       topics: ["Rust"],
       markdown: "# Rust\n\nAll quiet.",
       narration: "Rust is quiet",
-      sources: [],
+      sources: [
+        { title: "Example", url: "https://example.com/article", provider: "perplexity" },
+        { title: "Example dup", url: "https://example.com/other", provider: "perplexity" },
+        { title: "News", url: "https://news.example.org/story", provider: "bluesky" },
+      ],
     });
     kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg", 1000);
 
@@ -287,9 +313,40 @@ describe("webhook gateway", () => {
     expect(summary.kind).toBe("text");
     if (summary.kind === "text") {
       expect(summary.text).toContain("# Rust");
+      expect(summary.text).toContain("**Sources**");
+      expect(summary.text).toContain("[Example](https://example.com/article)");
+      expect(summary.text).toContain("[News](https://news.example.org/story)");
+      expect(summary.text).not.toContain("example.com/other");
       expect(summary.html).toContain("<h2>Rust</h2>");
+      expect(summary.html).toContain('href="https://example.com/article"');
     }
     expect(added[1]!.kind).toBe("voice");
+  });
+
+  test("deletes a stored brief", async () => {
+    const brief = kernel.briefs.create({
+      topics: ["Obsolete"],
+      markdown: "# Obsolete",
+      narration: "n",
+      sources: [],
+    });
+
+    const deletedEvent = waitForEvent(
+      kernel.bus,
+      "brief.deleted",
+      (event) => (event.payload as { briefId: string }).briefId === brief.id,
+    );
+
+    const result = await call<{ ok: boolean; briefId: string }>("brief.delete", { id: brief.id });
+    expect(result).toEqual({ ok: true, briefId: brief.id });
+    await deletedEvent;
+
+    const listed = await call<Array<{ id: string }>>("brief.list");
+    expect(listed.some((entry) => entry.id === brief.id)).toBe(false);
+
+    const missing = await post({ type: "brief.delete", payload: { id: brief.id } });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toContain("not found");
   });
 
   test("event.pull returns persisted history", async () => {

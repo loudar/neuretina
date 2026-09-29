@@ -127,7 +127,21 @@ export class StartupService {
               `${stripTrailingSlash(config.elevenlabs.baseUrl)}/v1/voices/${voiceId}`,
               { headers: { "xi-api-key": config.elevenlabs.apiKey } },
             );
-            return { status: "ok", detail: `voice "${voice.name ?? config.elevenlabs.voiceId}" available` };
+            const notes: string[] = [];
+            if (
+              config.elevenlabs.speed !== 1 &&
+              config.elevenlabs.modelId.startsWith("eleven_v4")
+            ) {
+              notes.push(
+                `note: "${config.elevenlabs.modelId}" ignores ELEVENLABS_SPEED — set ELEVENLABS_MODEL_ID=eleven_turbo_v2_5 to apply it`,
+              );
+            }
+            return {
+              status: "ok",
+              detail: `voice "${voice.name ?? config.elevenlabs.voiceId}" available${
+                notes.length > 0 ? ` (${notes.join("; ")})` : ""
+              }`,
+            };
           } catch (error) {
             if (error instanceof ProviderError && error.status === 404) {
               return {

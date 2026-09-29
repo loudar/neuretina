@@ -87,6 +87,9 @@ bun test
 
 - API key → `KEY_ELEVENLABS`.
 - `ELEVENLABS_MODEL_ID=eleven_v4` (highest-quality model; `eleven_v4_turbo` also works).
+- `ELEVENLABS_SPEED` controls the speaking rate (0.7–1.2, default 1.15). **The Eleven v4 family
+  ignores speed** — set `ELEVENLABS_MODEL_ID=eleven_turbo_v2_5` if you want the rate applied
+  (the startup check warns when speed is configured with a v4 model).
 - Pick a voice from the voice library and set `ELEVENLABS_VOICE_ID`.
 - `opus_48000_128` is the default output format because Matrix clients render Ogg/Opus as a
   native voice bubble.
@@ -186,17 +189,26 @@ baseline palette in light and dark mode (`web/src/app.css`) plus the Google Sans
 Only truly custom pieces are hand-styled (the dense event log and the audio element), and even
 those use the M3 design tokens.
 
-The Briefs view shows the full summary, plays the stored audio, and offers **Re-send** to deliver
-the brief to Matrix again (formatted summary + voice).
+The Briefs view shows the full summary, plays the stored audio, offers **Re-send** to deliver the
+brief to Matrix again (formatted summary + voice), and can **delete** a brief behind an M3
+confirmation dialog.
 
 ## Topics and scheduled tasks
 
-- **Topics** are managed in the UI (or by sending `topic.create` / `topic.delete` / `topic.list`
-  through the webhook). Each topic is researched on the web and on Bluesky, then the compiler
-  groups the brief by topic.
-- **Delivery is two messages:** the compiled summary as a formatted text message (markdown
-  rendered to Matrix `formatted_body`) followed by the voice message. The Briefs view has a
-  **Re-send** button, and `brief.send { id }` does the same over the webhook.
+- **Topics** are managed in the UI (or by sending `topic.create` / `topic.update` /
+  `topic.delete` / `topic.list` through the webhook), including a **mute toggle** — muted topics
+  are excluded from every briefing until unmuted. One LLM-planned research run covers all topics
+  at once (they may overlap), and the compiler merges everything into a single brief.
+- **Delivery is two messages by default:** the compiled summary as a formatted text message
+  (markdown rendered to Matrix `formatted_body`) followed by the voice message. The summary is
+  written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
+  TTS-aware (speakable sentences, symbols written out, everyday expressions kept neutral) and the
+  narration is derived from the summary itself, so the audio reads the same text minus the links.
+- **Voice is optional per run:** scheduled tasks accept `{"generateAudio": false}` (the Jobs UI
+  has a *Delivery* selector at creation and a *Disable voice* toggle per task), and the manual
+  "Run briefing now" button has its own *Delivery* selector — text-only runs skip TTS entirely
+  and deliver just the formatted summary. The Briefs view also has a **Re-send** button, and
+  `brief.send { id }` does the same over the webhook.
 - **Relevance-checked research:** the researcher agent finishes with a `{"found": <bool>, "notes":
   …}` verdict, and its tool budget is capped. Search engines return junk even for nonsense
   queries, so if no topic yields *relevant* material the workflow writes **no summary and sends
@@ -246,9 +258,10 @@ without any streaming connection. Read-only message types (`event.*`, `*.list`, 
 `brief.audio`, `config.get`) are "quiet": they generate no audit events, so polling can never feed
 itself.
 
-Built-in message types: `config.get`, `topic.list/create/delete`, `job.list/create/update/delete/run`,
-`workflow.list/run`, `brief.list/get/audio/send`, `event.pull/wait`. Adding one is
-`router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
+Built-in message types: `config.get`, `topic.list/create/update/delete`,
+`job.list/create/update/delete/run`, `workflow.list/run`, `brief.list/get/audio/send/delete`,
+`event.pull/wait`. Adding one is `router.register("my.type", handler)` in
+`src/commands/registerCommands.ts`.
 
 ## Live activity feed (WebSocket)
 

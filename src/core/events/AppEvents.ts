@@ -16,7 +16,8 @@ export interface AppEvents {
   "system.startup.announced": { channel: string; eventId: string };
   "system.startup.announce_failed": { error: string };
 
-  "topic.created": { id: string; name: string; description?: string };
+  "topic.created": { id: string; name: string; description?: string; muted?: boolean };
+  "topic.updated": { id: string; name: string; description?: string; muted?: boolean };
   "topic.deleted": { id: string; name: string };
 
   "job.created": { id: string; name: string; cron: string; workflow: string };
@@ -75,6 +76,7 @@ export interface AppEvents {
     topics?: string[];
     queries?: string[];
   };
+  "brief.deleted": { correlationId: string; briefId: string };
 
   "tts.synthesized": {
     correlationId: string;

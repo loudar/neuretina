@@ -12,6 +12,11 @@ export interface ElevenLabsTtsOptions {
   modelId: string;
   voiceId: string;
   outputFormat: string;
+  /**
+   * Speaking rate (0.7–1.2). Models in the Eleven v4 family ignore this;
+   * e.g. eleven_turbo_v2_5 honors it.
+   */
+  speed?: number;
   maxCharsPerRequest?: number;
 }
 
@@ -83,6 +88,9 @@ export class ElevenLabsTtsProvider implements TextToSpeechProvider {
           text: input.text,
           model_id: input.modelId,
           ...(input.previousText ? { previous_text: input.previousText } : {}),
+          ...(this.options.speed !== undefined && this.options.speed !== 1
+            ? { voice_settings: { speed: this.options.speed } }
+            : {}),
         }),
       },
       { retries: 2 },

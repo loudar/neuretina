@@ -4,6 +4,7 @@ import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import { markdownToHtml } from "../core/markdown.ts";
+import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
@@ -50,7 +51,35 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     });
     bus.publish(
       "topic.created",
-      { id: topic.id, name: topic.name, description: topic.description },
+      { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    return topic;
+  });
+
+  router.register("topic.update", (payload, context) => {
+    const record = asRecord(payload);
+    const id = requireString(record, "id");
+    const patch: { name?: string; description?: string; muted?: boolean } = {};
+
+    if (record.name !== undefined) patch.name = requireString(record, "name");
+    if (record.description !== undefined) {
+      if (typeof record.description !== "string") {
+        throw new ValidationError(`"description" must be a string`);
+      }
+      patch.description = record.description;
+    }
+    if (record.muted !== undefined) {
+      if (typeof record.muted !== "boolean") {
+        throw new ValidationError(`"muted" must be a boolean`);
+      }
+      patch.muted = record.muted;
+    }
+
+    const topic = topics.update(id, patch);
+    bus.publish(
+      "topic.updated",
+      { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted },
       { source: "commands", correlationId: context.correlationId },
     );
     return topic;
@@ -172,6 +201,17 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     };
   });
 
+  router.register("brief.delete", (payload, context) => {
+    const id = requireString(asRecord(payload), "id");
+    const brief = briefs.remove(id);
+    bus.publish(
+      "brief.deleted",
+      { correlationId: context.correlationId, briefId: brief.id },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    return { ok: true, briefId: brief.id };
+  });
+
   // Re-sends a stored brief: the summary as formatted text, plus the audio
   // as a voice message when one exists.
   router.register("brief.send", async (payload, context) => {
@@ -181,18 +221,19 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const brief = briefs.get(id);
     const sent: Array<{ kind: "text" | "voice"; eventId: string }> = [];
 
-    const text = await messaging.send({
+    const text = buildBriefMessage(brief.markdown, brief.sources);
+    const textMessage = await messaging.send({
       kind: "text",
-      text: brief.markdown,
-      html: markdownToHtml(brief.markdown),
+      text,
+      html: markdownToHtml(text),
       channel,
     });
     bus.publish(
       "message.text.sent",
-      { correlationId: context.correlationId, channel: text.channel, eventId: text.id },
+      { correlationId: context.correlationId, channel: textMessage.channel, eventId: textMessage.id },
       { source: "commands", correlationId: context.correlationId },
     );
-    sent.push({ kind: "text", eventId: text.id });
+    sent.push({ kind: "text", eventId: textMessage.id });
 
     const audio = briefs.getAudio(id);
     if (audio) {

@@ -24,9 +24,14 @@
   let name = $state("morning-brief");
   let cron = $state("0 7 * * *");
   let workflow = $state("briefing");
+  let delivery = $state("voice");
   let defaultCronApplied = false;
 
   const workflowOptions = $derived(workflows.map((entry) => ({ text: entry.id, value: entry.id })));
+  const deliveryOptions = [
+    { text: "Voice + text", value: "voice" },
+    { text: "Text only", value: "text" },
+  ];
 
   async function refresh(): Promise<void> {
     try {
@@ -52,11 +57,25 @@
     if (busy) return;
     busy = true;
     try {
-      await commands.jobs.create({ name: name.trim(), cron: cron.trim(), workflow });
+      await commands.jobs.create({
+        name: name.trim(),
+        cron: cron.trim(),
+        workflow,
+        input: { generateAudio: delivery === "voice" },
+      });
     } catch (error) {
       reportError(error);
     } finally {
       busy = false;
+    }
+  }
+
+  async function toggleVoice(job: ScheduledJob): Promise<void> {
+    const generateAudio = job.input.generateAudio === false;
+    try {
+      await commands.jobs.update(job.id, { input: { ...job.input, generateAudio } });
+    } catch (error) {
+      reportError(error);
     }
   }
 
@@ -86,7 +105,8 @@
 
   function supportingText(job: ScheduledJob): string {
     const status = job.lastStatus ? ` (${job.lastStatus})` : "";
-    return `${job.workflow} · cron ${job.cron} · last run ${formatDateTime(job.lastRunAt, "never")}${status}`;
+    const mode = job.input.generateAudio === false ? "text only" : "voice + text";
+    return `${job.workflow} · ${mode} · cron ${job.cron} · last run ${formatDateTime(job.lastRunAt, "never")}${status}`;
   }
 </script>
 
@@ -97,6 +117,7 @@
     <TextFieldOutlined label="Name" bind:value={name} />
     <TextFieldOutlined label="Cron expression" bind:value={cron} enter={create} />
     <Select label="Workflow" options={workflowOptions} bind:value={workflow} />
+    <Select label="Delivery" options={deliveryOptions} bind:value={delivery} />
     <Button variant="filled" iconType="left" onclick={create} disabled={busy}>
       <Icon icon={iconAdd} /> Add task
     </Button>
@@ -112,19 +133,22 @@
         {#snippet leading()}
           <Icon icon={iconSchedule} />
         {/snippet}
-        {#snippet trailing()}
-          <div class="actions">
-            <Button variant="tonal" iconType="left" onclick={() => run(job.id)}>
-              <Icon icon={iconPlay} /> Run
-            </Button>
-            <Button variant="text" onclick={() => toggle(job)}>
-              {job.enabled ? "Disable" : "Enable"}
-            </Button>
-            <Button variant="text" iconType="full" onclick={() => remove(job.id)}>
-              <Icon icon={iconDelete} />
-            </Button>
-          </div>
-        {/snippet}
+          {#snippet trailing()}
+            <div class="actions">
+              <Button variant="tonal" iconType="left" onclick={() => run(job.id)}>
+                <Icon icon={iconPlay} /> Run
+              </Button>
+              <Button variant="text" onclick={() => toggleVoice(job)}>
+                {job.input.generateAudio === false ? "Enable voice" : "Disable voice"}
+              </Button>
+              <Button variant="text" onclick={() => toggle(job)}>
+                {job.enabled ? "Disable" : "Enable"}
+              </Button>
+              <Button variant="text" iconType="full" onclick={() => remove(job.id)}>
+                <Icon icon={iconDelete} />
+              </Button>
+            </div>
+          {/snippet}
       </ListItem>
     {/snippet}
   </DataList>

@@ -37,6 +37,41 @@ describe("TopicRepository", () => {
     expect(repo.list()).toHaveLength(0);
     expect(() => repo.get(topic.id)).toThrow(/not found/);
   });
+
+  test("updates name and description, including clearing the description", () => {
+    const repo = new TopicRepository(db());
+    const topic = repo.add({ name: "Rust", description: "language" });
+    const other = repo.add({ name: "AI" });
+
+    const renamed = repo.update(topic.id, { name: "Rust ecosystem" });
+    expect(renamed.name).toBe("Rust ecosystem");
+    expect(renamed.description).toBe("language");
+
+    const described = repo.update(topic.id, { description: "crates, tooling, async" });
+    expect(described.description).toBe("crates, tooling, async");
+
+    const cleared = repo.update(topic.id, { description: "  " });
+    expect(cleared.description).toBeUndefined();
+
+    expect(() => repo.update(other.id, { name: "Rust ecosystem" })).toThrow(/already exists/);
+  });
+
+  test("mutes and unmutes topics without removing them", () => {
+    const repo = new TopicRepository(db());
+    const topic = repo.add({ name: "Rust" });
+
+    expect(topic.muted).toBe(false);
+    expect(repo.listActive()).toHaveLength(1);
+
+    const muted = repo.update(topic.id, { muted: true });
+    expect(muted.muted).toBe(true);
+    expect(repo.list()).toHaveLength(1);
+    expect(repo.listActive()).toHaveLength(0);
+
+    const unmuted = repo.update(topic.id, { muted: false });
+    expect(unmuted.muted).toBe(false);
+    expect(repo.listActive()).toHaveLength(1);
+  });
 });
 
 describe("JobRepository", () => {
@@ -118,5 +153,21 @@ describe("BriefRepository", () => {
     expect(repo.search("regulation").map((brief) => brief.id)).toEqual([ai.id]);
     expect(repo.search(undefined, 1)[0]?.id).toBe(ai.id);
     expect(repo.search(undefined, 10)).toHaveLength(2);
+  });
+
+  test("removes briefs and reports missing ones", () => {
+    const repo = new BriefRepository(db());
+    const brief = repo.create({
+      topics: ["Rust"],
+      markdown: "# Rust",
+      narration: "n",
+      sources: [],
+    });
+
+    const removed = repo.remove(brief.id);
+    expect(removed.id).toBe(brief.id);
+    expect(repo.list()).toHaveLength(0);
+    expect(repo.getAudio(brief.id)).toBeNull();
+    expect(() => repo.remove(brief.id)).toThrow(/not found/);
   });
 });

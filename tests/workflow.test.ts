@@ -24,6 +24,8 @@ interface SetupOptions {
   socialResults?: typeof sampleResults;
   /** Verdict the research agent reports for its final JSON answer. */
   researchVerdict?: boolean;
+  /** Makes the first compiler call return a draft far over the word budget. */
+  longCompilerOutput?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -31,16 +33,20 @@ function setup(options: SetupOptions = {}) {
   const bus = new EventBus(new EventStore(db), log);
   const topics = new TopicRepository(db);
   const briefs = new BriefRepository(db);
+  let compilerCalls = 0;
 
   const llm = stubLlm((request) => {
     const system = request.messages[0]?.content ?? "";
 
     if (system.includes("editor")) {
+      compilerCalls += 1;
+      if (options.longCompilerOutput && compilerCalls === 1) {
+        const filler = Array.from({ length: 200 }, (_, index) => `longfact${index}`).join(" ");
+        return completion(JSON.stringify({ markdown: `# Morning brief\n\n${filler}` }));
+      }
       return completion(
         JSON.stringify({
           markdown: "# Morning brief\n\n## Rust\nAll quiet.\n\n## AI regulation\nHeated debate.",
-          narration:
-            "Rust is quiet today. AI regulation is being debated. Sources: 1. example.com https://example.com/article",
         }),
       );
     }
@@ -113,19 +119,29 @@ describe("BriefingWorkflow", () => {
     expect(stored.hasAudio).toBe(true);
     expect(stored.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
 
+    // Narration is derived from the summary, so it matches the written brief.
+    expect(stored.narration).toContain("All quiet");
+    expect(stored.narration).not.toContain("http");
+    expect(stored.narration).not.toContain("Sources");
+
     expect(tts.requests).toHaveLength(1);
-    expect(tts.requests[0]).toContain("Rust");
+    expect(tts.requests[0]).toContain("All quiet");
     expect(tts.requests[0]).not.toContain("http");
     expect(tts.requests[0]).not.toContain("Sources");
 
-    // Summary as formatted text first, then the voice message.
+    // Summary as formatted text (with clickable sources) first, then voice.
     expect(messaging.sent).toHaveLength(2);
     const summary = messaging.sent[0]!.message;
     expect(summary.kind).toBe("text");
     if (summary.kind === "text") {
       expect(summary.text).toContain("# Morning brief");
+      expect(summary.text).toContain("**Sources**");
+      expect(summary.text).toContain("](https://");
+      // The spoken narration must not contain the links.
+      expect(tts.requests[0]).not.toContain("example.com");
       expect(summary.html).toContain("<h2>Morning brief</h2>");
       expect(summary.html).toContain("<h3>Rust</h3>");
+      expect(summary.html).toContain('href="https://example.com/article"');
     }
     expect(messaging.sent[1]?.message.kind).toBe("voice");
 
@@ -213,6 +229,75 @@ describe("BriefingWorkflow", () => {
     expect(skipEvent?.payload).toMatchObject({ topics: ["very obscure topic"] });
     expect(events.map((event) => event.topic)).not.toContain("brief.generated");
     expect(events.map((event) => event.topic)).not.toContain("tts.synthesized");
+  });
+
+  test("delivers text only when voice is disabled", async () => {
+    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: true, generateAudio: false },
+      { correlationId: "c11", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    expect(output.audioBytes).toBeUndefined();
+    expect(briefs.get(output.briefId!).hasAudio).toBe(false);
+    expect(tts.requests).toHaveLength(0);
+    expect(messaging.sent).toHaveLength(1);
+    expect(messaging.sent[0]?.message.kind).toBe("text");
+  });
+
+  test("compresses an over-long draft before delivering", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup({ longCompilerOutput: true });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c10", bus, logger: log, statuses },
+    );
+
+    const stored = briefs.get(output.briefId!);
+    expect(stored.markdown).toContain("All quiet");
+    expect(stored.markdown.split(/\s+/).filter(Boolean).length).toBeLessThan(40);
+    expect(stored.narration).toContain("All quiet");
+  });
+
+  test("excludes muted topics from briefings", async () => {
+    const { workflow, topics, bus, briefs, statuses } = setup();
+    const active = topics.add({ name: "Rust" });
+    const muted = topics.add({ name: "Crypto" });
+    topics.update(muted.id, { muted: true });
+
+    const events: DomainEvent[] = [];
+    bus.subscribe("*", (event) => events.push(event));
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c7", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    expect(output.topics).toEqual(["Rust"]);
+    expect(briefs.latest()?.topics).toEqual(["Rust"]);
+    const researchStarted = events.find((event) => event.topic === "brief.research.started");
+    expect(researchStarted?.payload).toMatchObject({ topics: ["Rust"] });
+
+    // Explicitly requesting a muted topic does not bring it back.
+    const explicit = await workflow.run(
+      { topics: ["Crypto"], deliver: false, generateAudio: false },
+      { correlationId: "c8", bus, logger: log, statuses },
+    );
+    expect(explicit.skipped).toBe(true);
+
+    // Muting everything produces a clear reason.
+    topics.update(active.id, { muted: true });
+    const allMuted = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c9", bus, logger: log, statuses },
+    );
+    expect(allMuted.skipped).toBe(true);
+    expect(allMuted.reason).toBe("All topics are muted");
   });
 
   test("ignores irrelevant search results when the researcher reports found=false", async () => {
