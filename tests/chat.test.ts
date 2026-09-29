@@ -6,9 +6,11 @@ import { EventStore } from "../src/core/events/EventStore.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { Scheduler } from "../src/core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
+import { WorkflowRunner } from "../src/core/workflow/WorkflowRunner.ts";
 import { StatusHub } from "../src/core/status/StatusHub.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
+import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { StubMessaging, testConfig } from "./support.ts";
 import type { ChatCommand } from "../src/capabilities/chat/ChatChannel.ts";
 
@@ -31,7 +33,9 @@ function setup() {
   const jobs = new JobRepository(db);
   const workflows = new WorkflowRegistry({ bus, logger: log, statuses: new StatusHub() });
   const messaging = new StubMessaging();
-  const scheduler = new Scheduler({ jobs, workflows, bus, logger: log });
+  const runs = new WorkflowRunRepository(db);
+  const runner = new WorkflowRunner({ workflows, runs, bus, logger: log, statuses: new StatusHub() });
+  const scheduler = new Scheduler({ jobs, runner, bus, logger: log });
 
   const workflow: Workflow = {
     id: "briefing",
@@ -44,6 +48,7 @@ function setup() {
     config: testConfig(),
     jobs,
     workflows,
+    runner,
     scheduler,
     messaging,
     bus,

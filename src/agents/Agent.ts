@@ -1,6 +1,5 @@
 import type { Logger } from "../core/logger.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
-import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { LlmMessage, LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { Tool } from "./Tool.ts";
@@ -16,15 +15,12 @@ export interface AgentOptions {
   maxToolCalls?: number;
   model?: string;
   temperature?: number;
-  statuses?: StatusHub;
 }
 
 export interface AgentContext {
   correlationId: string;
   bus: EventBus;
   logger: Logger;
-  /** Status entry to nest this agent's activity under (e.g. its research span). */
-  statusParentId?: string;
 }
 
 export interface AgentToolInvocation {
@@ -67,7 +63,6 @@ export class Agent {
   private readonly maxToolCalls: number;
   private readonly model?: string;
   private readonly temperature?: number;
-  private readonly statuses?: StatusHub;
 
   constructor(options: AgentOptions) {
     this.name = options.name;
@@ -80,7 +75,6 @@ export class Agent {
     this.maxToolCalls = options.maxToolCalls ?? 12;
     this.model = options.model;
     this.temperature = options.temperature;
-    this.statuses = options.statuses;
   }
 
   get toolNames(): string[] {
@@ -91,7 +85,6 @@ export class Agent {
     const { bus, logger, correlationId } = context;
     const started = Date.now();
     const source = `agent:${this.name}`;
-    const activityId = `${correlationId}:agent:${this.name}`;
     let toolBudget = this.maxToolCalls;
 
     bus.publish(
@@ -110,12 +103,6 @@ export class Agent {
       let finalText = "";
 
       for (let index = 0; index < this.maxSteps; index++) {
-        const reasoning = this.statuses?.begin(activityId, "Reasoning", {
-          correlationId,
-          parentId: context.statusParentId,
-        });
-
-        reasoning?.update("Waiting for the model");
         const completion = await this.llm.complete({
           messages,
           tools: this.toolList.map((tool) => ({
@@ -127,11 +114,6 @@ export class Agent {
           temperature: this.temperature,
           sessionId: correlationId,
         });
-        reasoning?.done(
-          completion.toolCalls.length > 0
-            ? `Model requested ${completion.toolCalls.length} tool call(s)`
-            : "Model answered",
-        );
 
         if (completion.toolCalls.length === 0) {
           finalText = completion.text;
@@ -168,7 +150,7 @@ export class Agent {
           }
           toolBudget--;
 
-          const invocation = await this.invokeTool(activityId, call.name, call.arguments, context);
+          const invocation = await this.invokeTool(call.name, call.arguments, context);
           invocations.push(invocation);
 
           messages.push({
@@ -222,7 +204,6 @@ export class Agent {
   }
 
   private async invokeTool(
-    activityId: string,
     name: string,
     args: Record<string, unknown>,
     context: AgentContext,
@@ -237,16 +218,9 @@ export class Agent {
       { source, correlationId },
     );
 
-    const status = this.statuses?.begin(activityId, `Calling tool ${name}`, {
-      correlationId,
-      parentId: context.statusParentId,
-    });
-    status?.update(`Waiting for ${name}`);
-
     const tool = this.tools.get(name);
     if (!tool) {
       const error = `Unknown tool "${name}"`;
-      status?.failed(`Tool ${name} unknown`);
       bus.publish(
         "agent.tool.failed",
         { agent: this.name, correlationId, tool: name, error },
@@ -259,7 +233,6 @@ export class Agent {
       const result = await tool.execute(args, { correlationId, bus, logger, agent: this.name });
       const durationMs = Date.now() - started;
       const summary = summarizeResult(result);
-      status?.done(`Tool ${name} returned (${summary})`);
       bus.publish(
         "agent.tool.succeeded",
         {
@@ -275,7 +248,6 @@ export class Agent {
     } catch (error) {
       const durationMs = Date.now() - started;
       const message = errorMessage(error);
-      status?.failed(`Tool ${name} failed: ${message}`);
       bus.publish(
         "agent.tool.failed",
         { agent: this.name, correlationId, tool: name, error: message },

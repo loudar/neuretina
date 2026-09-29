@@ -26,18 +26,37 @@ export const migrations: Migration[] = [
   },
   {
     id: 2,
+    name: "contexts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS contexts (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        description TEXT,
+        settings    TEXT NOT NULL DEFAULT '{}',
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO contexts (id, name, description, settings, created_at, updated_at)
+      VALUES ('morning-briefing', 'Morning briefing', NULL, '{}', 0, 0);
+    `,
+  },
+  {
+    id: 3,
     name: "topics",
     sql: `
       CREATE TABLE IF NOT EXISTS topics (
         id          TEXT PRIMARY KEY,
         name        TEXT NOT NULL UNIQUE,
         description TEXT,
+        muted       INTEGER NOT NULL DEFAULT 0,
+        context_id  TEXT NOT NULL DEFAULT 'morning-briefing',
         created_at  INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS idx_topics_context ON topics (context_id);
     `,
   },
   {
-    id: 3,
+    id: 4,
     name: "scheduled_jobs",
     sql: `
       CREATE TABLE IF NOT EXISTS scheduled_jobs (
@@ -46,6 +65,7 @@ export const migrations: Migration[] = [
         cron         TEXT NOT NULL,
         timezone     TEXT,
         workflow     TEXT NOT NULL,
+        context_id   TEXT NOT NULL DEFAULT 'morning-briefing',
         input        TEXT NOT NULL DEFAULT '{}',
         enabled      INTEGER NOT NULL DEFAULT 1,
         created_at   INTEGER NOT NULL,
@@ -53,10 +73,11 @@ export const migrations: Migration[] = [
         last_run_at  INTEGER,
         last_status  TEXT
       );
+      CREATE INDEX IF NOT EXISTS idx_jobs_context ON scheduled_jobs (context_id);
     `,
   },
   {
-    id: 4,
+    id: 5,
     name: "kv",
     sql: `
       CREATE TABLE IF NOT EXISTS kv (
@@ -64,13 +85,6 @@ export const migrations: Migration[] = [
         value      TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
-    `,
-  },
-  {
-    id: 5,
-    name: "topic-muted",
-    sql: `
-      ALTER TABLE topics ADD COLUMN muted INTEGER NOT NULL DEFAULT 0;
     `,
   },
   {
@@ -88,11 +102,34 @@ export const migrations: Migration[] = [
         parent_id      TEXT,
         workflow       TEXT,
         correlation_id TEXT,
+        context_id     TEXT NOT NULL DEFAULT 'morning-briefing',
         created_at     INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_artifacts_kind_created ON artifacts (kind, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_artifacts_parent ON artifacts (parent_id);
       CREATE INDEX IF NOT EXISTS idx_artifacts_correlation ON artifacts (correlation_id);
+      CREATE INDEX IF NOT EXISTS idx_artifacts_context ON artifacts (context_id);
+    `,
+  },
+  {
+    id: 7,
+    name: "workflow_runs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS workflow_runs (
+        id             TEXT PRIMARY KEY,
+        workflow       TEXT NOT NULL,
+        context_id     TEXT NOT NULL,
+        trigger        TEXT NOT NULL,
+        trigger_detail TEXT NOT NULL DEFAULT '{}',
+        status         TEXT NOT NULL,
+        input          TEXT NOT NULL DEFAULT '{}',
+        output         TEXT,
+        error          TEXT,
+        started_at     INTEGER NOT NULL,
+        finished_at    INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_runs_context_started ON workflow_runs (context_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runs_workflow ON workflow_runs (workflow);
     `,
   },
 ];
@@ -106,8 +143,8 @@ export function runMigrations(db: BunDatabaseType): void {
     );
   `);
 
-  // The old briefs table predates the artifacts schema. Nothing is deployed
-  // yet, so there is no upgrade path: wipe the database instead of half-migrating.
+  // The old briefs table predates the artifacts schema. There is no upgrade
+  // path: wipe the database instead of half-migrating.
   const legacy = db
     .query<{ name: string }, []>(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'briefs'",
@@ -125,7 +162,6 @@ export function runMigrations(db: BunDatabaseType): void {
       .all()
       .map((row) => row.id),
   );
-
   for (const migration of migrations) {
     if (applied.has(migration.id)) continue;
 

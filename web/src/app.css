@@ -136,12 +136,6 @@ h3 {
 }
 
 /* Shared layout helpers; component styling comes from M3 Svelte. */
-.app {
-  max-width: 76rem;
-  margin-inline: auto;
-  padding: 1rem clamp(0.75rem, 2vw, 2rem) 4rem;
-}
-
 .stack {
   display: flex;
   flex-direction: column;
@@ -170,16 +164,35 @@ h3 {
   flex-wrap: wrap;
 }
 
-.row {
-  display: grid;
-  gap: 1.25rem;
-  align-items: start;
+/*
+ * List rows (M3 ListItem): keep every line inside its fixed-height row.
+ * The list item is a child component, so these rules are global on purpose.
+ */
+.pane li {
+  min-width: 0;
 }
 
-@media (width >= 50rem) {
-  .row.two {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
-  }
+.pane li .m3-container {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Leading icons and trailing actions never get squeezed. */
+.pane li .leading > *,
+.pane li .trailing > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pane li .body {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.pane li .body > p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 

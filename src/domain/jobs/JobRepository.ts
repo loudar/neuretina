@@ -1,5 +1,6 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { DEFAULT_CONTEXT_ID } from "../contexts/ContextRepository.ts";
 
 export type JobRunStatus = "success" | "failed";
 
@@ -9,6 +10,8 @@ export interface ScheduledJob {
   cron: string;
   timezone?: string;
   workflow: string;
+  /** Context the triggered run belongs to. */
+  contextId: string;
   input: Record<string, unknown>;
   enabled: boolean;
   createdAt: number;
@@ -22,6 +25,7 @@ export interface CreateJobInput {
   cron: string;
   timezone?: string;
   workflow: string;
+  contextId?: string;
   input?: Record<string, unknown>;
   enabled?: boolean;
 }
@@ -34,6 +38,7 @@ interface JobRow {
   cron: string;
   timezone: string | null;
   workflow: string;
+  context_id: string;
   input: string;
   enabled: number;
   created_at: number;
@@ -84,6 +89,7 @@ export class JobRepository implements JobStore {
       cron: input.cron.trim(),
       timezone: input.timezone,
       workflow: input.workflow,
+      contextId: input.contextId ?? DEFAULT_CONTEXT_ID,
       input: input.input ?? {},
       enabled: input.enabled ?? true,
       createdAt: now,
@@ -92,8 +98,8 @@ export class JobRepository implements JobStore {
 
     this.db.raw
       .query(
-        `INSERT INTO scheduled_jobs (id, name, cron, timezone, workflow, input, enabled, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO scheduled_jobs (id, name, cron, timezone, workflow, context_id, input, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         job.id,
@@ -101,6 +107,7 @@ export class JobRepository implements JobStore {
         job.cron,
         job.timezone ?? null,
         job.workflow,
+        job.contextId,
         JSON.stringify(job.input),
         job.enabled ? 1 : 0,
         job.createdAt,
@@ -175,6 +182,7 @@ function toJob(row: JobRow): ScheduledJob {
     cron: row.cron,
     timezone: row.timezone ?? undefined,
     workflow: row.workflow,
+    contextId: row.context_id,
     input: parsedInput,
     enabled: row.enabled === 1,
     createdAt: row.created_at,

@@ -9,35 +9,36 @@ event bus that every subsystem publishes to from the ground up.
 ## How it works
 
 ```
-scheduler (Bun.cron, jobs in SQLite)
-   └─> workflow run ────────────────────────────────────────────────┐
-        research agent (code mode: writes one program per run)      │
-          └─ run_code ─┬─ web_search      → Perplexity Search API   │
-                       ├─ finance         → Perplexity Agent API    │
-                       ├─ bluesky_search  → AT Protocol searchPosts │
-                       └─ past_briefs     → SQLite brief history    │
-        compiler LLM → neutral markdown brief + spoken narration    │
-        follow-up subagents → implications/context → recompile       │
-        Qwen3-TTS    → speech audio (local server)                  │
-        Matrix       → voice message (MSC3245)                      │
-                                                                     ▼
-                          every step publishes typed events → EventBus → SQLite event log
-                                                            │                    │
-                                            Svelte UI ◄─────┴── webhook event.wait (event feed)
-                                            Svelte UI ◄──────── WS /api/ws (live status feed)
+scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolved)
+   └─> workflow runner: persists a run, dispatches triggers ──────────┘
+        briefing workflow                          qa workflow
+          research agent (code mode: writes one program per run)
+            └─ run_code ─┬─ web_search      → Perplexity Search API
+                         ├─ finance         → Perplexity Agent API
+                         ├─ bluesky_search  → AT Protocol searchPosts
+                         └─ past_briefs     → SQLite brief history
+          compiler LLM → neutral markdown brief + spoken narration
+          follow-up subagents → implications/context → recompile
+          Qwen3-TTS    → speech audio (local server)
+          Matrix       → voice message (MSC3245)
+                                                                       ▼
+                            every step publishes typed events → EventBus → SQLite event log
+                                                              │                    │
+                                              Svelte UI ◄─────┴── webhook event.wait (event feed)
+                                              Svelte UI ◄──────── WS /api/ws (live status feed)
 ```
 
 ### Architecture
 
 | Layer | Location | Purpose |
 | --- | --- | --- |
-| Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, logger, errors |
+| Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, workflow runner, trigger dispatcher, logger, errors |
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
 | Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, local Qwen3-TTS, Matrix; the ElevenLabs module is kept but unused) |
-| Domain | `src/domain` | SQLite repositories: generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
+| Domain | `src/domain` | SQLite repositories: contexts, workflow runs, generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
-| Workflows | `src/workflows` | `BriefingWorkflow` orchestrating research → compile → TTS → delivery |
-| Command handlers | `src/commands` | application message handlers (topics, jobs, briefs, workflows) |
+| Workflows | `src/workflows` | `BriefingWorkflow` (research → compile → TTS → delivery) and `QuestionWorkflow` (Matrix follow-up answers) |
+| Command handlers | `src/commands` | application message handlers (contexts, topics, jobs, briefs, workflows, runs) |
 | API | `src/api` | single webhook gateway + static UI (no other endpoints) |
 | UI | `web` | Svelte 5 + Vite frontend built on the **M3 Svelte** Material 3 design system |
 
@@ -57,13 +58,13 @@ Everything the engine depends on externally sits behind a small interface, and
 | Financial data | `FinanceProvider` (`src/capabilities/finance`) | `PerplexityFinanceProvider` |
 | Speech | `TextToSpeechProvider` (`src/capabilities/tts`) | `QwenTtsProvider` (local server) |
 | Messaging | `MessagingProvider` (`src/capabilities/messaging`) | `MatrixMessagingProvider` |
-| Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `BriefStore`, `JobStore`, `KeyValueStore` | SQLite repositories (`src/domain`, `src/core/events`) |
+| Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `BriefStore`, `JobStore`, `KeyValueStore`, `ContextStore`, `WorkflowRunStore` | SQLite repositories (`src/domain`, `src/core/events`) |
 
 `createKernel()` accepts overrides for every provider (`llm`, `webSearch`, `socialSearch`,
 `finance`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, briefs, jobs,
-kv }`) — override all six stores and the kernel never opens SQLite (`kernel.db` is `null`). No
-consumer imports a concrete provider or database: workflows, agents, tools and command handlers
-only know the interfaces. Providers may implement an optional `verify()` (checked with
+kv, contexts, runs }`) — override all stores and the kernel never opens SQLite (`kernel.db` is
+`null`). No consumer imports a concrete provider or database: workflows, agents, tools and command
+handlers only know the interfaces. Providers may implement an optional `verify()` (checked with
 `isVerifiable`) so startup validation runs through the interface instead of reaching into config or
 HTTP details.
 
@@ -96,8 +97,9 @@ keeps direct tool calls, since it only needs one or two simple lookups.
 Every workflow output is stored as a generic **artifact** in one `artifacts` table — text payloads
 (markdown, JSON, plain text) and binary payloads (audio) alike. An artifact carries its `kind`,
 `name`, `content_type`, `metadata` (JSON), the `workflow` and `correlationId` of the run that
-produced it, and an optional `parentId` pointing at the artifact it belongs to. Nothing in the
-storage layer is brief-specific; any future research workflow can persist its outputs the same way.
+produced it, its `contextId`, and an optional `parentId` pointing at the artifact it belongs to.
+Nothing in the storage layer is brief-specific; any future research workflow can persist its
+outputs the same way.
 
 Briefs are the first typed view over that storage (`src/domain/briefs/BriefRepository.ts`):
 
@@ -110,12 +112,44 @@ Briefs are the first typed view over that storage (`src/domain/briefs/BriefRepos
 - deleting the brief artifact cascades to its audio.
 
 The generic surface is available over the webhook: `artifact.list` (filter by `kind`, `workflow`,
-`parentId`), `artifact.get`, `artifact.content`, `artifact.data` (base64 data URL) and
-`artifact.delete`. `artifact.created` / `artifact.deleted` events carry the artifact id, kind and
-parent, so the event log records every output of every run. The existing `brief.*` commands are a
-convenience view over the same rows. There is no migration from the old `briefs` table — nothing is
-deployed yet, so pre-artifacts databases are rejected at boot: delete the database file and start
-fresh.
+`parentId`, `correlationId`, `contextId`), `artifact.get`, `artifact.content`, `artifact.data`
+(base64 data URL) and `artifact.delete`. `artifact.created` / `artifact.deleted` events carry the
+artifact id, kind and parent, so the event log records every output of every run. The existing
+`brief.*` commands are a convenience view over the same rows. There is no migration from the old
+`briefs` table — nothing is deployed yet, so pre-artifacts databases are rejected at boot: delete
+the database file and start fresh.
+
+### Workflows, contexts and runs
+
+Workflows are **code-registered** definitions (`src/workflows`, registered in
+`src/kernel/Kernel.ts`) implementing the `Workflow` interface — an id, a description, an optional
+`contextId`, optional extra trigger bindings, and a `run(input, context)` method. The registry only
+stores definitions; execution lives in `WorkflowRunner`.
+
+- **Contexts** are named scopes that own topics, scheduled jobs, workflow runs and artifacts (all
+  carry a `context_id`). The first context is `morning-briefing`; the briefing workflow and the
+  seeded job live there. `context.list` returns each context with its topic/job/run/artifact counts.
+- **Workflow runs** are persisted in `workflow_runs`: id (= the run's correlation id, which every
+  event, status entry and artifact references), workflow, context, trigger kind, trigger detail,
+  status (`running` / `succeeded` / `failed` / `skipped`), input, output, error and timestamps.
+  Every trigger goes through `WorkflowRunner.start()`, which creates the record, publishes
+  `workflow.started` / `workflow.finished` / `workflow.failed` (all carrying `contextId` and
+  `trigger`), and finishes the record. A run whose output contains `{"skipped": true}` is marked
+  `skipped` (the "nothing relevant found" path).
+- **Triggers:** scheduled jobs (cron) and manual runs are implicit; workflows can add extra
+  bindings, e.g. `QuestionWorkflow` binds `matrix` with `when: (detail) => detail.replyToBot`.
+  `TriggerDispatcher.dispatch(kind, …)` fans a trigger out to every bound workflow and returns the
+  finished runs; a failing workflow never breaks the others.
+- **Per-run activity:** status entries carry the run's correlation id, and the Workflows UI tab
+  filters the live activity feed to a single run and lists the artifacts it produced
+  (`workflow.run.list`, `workflow.run.get` — the latter includes the run's artifacts). The top
+  Activity card keeps showing the live overview of the newest run.
+
+The Workflows tab is a drill-down: pick a workflow from the list (context filter on top, **Run
+now** per workflow), then pick a run from that workflow's runs sidebar, then inspect the run —
+live status feed, output/error preview and the artifacts it produced. `workflow.list`,
+`workflow.run.list`, `workflow.run.get` and `workflow.run` (manual trigger, optional `contextId`)
+are also available over the webhook.
 
 ## Quick start
 
@@ -293,10 +327,14 @@ re-execute old commands; the bot ignores its own messages; `MATRIX_ALLOWED_SENDE
 can. Sync errors back off and resume automatically, and a re-login transparently resets the sync
 position.
 
-**Follow-up questions:** reply to (quote) any message the bot sent — the brief summary, a notice,
-or one of its answers — and it searches for an answer (web, Bluesky and past briefs) and replies
-with a short **text** answer, never a voice message. Only direct quotes of the bot's own messages
-trigger this; plain messages are still treated as commands.
+**Follow-up questions:** every allowed message is handed to the trigger dispatcher (plain messages
+are still treated as commands). The `qa` workflow is bound to Matrix messages that are replies to
+(quotes of) one of the bot's own messages — the brief summary, a notice, or one of its answers —
+and answers with a short **text** answer, never a voice message. The trigger resolves the whole
+reply chain (`m.in_reply_to` upwards, capped at 10 events / 8k characters, oldest first) and
+passes it to the workflow, so "what about that?" still has a referent. The qa workflow is a normal
+persisted run: it appears in the Workflows tab with its activity and artifacts, and a failed run
+gets a "Sorry, I couldn't answer that: …" reply.
 
 ### Web UI
 
@@ -306,10 +344,19 @@ baseline palette in light and dark mode (`web/src/app.css`) plus the Google Sans
 Only truly custom pieces are hand-styled (the dense event log and the audio element), and even
 those use the M3 design tokens.
 
+The whole app is a full-width three-pane layout: a navigation rail on the left (sections plus a
+single engine-health pill — green when every integration is configured and the event stream is
+live, red when anything is down), a content list in the middle, and a details pane on the right.
+Lists never overflow their rows: long names, overlines and supporting lines ellipsize.
+
 The Briefs list shows each brief with colour-coded badges (topic count, source count, audio
 availability). The details view shows the full summary, plays the stored audio, offers
 **Re-send** to deliver the brief to Matrix again (formatted summary + voice), **Generate voice**
 for text-only briefs, and can **delete** a brief behind an M3 confirmation dialog.
+
+The Workflows tab shows contexts, workflow definitions (with **Run now**), recent runs and — when
+you open a run — its live per-run activity feed, output/error preview and the artifacts it
+produced. The Activity card at the top keeps showing the live overview of everything running.
 
 ## Topics and scheduled tasks
 
@@ -395,8 +442,8 @@ without any streaming connection. Read-only message types (`event.*`, `*.list`, 
 `brief.audio`, `config.get`) are "quiet": they generate no audit events, so polling can never feed
 itself.
 
-Built-in message types: `config.get`, `topic.list/create/update/delete`,
-`job.list/create/update/delete/run`, `workflow.list/run`,
+Built-in message types: `config.get`, `context.list`, `topic.list/create/update/delete`,
+`job.list/create/update/delete/run`, `workflow.list/run/run.list/run.get`,
 `brief.list/get/audio/audio.generate/send/delete`,
 `artifact.list/get/content/data/delete`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
@@ -407,19 +454,19 @@ Built-in message types: `config.get`, `topic.list/create/update/delete`,
 `src/core/status/StatusHub.ts`, not persisted):
 
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
-- Granular states: `Reasoning`, `Waiting for the model`, `Calling tool <tool>`,
-  `Waiting for <tool>`, `Researching "<topic>"`, `Compiling brief` / `Waiting for the compiler
-  model`, `Generating speech` / `Waiting for the local TTS server`, `Sending voice message` /
-  `Waiting for Matrix`, plus job lifecycle entries (`Running job "…"`, finished/failed) and
-  skipped/failed notices. Code-mode runs show `run_code` plus one `agent.tool.*` event for every
-  function the program calls inside the sandbox, so each real search stays visible.
+- Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling brief` /
+  `Waiting for the compiler model`, `Generating speech` / `Waiting for the local TTS server`,
+  `Sending voice message` / `Waiting for Matrix`, follow-up spans, plus job lifecycle entries
+  (`Running job "…"`, finished/failed) and skipped/failed notices. Tool- and model-level activity
+  (`Calling tool <tool>`, `Model requested N tool call(s)`, …) is **not** surfaced to the UI — it
+  stays in the persisted event log as `agent.tool.*` / `agent.*` events for debugging.
 - Running entries show an animated M3 spinner and are **grouped at the bottom of the list**, so
   parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
   Running entries keep a stable order even while their status text updates repeatedly.
-- Sub-activities are nested: an agent's reasoning and tool calls are indented under the span that
-  owns them (research, follow-up Q&A), and no task carries a secondary detail line. Each nested
-  section is capped at 200px, sticks to its newest entries (just the last few actions stay
-  visible), and fades out its top while there is older history above.
+- Sub-activities are nested: a workflow's spans are indented under the span that owns them (e.g.
+  follow-up questions under the research span). Each nested section is capped at 200px, sticks to
+  its newest entries (just the last few actions stay visible), and fades out its top while there is
+  older history above.
 - When nothing is running the header chip shows `idle`, otherwise the running count.
 - The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
   WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;
@@ -448,7 +495,8 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 
 Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.*`, `agent.*` (including
 `agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `brief.*`, `tts.synthesized`,
-`message.voice.sent`, `hook.received`, `chat.*` (commands and follow-up Q&A), `system.*`. Events are
+`message.voice.sent`, `hook.received`, `chat.*` (commands, `chat.message.received` for every allowed
+message, and follow-up Q&A), `system.*`. Events are
 persisted in SQLite (`events` table) and read back through the webhook via `event.pull` /
 `event.wait`, which is what makes the Svelte live view resumable.
 

@@ -8,15 +8,27 @@ import { StatusHub } from "../core/status/StatusHub.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
+import { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
+import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
 import { ArtifactRepository, type ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository, type BriefStore } from "../domain/briefs/BriefRepository.ts";
+import {
+  ContextRepository,
+  DEFAULT_CONTEXT_ID,
+  DEFAULT_CONTEXT_NAME,
+  type ContextStore,
+} from "../domain/contexts/ContextRepository.ts";
 import { JobRepository, type JobStore } from "../domain/jobs/JobRepository.ts";
+import {
+  WorkflowRunRepository,
+  type WorkflowRunStore,
+} from "../domain/runs/WorkflowRunRepository.ts";
 import { TopicRepository, type TopicStore } from "../domain/topics/TopicRepository.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
+import { QuestionWorkflow } from "../workflows/QuestionWorkflow.ts";
 import { registerCommands } from "../commands/registerCommands.ts";
 import { StartupService } from "../startup/StartupService.ts";
-import { QuestionAnswerer } from "../qa/QuestionAnswerer.ts";
 import { KeyValueRepository, type KeyValueStore } from "../domain/kv/KeyValueRepository.ts";
 import { MatrixClient } from "../providers/messaging/MatrixClient.ts";
 import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListener.ts";
@@ -37,6 +49,8 @@ import { createApiServer, type ApiServer } from "../api/server.ts";
 /** Swap any piece of storage; missing pieces fall back to the SQLite stores. */
 export interface KernelStores {
   events?: EventLog;
+  contexts?: ContextStore;
+  runs?: WorkflowRunStore;
   artifacts?: ArtifactStore;
   topics?: TopicStore;
   briefs?: BriefStore;
@@ -64,11 +78,14 @@ export interface Kernel {
   db: SqliteDatabase | null;
   bus: EventBus;
   store: EventLog;
+  contexts: ContextStore;
+  runs: WorkflowRunStore;
   artifacts: ArtifactStore;
   topics: TopicStore;
   briefs: BriefStore;
   jobs: JobStore;
   workflows: WorkflowRegistry;
+  runner: WorkflowRunner;
   scheduler: Scheduler;
   commands: CommandRouter;
   statuses: StatusHub;
@@ -85,6 +102,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const overridden = overrides.stores ?? {};
   const needsSqlite =
     !overridden.events ||
+    !overridden.contexts ||
+    !overridden.runs ||
     !overridden.artifacts ||
     !overridden.topics ||
     !overridden.briefs ||
@@ -99,6 +118,9 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const store = overridden.events ?? new EventStore(sqlite());
   const bus = new EventBus(store, logger.child("events"));
 
+  const contexts = overridden.contexts ?? new ContextRepository(sqlite());
+  contexts.ensure({ id: DEFAULT_CONTEXT_ID, name: DEFAULT_CONTEXT_NAME });
+  const runs = overridden.runs ?? new WorkflowRunRepository(sqlite());
   const artifacts = overridden.artifacts ?? new ArtifactRepository(sqlite());
   const topics = overridden.topics ?? new TopicRepository(sqlite());
   const briefs = overridden.briefs ?? new BriefRepository(artifacts);
@@ -196,9 +218,38 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     }),
   );
 
+  workflows.register(
+    new QuestionWorkflow({
+      llm,
+      webSearch,
+      socialSearch,
+      briefs,
+      statuses,
+      defaults: {
+        recency: config.defaults.searchRecency,
+        resultsPerProvider: config.defaults.searchResultsPerProvider,
+        language: config.defaults.briefLanguage,
+        searchDomains: config.defaults.searchDomains,
+      },
+    }),
+  );
+
+  const runner = new WorkflowRunner({
+    workflows,
+    runs,
+    bus,
+    logger: logger.child("runs"),
+    statuses,
+  });
+  const triggers = new TriggerDispatcher({
+    workflows,
+    runner,
+    logger: logger.child("triggers"),
+  });
+
   const scheduler = new Scheduler({
     jobs,
-    workflows,
+    runner,
     bus,
     logger: logger.child("scheduler"),
     defaultTimezone: config.timezone,
@@ -211,6 +262,9 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   registerCommands(commands, {
     config,
     bus,
+    contexts,
+    runs,
+    runner,
     artifacts,
     topics,
     briefs,
@@ -223,19 +277,6 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   });
 
   const kv = overridden.kv ?? new KeyValueRepository(sqlite());
-  const questionAnswerer = new QuestionAnswerer({
-    llm,
-    webSearch,
-    socialSearch,
-    briefs,
-    statuses,
-    defaults: {
-      recency: config.defaults.searchRecency,
-      resultsPerProvider: config.defaults.searchResultsPerProvider,
-      language: config.defaults.briefLanguage,
-      searchDomains: config.defaults.searchDomains,
-    },
-  });
 
   let chatListener: MatrixCommandListener | null = null;
   if (config.matrix.chatCommands) {
@@ -250,17 +291,36 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
         config,
         jobs,
         workflows,
+        runner,
         scheduler,
         messaging,
         bus,
         logger: logger.child("chat"),
       }),
-      onQuestion: (input) =>
-        questionAnswerer.answer(input.question, {
-          correlationId: crypto.randomUUID(),
-          bus,
-          logger: logger.child("qa"),
-        }),
+      onMessage: async (input) => {
+        const triggered = await triggers.dispatch("matrix", {
+          input: { question: input.body, chain: input.chain },
+          detail: {
+            channel: input.channel,
+            eventId: input.eventId,
+            sender: input.sender,
+            replyToBot: input.replyToBot,
+            ...(input.quotedEventId ? { quotedEventId: input.quotedEventId } : {}),
+          },
+        });
+
+        const answered = triggered.find((run) => {
+          const output = run.output as { answer?: unknown } | undefined;
+          return typeof output?.answer === "string" && output.answer.length > 0;
+        });
+        if (answered) {
+          return { answer: (answered.output as { answer: string }).answer };
+        }
+
+        const failed = triggered.find((run) => run.status === "failed");
+        if (failed) throw new Error(failed.error ?? "workflow failed");
+        return undefined;
+      },
     });
   }
 
@@ -320,11 +380,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     db,
     bus,
     store,
+    contexts,
+    runs,
     artifacts,
     topics,
     briefs,
     jobs,
     workflows,
+    runner,
     scheduler,
     commands,
     statuses,
@@ -343,6 +406,7 @@ function seedDefaultJobIfEmpty(jobs: JobStore, config: AppConfig, logger: Logger
     cron: config.defaults.briefCron,
     timezone: config.timezone,
     workflow: "briefing",
+    contextId: DEFAULT_CONTEXT_ID,
     input: {},
     enabled: true,
   });

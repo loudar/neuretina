@@ -8,12 +8,14 @@ import type { DomainEvent } from "../core/events/types.ts";
 import type { Logger } from "../core/logger.ts";
 import type { Scheduler } from "../core/scheduler/Scheduler.ts";
 import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
+import type { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 import type { JobStore, ScheduledJob } from "../domain/jobs/JobRepository.ts";
 
 export interface ChatCommandDeps {
   config: AppConfig;
   jobs: JobStore;
   workflows: WorkflowRegistry;
+  runner: WorkflowRunner;
   scheduler: Scheduler;
   messaging: MessagingProvider;
   bus: EventBus;
@@ -61,9 +63,17 @@ export function createChatCommandHandler(
     if (workflow) {
       const correlationId = crypto.randomUUID();
       watchCompletion(correlationId, [`workflow.finished`, `workflow.failed`], `Workflow "${workflow.id}"`);
-      void deps.workflows.run(workflow.id, {}, { correlationId }).catch((error) => {
-        log.warn("workflow run failed", { error: errorMessage(error) });
-      });
+      void deps.runner
+        .start({
+          workflow: workflow.id,
+          trigger: "manual",
+          input: {},
+          detail: { source: "chat" },
+          runId: correlationId,
+        })
+        .catch((error) => {
+          log.warn("workflow run failed", { error: errorMessage(error) });
+        });
       return `Started workflow "${workflow.id}" now — I'll post again when it finishes.`;
     }
 

@@ -25,6 +25,8 @@ export interface Brief {
   createdAt: number;
   correlationId?: string;
   workflow?: string;
+  /** Context this brief belongs to. */
+  contextId: string;
   topics: string[];
   markdown: string;
   narration: string;
@@ -42,6 +44,7 @@ export interface BriefWithAudio extends Brief {
 export interface CreateBriefInput {
   correlationId?: string;
   workflow?: string;
+  contextId?: string;
   topics: string[];
   markdown: string;
   narration: string;
@@ -62,10 +65,10 @@ export interface BriefStore {
   attachAudio(id: string, audio: Uint8Array, mimeType: string, durationMs?: number): string;
   get(id: string, includeAudio?: boolean): BriefWithAudio;
   getAudio(id: string): { audio: Uint8Array; mimeType: string } | null;
-  list(limit?: number): Brief[];
+  list(limit?: number, contextId?: string): Brief[];
   /** Searches earlier briefs (markdown + topics); without a query returns the latest. */
-  search(query: string | undefined, limit?: number): Brief[];
-  latest(): Brief | null;
+  search(query: string | undefined, limit?: number, contextId?: string): Brief[];
+  latest(contextId?: string): Brief | null;
   remove(id: string): Brief;
 }
 
@@ -85,6 +88,7 @@ export class BriefRepository implements BriefStore {
       },
       workflow: input.workflow,
       correlationId: input.correlationId,
+      contextId: input.contextId,
     });
     return toBrief(artifact);
   }
@@ -114,6 +118,7 @@ export class BriefRepository implements BriefStore {
       parentId: id,
       workflow: brief.workflow,
       correlationId: brief.correlationId,
+      contextId: brief.contextId,
       metadata: { briefId: id, ...audioDuration },
     });
     this.artifacts.updateMetadata(id, {
@@ -150,17 +155,17 @@ export class BriefRepository implements BriefStore {
     return { audio: audio.data, mimeType: audio.contentType };
   }
 
-  list(limit = 50): Brief[] {
-    return this.artifacts.list({ kind: BRIEF_KIND, limit }).map(toBrief);
+  list(limit = 50, contextId?: string): Brief[] {
+    return this.artifacts.list({ kind: BRIEF_KIND, contextId, limit }).map(toBrief);
   }
 
   /** Searches earlier briefs (markdown + topics); without a query returns the latest. */
-  search(query: string | undefined, limit = 3): Brief[] {
-    return this.artifacts.search(query, { kind: BRIEF_KIND, limit }).map(toBrief);
+  search(query: string | undefined, limit = 3, contextId?: string): Brief[] {
+    return this.artifacts.search(query, { kind: BRIEF_KIND, contextId, limit }).map(toBrief);
   }
 
-  latest(): Brief | null {
-    return this.list(1)[0] ?? null;
+  latest(contextId?: string): Brief | null {
+    return this.list(1, contextId)[0] ?? null;
   }
 
   remove(id: string): Brief {
@@ -184,6 +189,7 @@ function toBrief(artifact: Artifact): Brief {
     createdAt: artifact.createdAt,
     correlationId: artifact.correlationId,
     workflow: artifact.workflow,
+    contextId: artifact.contextId,
     topics: stringArray(artifact.metadata.topics),
     markdown: artifact.content ?? "",
     narration: stringField(artifact.metadata, "narration") ?? "",

@@ -1,6 +1,6 @@
 import type { Logger } from "../logger.ts";
 import type { EventBus } from "../events/EventBus.ts";
-import type { WorkflowRegistry } from "../workflow/Workflow.ts";
+import type { WorkflowRunner } from "../workflow/WorkflowRunner.ts";
 import type { JobStore, ScheduledJob } from "../../domain/jobs/JobRepository.ts";
 import { ValidationError, errorMessage } from "../errors.ts";
 
@@ -11,7 +11,7 @@ interface CronHandle {
 
 export interface SchedulerDeps {
   jobs: JobStore;
-  workflows: WorkflowRegistry;
+  runner: WorkflowRunner;
   bus: EventBus;
   logger: Logger;
   defaultTimezone?: string;
@@ -88,7 +88,7 @@ export class Scheduler {
     trigger: "schedule" | "manual",
     correlationId?: string,
   ): Promise<void> {
-    const { bus, workflows, jobs, logger } = this.deps;
+    const { bus, runner, jobs, logger } = this.deps;
     const runId = correlationId ?? crypto.randomUUID();
     const started = Date.now();
 
@@ -101,7 +101,14 @@ export class Scheduler {
     logger.info("job started", { id: job.id, name: job.name, trigger });
 
     try {
-      await workflows.run(job.workflow, job.input, { correlationId: runId });
+      await runner.start({
+        workflow: job.workflow,
+        contextId: job.contextId,
+        trigger,
+        input: job.input,
+        detail: { jobId: job.id, jobName: job.name },
+        runId,
+      });
       jobs.setRunResult(job.id, "success", Date.now());
       bus.publish(
         "job.finished",

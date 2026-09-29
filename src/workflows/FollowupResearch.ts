@@ -18,6 +18,8 @@ export interface FollowupTask {
 export interface FollowupResearchDeps {
   llm: LlmProvider;
   briefs: BriefStore;
+  /** Context the subagents search past briefs in. */
+  contextId?: string;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;
   defaults: {
@@ -158,7 +160,6 @@ export class FollowupResearch {
           correlationId: context.correlationId,
           bus: context.bus,
           logger: context.logger,
-          statusParentId: status?.id,
         });
         const outcome = parseFollowupOutcome(result.text);
 
@@ -257,7 +258,7 @@ export class FollowupResearch {
         defaultLimit: defaults.resultsPerProvider,
         defaultRecency: defaults.recency,
       }),
-      new BriefSearchTool(this.deps.briefs),
+      new BriefSearchTool(this.deps.briefs, this.deps.contextId),
     ];
 
     return new CodeModeTool({ tools, maxToolCalls: 6 });

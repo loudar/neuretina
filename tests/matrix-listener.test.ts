@@ -4,6 +4,7 @@ import {
   stripReplyFallback,
   MatrixCommandListener,
 } from "../src/providers/messaging/MatrixCommandListener.ts";
+import type { MatrixTriggerInput } from "../src/providers/messaging/MatrixCommandListener.ts";
 import { MatrixClient } from "../src/providers/messaging/MatrixClient.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
@@ -48,7 +49,7 @@ interface SentRequest {
 function setupListener(options: {
   allowedSenders?: string[];
   onCommand?: (command: ChatCommand) => Promise<string>;
-  onQuestion?: (input: { question: string; sender: string; quotedEventId: string }) => Promise<string>;
+  onMessage?: (input: MatrixTriggerInput) => Promise<{ answer?: string } | undefined>;
 }) {
   const db = new SqliteDatabase(":memory:");
   const kv = new KeyValueRepository(db);
@@ -155,10 +156,29 @@ function setupListener(options: {
       sent.push({ method, url, body: typeof init?.body === "string" ? init.body : undefined });
       return Response.json({ event_id: "$evt" });
     }
+    if (url.includes("/event/")) {
+      if (url.includes("botmsg")) {
+        return Response.json({
+          event_id: "$botmsg",
+          sender: "@bot:matrix.test",
+          type: "m.room.message",
+          content: { msgtype: "m.text", body: "Morning brief" },
+        });
+      }
+      if (url.includes("someone-else")) {
+        return Response.json({
+          event_id: "$someone-else",
+          sender: "@someone:matrix.test",
+          type: "m.room.message",
+          content: { msgtype: "m.text", body: "hello" },
+        });
+      }
+      return new Response("not found", { status: 404 });
+    }
     return new Response("not found", { status: 404 });
   });
 
-  const questions: Array<{ question: string; sender: string; quotedEventId: string }> = [];
+  const messages: MatrixTriggerInput[] = [];
   const listener = new MatrixCommandListener({
     client,
     kv,
@@ -172,15 +192,17 @@ function setupListener(options: {
         received.push(command);
         return `ack:${command.command}`;
       }),
-    onQuestion:
-      options.onQuestion ??
+    onMessage:
+      options.onMessage ??
       (async (input) => {
-        questions.push(input);
-        return "Answer text";
+        // Mirrors the qa workflow's trigger binding.
+        if (!input.replyToBot) return undefined;
+        messages.push(input);
+        return { answer: "Answer text" };
       }),
   });
 
-  return { listener, kv, bus, received, sent, questions };
+  return { listener, kv, bus, received, sent, messages };
 }
 
 describe("MatrixCommandListener", () => {
@@ -248,7 +270,7 @@ describe("MatrixCommandListener", () => {
   });
 
   test("answers follow-up questions that quote one of the bot's messages", async () => {
-    const { listener, bus, sent, questions } = setupListener({});
+    const { listener, bus, sent, messages } = setupListener({});
     // Simulate a message the bot sent earlier (summary text delivery).
     bus.publish(
       "message.text.sent",
@@ -262,13 +284,18 @@ describe("MatrixCommandListener", () => {
     listener.stop();
 
     // Only the reply quoting *our* message is answered (with the quote
-    // fallback stripped); the one quoting someone else is ignored.
-    expect(questions).toHaveLength(1);
-    expect(questions[0]).toMatchObject({
-      question: "what is X?",
+    // fallback stripped and the chain resolved); the one quoting someone
+    // else is dispatched but not answered.
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      body: "what is X?",
       sender: "@user:matrix.test",
       quotedEventId: "$botmsg",
+      replyToBot: true,
     });
+    expect(messages[0]?.chain).toEqual([
+      expect.objectContaining({ eventId: "$botmsg", fromBot: true, body: "Morning brief" }),
+    ]);
 
     const reply = sent.find((request) => request.body?.includes("Answer text"));
     expect(reply?.body).toContain('"event_id":"$m5"');

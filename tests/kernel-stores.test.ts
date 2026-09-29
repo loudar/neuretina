@@ -4,8 +4,10 @@ import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { ContextRepository } from "../src/domain/contexts/ContextRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
+import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { testConfig } from "./support.ts";
 
@@ -20,6 +22,8 @@ describe("kernel storage overrides", () => {
       briefs: new BriefRepository(artifacts),
       jobs: new JobRepository(memory),
       kv: new KeyValueRepository(memory),
+      contexts: new ContextRepository(memory),
+      runs: new WorkflowRunRepository(memory),
     };
 
     const kernel = await createKernel({ config: testConfig(), stores });

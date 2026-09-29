@@ -4,17 +4,48 @@
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
   import { statusFeed } from "../lib/statuses.svelte";
+  import type { StatusEntry } from "../lib/statusTypes";
   import {
     flattenStatusEntries,
     orderStatusEntries,
     type OrderedStatusEntry,
   } from "../lib/statusOrder";
 
+  interface Props {
+    /** Only show entries belonging to this run (correlation id). */
+    runId?: string;
+    title?: string;
+    empty?: string;
+  }
+
+  let {
+    runId,
+    title = "Activity",
+    empty = "Idle — nothing has run yet.",
+  }: Props = $props();
+
   let scroller: HTMLDivElement | undefined = $state();
+
+  // Runs nest their sub-activities; a child without a correlation id still
+  // belongs to the run when one of its ancestors carries it.
+  const source = $derived.by(() => {
+    if (!runId) return statusFeed.entries;
+    const byId = new Map(statusFeed.entries.map((entry) => [entry.id, entry]));
+    return statusFeed.entries.filter((entry) => {
+      let current: StatusEntry | undefined = entry;
+      const seen = new Set<string>();
+      while (current && !seen.has(current.id)) {
+        if (current.correlationId === runId) return true;
+        seen.add(current.id);
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+      return false;
+    });
+  });
 
   // Running entries are grouped at the bottom; settled history stays above;
   // sub-activities are nested (and height-capped) under the task they belong to.
-  const ordered = $derived(orderStatusEntries(statusFeed.entries));
+  const ordered = $derived(orderStatusEntries(source));
   const flat = $derived(flattenStatusEntries(ordered));
   const runningCount = $derived(
     flat.filter((entry) => entry.state === "running").length,
@@ -117,7 +148,7 @@
 <Card variant="outlined">
   <div class="stack">
     <div class="toolbar">
-      <h3>Activity</h3>
+      <h3>{title}</h3>
       <div class="chips">
         {#if runningCount > 0}
           <Chip variant="assist" icon={iconBolt}>{runningCount} running</Chip>
@@ -130,8 +161,8 @@
     <div class="feed" bind:this={scroller}>
       {@render rows(ordered)}
 
-      {#if statusFeed.entries.length === 0}
-        <p class="muted">Idle — nothing has run yet.</p>
+      {#if source.length === 0}
+        <p class="muted">{empty}</p>
       {/if}
     </div>
   </div>

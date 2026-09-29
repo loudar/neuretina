@@ -125,7 +125,7 @@ describe("StatusService", () => {
 });
 
 describe("Agent status instrumentation", () => {
-  test("emits reasoning, tool call and waiting entries", async () => {
+  test("keeps tool activity out of the status feed", async () => {
     const hub = new StatusHub();
     const seen: string[] = [];
     hub.subscribe((message) => {
@@ -150,24 +150,16 @@ describe("Agent status instrumentation", () => {
       systemPrompt: "s",
       llm,
       tools: [tool],
-      statuses: hub,
     });
 
-    await agent.run("input", { correlationId: "corr", bus, logger: log });
+    const result = await agent.run("input", { correlationId: "corr", bus, logger: log });
 
-    expect(seen).toContain("Reasoning");
-    expect(seen).toContain("Waiting for the model");
-    expect(seen).toContain("Calling tool web_search");
-    expect(seen).toContain("Waiting for web_search");
-    expect(seen).toContain("Model answered");
-
-    const entries = hub.snapshot();
-    expect(entries.every((entry) => entry.state === "done")).toBe(true);
-    expect(entries.some((entry) => entry.text === "Tool web_search returned (1 results)")).toBe(true);
+    expect(result.text).toBe("Final notes");
+    expect(seen).toEqual([]);
+    expect(hub.snapshot()).toEqual([]);
   });
 
   test("enforces the tool call budget", async () => {
-    const hub = new StatusHub();
     const tool: Tool = {
       name: "web_search",
       description: "search",
@@ -183,7 +175,6 @@ describe("Agent status instrumentation", () => {
       tools: [tool],
       maxSteps: 3,
       maxToolCalls: 1,
-      statuses: hub,
     });
 
     const result = await agent.run("input", { correlationId: "corr", bus, logger: log });

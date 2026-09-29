@@ -5,8 +5,10 @@ import { EventStore } from "../src/core/events/EventStore.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { Scheduler } from "../src/core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
+import { WorkflowRunner } from "../src/core/workflow/WorkflowRunner.ts";
 import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
+import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 
 const log = createLogger("test", { level: "error" });
@@ -23,9 +25,11 @@ function setup(workflow: Workflow) {
   const workflows = new WorkflowRegistry({ bus, logger: log, statuses: new StatusHub() });
   workflows.register(workflow);
   const jobs = new JobRepository(db);
-  const scheduler = new Scheduler({ jobs, workflows, bus, logger: log });
+  const runs = new WorkflowRunRepository(db);
+  const runner = new WorkflowRunner({ workflows, runs, bus, logger: log, statuses: new StatusHub() });
+  const scheduler = new Scheduler({ jobs, runner, bus, logger: log });
   activeScheduler = scheduler;
-  return { scheduler, jobs, bus };
+  return { scheduler, jobs, bus, runs };
 }
 
 describe("cron validation", () => {

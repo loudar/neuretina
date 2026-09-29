@@ -36,13 +36,17 @@ export class BriefSearchTool implements Tool<PastBriefsResult> {
     required: [],
   };
 
-  constructor(private readonly briefs: BriefStore) {}
+  constructor(
+    private readonly briefs: BriefStore,
+    /** Only search briefs from this context. */
+    private readonly contextId?: string,
+  ) {}
 
   async execute(args: Record<string, unknown>): Promise<PastBriefsResult> {
     const query = typeof args.query === "string" ? args.query.trim() : undefined;
     const limit = typeof args.limit === "number" ? Math.min(Math.max(Math.floor(args.limit), 1), 10) : 3;
 
-    const found = this.briefs.search(query || undefined, limit);
+    const found = this.briefs.search(query || undefined, limit, this.contextId);
     if (found.length === 0) {
       return { briefs: [], note: "No earlier briefs are stored yet." };
     }

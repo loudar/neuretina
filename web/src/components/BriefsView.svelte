@@ -25,7 +25,7 @@
   } from "../lib/sources";
   import { markdownToHtml } from "../../../src/core/markdown.ts";
   import DataList from "./DataList.svelte";
-  import Panel from "./Panel.svelte";
+  import Pane from "./Pane.svelte";
 
   let briefs = $state<Brief[]>([]);
   let selected = $state<Brief | null>(null);
@@ -136,211 +136,207 @@
   });
 </script>
 
-<div class="row two">
-  <Panel>
-    <div class="toolbar">
-      <h2>Briefs</h2>
-      <div class="actions">
-        <label
-          class="voice-toggle"
-          title={voiceEnabled
-            ? "Voice + text — switch off for text-only delivery"
-            : "Text only — switch on to include the voice message"}
-        >
-          <Switch
-            bind:checked={voiceEnabled}
-            icons="both"
-            checkedIcon={iconMic}
-            uncheckedIcon={iconMicOff}
-          />
-          <span class="voice-label">Voice</span>
-        </label>
-        <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
-          <Icon icon={iconPlay} /> Run briefing now
-        </Button>
-      </div>
-    </div>
-
-    <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
-      {#snippet children(brief)}
-        <div class="entry" class:selected={selected?.id === brief.id}>
-          <ListItem onclick={() => select(brief.id)} headline={formatListDate(brief.createdAt)}>
-            {#snippet leading()}
-              <Icon icon={iconArticle} />
-            {/snippet}
-            {#snippet trailing()}
-              <div class="badges">
-                <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
-                  <Icon icon={iconLabel} size={14} />{brief.topics.length}
-                </span>
-                <span class="badge sources" title={`${brief.sources.length} source(s)`}>
-                  <Icon icon={iconLink} size={14} />{brief.sources.length}
-                </span>
-                <span
-                  class="badge audio"
-                  class:has-audio={brief.hasAudio}
-                  title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
-                >
-                  <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
-                    ? "audio"
-                    : "text"}
-                </span>
-              </div>
-            {/snippet}
-          </ListItem>
-        </div>
-      {/snippet}
-    </DataList>
-  </Panel>
-
-  <Panel>
-    {#if selected}
-      <div class="toolbar brief-head">
-        <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
-        <span class="brief-time muted" title={formatDateTime(selected.createdAt)}>
-          {formatRelativeTime(selected.createdAt)}{selected.audioDurationMs
-            ? ` · ${Math.round(selected.audioDurationMs / 1000)}s audio`
-            : ""}
-        </span>
-      </div>
-      <div class="actions detail-actions">
-        {#if !selected.hasAudio}
-          <Button variant="tonal" iconType="left" onclick={generateVoice} disabled={generating}>
-            <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
-          </Button>
-        {/if}
-        <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
-          <Icon icon={iconSend} /> Re-send
-        </Button>
-        <Button
-          variant="text"
-          iconType="full"
-          onclick={() => (confirmingDelete = true)}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </div>
-
-      {#if audioUrl}
-        <audio controls src={audioUrl}></audio>
-      {:else if selected.hasAudio}
-        <p class="muted">Loading audio…</p>
-      {/if}
-
-      <div class="brief-text">{@html briefHtml}</div>
-
-      {#if selected.sources.length > 0}
-        <div class="source-section">
-          <div class="source-section-head">
-            <h3>Sources</h3>
-            <span class="total">
-              {filtering
-                ? `${filteredSources.length} of ${selected.sources.length}`
-                : selected.sources.length}
-            </span>
-          </div>
-          <TextFieldOutlined
-            label="Filter sources"
-            leadingIcon={iconSearch}
-            bind:value={sourceFilter}
-            trailing={filtering
-              ? { icon: iconClose, onclick: () => (sourceFilter = "") }
-              : undefined}
-          />
-          {#if sourceGroups.length === 0}
-            <p class="muted">No sources match "{sourceFilter.trim()}".</p>
-          {:else}
-            <div class="source-groups">
-              {#each sourceGroups as group (group.domain)}
-                <details class="source-group" open={filtering}>
-                  <summary>
-                    <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
-                    <span class="domain">{group.domain}</span>
-                    <span class="count">{group.sources.length}</span>
-                    <span class="provider-tags">
-                      {#each group.providers as provider (provider)}
-                        <span class="provider-tag" data-provider={provider}>
-                          {providerLabel(provider)}
-                        </span>
-                      {/each}
-                    </span>
-                    <span class="chevron"><Icon icon={iconExpandMore} size={18} /></span>
-                  </summary>
-                  <ul>
-                    {#each group.sources as source (source.url)}
-                      <li class="source">
-                        <a class="source-head" href={source.url} target="_blank" rel="noreferrer">
-                          <span class="title">{source.title}</span>
-                          <span class="open" aria-hidden="true">
-                            <Icon icon={iconOpenInNew} size={15} />
-                          </span>
-                        </a>
-                        {#if source.provider === "bluesky" && source.snippet}
-                          <p class="snippet">{source.snippet}</p>
-                        {/if}
-                        {#if source.media?.length}
-                          <div class="media">
-                            {#each source.media as item, index (item.thumbUrl + index)}
-                              <a
-                                class="media-item"
-                                href={item.type === "video" ? source.url : item.fullUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                title={item.alt ?? "Open media"}
-                              >
-                                <img
-                                  src={item.thumbUrl}
-                                  alt={item.alt ?? ""}
-                                  loading="lazy"
-                                  width={item.width}
-                                  height={item.height}
-                                  style={item.width && item.height
-                                    ? `aspect-ratio: ${item.width} / ${item.height};`
-                                    : ""}
-                                />
-                                {#if item.type === "video"}
-                                  <span class="play" aria-hidden="true">
-                                    <Icon icon={iconPlay} size={18} />
-                                  </span>
-                                {/if}
-                              </a>
-                            {/each}
-                          </div>
-                        {/if}
-                      </li>
-                    {/each}
-                  </ul>
-                </details>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      {/if}
-    {:else}
-      <h2>Brief details</h2>
-      <p class="muted">Select a brief to read it and play the audio.</p>
-    {/if}
-  </Panel>
-</div>
-
-<Dialog headline="Delete this brief?" bind:open={confirmingDelete}>
-  <p>
-    "{selected?.topics.join(", ") || "Untitled brief"}" from
-    {formatDateTime(selected?.createdAt)} will be permanently removed, including its audio. This
-    cannot be undone.
-  </p>
-  {#snippet buttons()}
-    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
-      Cancel
+<Pane variant="list" title="Briefs">
+  {#snippet actions()}
+    <label
+      class="voice-toggle"
+      title={voiceEnabled
+        ? "Voice + text — switch off for text-only delivery"
+        : "Text only — switch on to include the voice message"}
+    >
+      <Switch
+        bind:checked={voiceEnabled}
+        icons="both"
+        checkedIcon={iconMic}
+        uncheckedIcon={iconMicOff}
+      />
+    </label>
+    <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
+      <Icon icon={iconPlay} /> Run now
     </Button>
-    <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
   {/snippet}
-</Dialog>
+
+  <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
+    {#snippet children(brief)}
+      <div class="entry" class:selected={selected?.id === brief.id}>
+        <ListItem onclick={() => select(brief.id)} headline={formatListDate(brief.createdAt)}>
+          {#snippet leading()}
+            <Icon icon={iconArticle} />
+          {/snippet}
+          {#snippet trailing()}
+            <div class="badges">
+              <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
+                <Icon icon={iconLabel} size={14} />{brief.topics.length}
+              </span>
+              <span class="badge sources" title={`${brief.sources.length} source(s)`}>
+                <Icon icon={iconLink} size={14} />{brief.sources.length}
+              </span>
+              <span
+                class="badge audio"
+                class:has-audio={brief.hasAudio}
+                title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
+              >
+                <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
+                  ? "audio"
+                  : "text"}
+              </span>
+            </div>
+          {/snippet}
+        </ListItem>
+      </div>
+    {/snippet}
+  </DataList>
+</Pane>
+
+<Pane
+  variant="detail"
+  title={selected ? selected.topics.join(", ") || "Untitled brief" : "Brief details"}
+  subtitle={selected
+    ? `${formatRelativeTime(selected.createdAt)}${selected.audioDurationMs
+        ? ` · ${Math.round(selected.audioDurationMs / 1000)}s audio`
+        : ""}`
+    : undefined}
+>
+  {#snippet actions()}
+    {#if selected}
+      {#if !selected.hasAudio}
+        <Button variant="tonal" iconType="left" onclick={generateVoice} disabled={generating}>
+          <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
+        </Button>
+      {/if}
+      <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
+        <Icon icon={iconSend} /> Re-send
+      </Button>
+      <Button
+        variant="text"
+        iconType="full"
+        onclick={() => (confirmingDelete = true)}
+        disabled={deleting}
+      >
+        <Icon icon={iconDelete} />
+      </Button>
+    {/if}
+  {/snippet}
+
+  {#if selected}
+    {#if audioUrl}
+      <audio controls src={audioUrl}></audio>
+    {:else if selected.hasAudio}
+      <p class="muted">Loading audio…</p>
+    {/if}
+
+    <div class="brief-text">{@html briefHtml}</div>
+
+    {#if selected.sources.length > 0}
+      <div class="source-section">
+        <div class="source-section-head">
+          <h3>Sources</h3>
+          <span class="total">
+            {filtering
+              ? `${filteredSources.length} of ${selected.sources.length}`
+              : selected.sources.length}
+          </span>
+        </div>
+        <TextFieldOutlined
+          label="Filter sources"
+          leadingIcon={iconSearch}
+          bind:value={sourceFilter}
+          trailing={filtering
+            ? { icon: iconClose, onclick: () => (sourceFilter = "") }
+            : undefined}
+        />
+        {#if sourceGroups.length === 0}
+          <p class="muted">No sources match "{sourceFilter.trim()}".</p>
+        {:else}
+          <div class="source-groups">
+            {#each sourceGroups as group (group.domain)}
+              <details class="source-group" open={filtering}>
+                <summary>
+                  <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
+                  <span class="domain">{group.domain}</span>
+                  <span class="count">{group.sources.length}</span>
+                  <span class="provider-tags">
+                    {#each group.providers as provider (provider)}
+                      <span class="provider-tag" data-provider={provider}>
+                        {providerLabel(provider)}
+                      </span>
+                    {/each}
+                  </span>
+                  <span class="chevron"><Icon icon={iconExpandMore} size={18} /></span>
+                </summary>
+                <ul>
+                  {#each group.sources as source (source.url)}
+                    <li class="source">
+                      <a class="source-head" href={source.url} target="_blank" rel="noreferrer">
+                        <span class="title">{source.title}</span>
+                        <span class="open" aria-hidden="true">
+                          <Icon icon={iconOpenInNew} size={15} />
+                        </span>
+                      </a>
+                      {#if source.provider === "bluesky" && source.snippet}
+                        <p class="snippet">{source.snippet}</p>
+                      {/if}
+                      {#if source.media?.length}
+                        <div class="media">
+                          {#each source.media as item, index (item.thumbUrl + index)}
+                            <a
+                              class="media-item"
+                              href={item.type === "video" ? source.url : item.fullUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={item.alt ?? "Open media"}
+                            >
+                              <img
+                                src={item.thumbUrl}
+                                alt={item.alt ?? ""}
+                                loading="lazy"
+                                width={item.width}
+                                height={item.height}
+                                style={item.width && item.height
+                                  ? `aspect-ratio: ${item.width} / ${item.height};`
+                                  : ""}
+                              />
+                              {#if item.type === "video"}
+                                <span class="play" aria-hidden="true">
+                                  <Icon icon={iconPlay} size={18} />
+                                </span>
+                              {/if}
+                            </a>
+                          {/each}
+                        </div>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              </details>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+  {:else}
+    <p class="muted">Select a brief to read it and play the audio.</p>
+  {/if}
+
+  <Dialog headline="Delete this brief?" bind:open={confirmingDelete}>
+    <p>
+      "{selected?.topics.join(", ") || "Untitled brief"}" from
+      {formatDateTime(selected?.createdAt)} will be permanently removed, including its audio. This
+      cannot be undone.
+    </p>
+    {#snippet buttons()}
+      <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
+        Cancel
+      </Button>
+      <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
+    {/snippet}
+  </Dialog>
+</Pane>
 
 <style>
   audio {
     width: 100%;
+    margin-bottom: 0.75rem;
   }
 
   .voice-toggle {
@@ -352,30 +348,6 @@
     font-size: 0.85rem;
     cursor: pointer;
     user-select: none;
-  }
-
-  .voice-label {
-    line-height: 1;
-  }
-
-  .brief-head {
-    flex-wrap: nowrap;
-  }
-
-  .brief-head h2 {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .brief-time {
-    font-size: 0.8rem;
-    white-space: nowrap;
-  }
-
-  .detail-actions {
-    justify-content: flex-end;
   }
 
   .entry {
@@ -429,8 +401,6 @@
   }
 
   .brief-text {
-    max-height: 30rem;
-    overflow: auto;
     padding: 0.25rem 0;
     font-size: 0.95rem;
     line-height: 1.55;
@@ -507,6 +477,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    margin-top: 1rem;
   }
 
   .source-section-head {

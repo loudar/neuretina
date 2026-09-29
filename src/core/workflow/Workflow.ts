@@ -1,7 +1,8 @@
 import type { Logger } from "../logger.ts";
 import type { EventBus } from "../events/EventBus.ts";
 import type { StatusHub } from "../status/StatusHub.ts";
-import { NotFoundError, errorMessage } from "../errors.ts";
+import type { TriggerKind, WorkflowRun } from "../../domain/runs/WorkflowRunRepository.ts";
+import { NotFoundError } from "../errors.ts";
 
 export interface WorkflowContext {
   correlationId: string;
@@ -10,22 +11,48 @@ export interface WorkflowContext {
   statuses: StatusHub;
 }
 
+/** What started a run; `detail` carries the trigger-specific origin. */
+export interface TriggerInfo {
+  kind: TriggerKind;
+  detail: Record<string, unknown>;
+}
+
+/** Runtime context a workflow receives: base context plus run identity/scope. */
+export interface WorkflowRunContext extends WorkflowContext {
+  /** Context the run belongs to (defaults to the engine's default context). */
+  contextId?: string;
+  /** The persisted run record (absent for direct/unit-test invocations). */
+  run?: WorkflowRun;
+  trigger?: TriggerInfo;
+}
+
+export interface WorkflowTriggerBinding {
+  kind: TriggerKind;
+  /** Only dispatch when this returns true (e.g. only Matrix replies to the bot). */
+  when?: (detail: Record<string, unknown>) => boolean;
+}
+
 export interface Workflow<TInput = unknown, TOutput = unknown> {
   readonly id: string;
   readonly description: string;
-  run(input: TInput, context: WorkflowContext): Promise<TOutput>;
+  /** Context this workflow belongs to; defaults to the engine's default context. */
+  readonly contextId?: string;
+  /** Extra triggers this workflow accepts (schedule jobs and manual runs are implicit). */
+  readonly triggers?: WorkflowTriggerBinding[];
+  run(input: TInput, context: WorkflowRunContext): Promise<TOutput>;
 }
 
-export interface WorkflowRunOptions {
-  correlationId?: string;
+export interface WorkflowInfo {
+  id: string;
+  description: string;
+  contextId?: string;
+  triggers: TriggerKind[];
 }
 
-export interface WorkflowRunResult<TOutput = unknown> {
-  correlationId: string;
-  output: TOutput;
-  durationMs: number;
-}
-
+/**
+ * Code-registered workflow definitions. Execution lives in `WorkflowRunner`,
+ * which persists a run and gives the workflow its run context.
+ */
 export class WorkflowRegistry {
   private readonly workflows = new Map<string, Workflow>();
 
@@ -43,50 +70,20 @@ export class WorkflowRegistry {
     return workflow;
   }
 
-  list(): Array<{ id: string; description: string }> {
-    return [...this.workflows.values()].map(({ id, description }) => ({ id, description }));
+  /** Definitions with their trigger kinds, for the UI and trigger dispatch. */
+  definitions(): Array<{ workflow: Workflow; triggers: TriggerKind[] }> {
+    return [...this.workflows.values()].map((workflow) => ({
+      workflow,
+      triggers: workflow.triggers?.map((binding) => binding.kind) ?? [],
+    }));
   }
 
-  async run<TOutput = unknown>(
-    id: string,
-    input: unknown,
-    options: WorkflowRunOptions = {},
-  ): Promise<WorkflowRunResult<TOutput>> {
-    const workflow = this.get(id);
-    const correlationId = options.correlationId ?? crypto.randomUUID();
-    const logger = this.deps.logger.child(`workflow:${id}`);
-    const started = Date.now();
-
-    this.deps.bus.publish(
-      "workflow.started",
-      { workflow: id, correlationId, input },
-      { source: "workflow-registry", correlationId },
-    );
-
-    try {
-      const output = (await workflow.run(input, {
-        correlationId,
-        bus: this.deps.bus,
-        logger,
-        statuses: this.deps.statuses,
-      })) as TOutput;
-
-      const durationMs = Date.now() - started;
-      this.deps.bus.publish(
-        "workflow.finished",
-        { workflow: id, correlationId, durationMs, output },
-        { source: "workflow-registry", correlationId },
-      );
-
-      return { correlationId, output, durationMs };
-    } catch (error) {
-      this.deps.bus.publish(
-        "workflow.failed",
-        { workflow: id, correlationId, error: errorMessage(error) },
-        { source: "workflow-registry", correlationId },
-      );
-      logger.error("workflow failed", { correlationId, error: errorMessage(error) });
-      throw error;
-    }
+  list(): WorkflowInfo[] {
+    return [...this.workflows.values()].map(({ id, description, contextId, triggers }) => ({
+      id,
+      description,
+      contextId,
+      triggers: triggers?.map((binding) => binding.kind) ?? [],
+    }));
   }
 }

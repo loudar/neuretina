@@ -15,8 +15,9 @@ import { extractJson } from "../core/json.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { BriefSource, BriefStore } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
+import { DEFAULT_CONTEXT_ID } from "../domain/contexts/ContextRepository.ts";
 import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
-import type { Workflow, WorkflowContext } from "../core/workflow/Workflow.ts";
+import type { Workflow, WorkflowContext, WorkflowRunContext } from "../core/workflow/Workflow.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
 import { FollowupResearch } from "./FollowupResearch.ts";
@@ -136,18 +137,21 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   readonly id = "briefing";
   readonly description =
     "Researches all configured topics (web + social), compiles a neutral brief, generates audio and delivers it.";
+  readonly contextId = DEFAULT_CONTEXT_ID;
+  readonly triggers = [{ kind: "schedule" as const }, { kind: "manual" as const }];
 
   constructor(private readonly deps: BriefingWorkflowDeps) {}
 
   async run(
     input: BriefingWorkflowInput,
-    context: WorkflowContext,
+    context: WorkflowRunContext,
   ): Promise<BriefingWorkflowOutput> {
     const { bus, logger, correlationId } = context;
+    const contextId = context.contextId ?? DEFAULT_CONTEXT_ID;
     const record = (event: string, fields: Record<string, unknown>) =>
       logger.info(event, { correlationId, ...fields });
 
-    const selectedTopics = this.resolveTopics(input);
+    const selectedTopics = this.resolveTopics(input, contextId);
     if (selectedTopics.length === 0) {
       const stored = this.deps.topics.list();
       const reason =
@@ -171,7 +175,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     // One research run covers all topics: the agent plans its own searches,
     // merges overlapping topics and can consult earlier briefs.
-    const researchAgent = this.createResearchAgent();
+    const researchAgent = this.createResearchAgent(contextId);
     const researchSpan = this.deps.statuses?.begin(
       `${correlationId}:research`,
       `Researching ${topicNames.length} topic(s)`,
@@ -184,7 +188,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         correlationId,
         bus,
         logger: logger.child("research"),
-        statusParentId: researchSpan?.id,
       });
     } catch (error) {
       researchSpan?.failed("Research failed");
@@ -259,6 +262,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         topicNames,
         compiled.markdown,
         uniqueSources,
+        contextId,
         context,
       );
       if (deeper) {
@@ -271,6 +275,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const brief = this.deps.briefs.create({
       correlationId,
       workflow: this.id,
+      contextId,
       topics: topicNames,
       markdown: compiled.markdown,
       narration: compiled.narration,
@@ -501,16 +506,16 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     return { skipped: true, topics: topicNames, sources: 0, reason };
   }
 
-  private resolveTopics(input: BriefingWorkflowInput): Topic[] {
+  private resolveTopics(input: BriefingWorkflowInput, contextId: string): Topic[] {
     // Muted topics are never part of a briefing, not even when requested.
-    const active = this.deps.topics.listActive();
+    const active = this.deps.topics.listActive(contextId);
     if (!input.topics || input.topics.length === 0) return active;
 
     const requested = new Set(input.topics.map((name) => name.trim().toLowerCase()));
     return active.filter((topic) => requested.has(topic.name.toLowerCase()));
   }
 
-  private createResearchAgent(): Agent {
+  private createResearchAgent(contextId: string): Agent {
     // Code mode: the researcher writes one program that calls the real tools
     // inside a sandbox, so searches run in parallel and intermediate results
     // never round-trip through the model.
@@ -528,7 +533,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         defaultLimit: this.deps.defaults.resultsPerProvider,
         defaultRecency: this.deps.defaults.recency,
       }),
-      new BriefSearchTool(this.deps.briefs),
+      new BriefSearchTool(this.deps.briefs, contextId),
       new BriefGetTool(this.deps.briefs),
       new FinanceSearchTool(this.deps.finance),
     ];
@@ -542,7 +547,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       maxSteps: 6,
       maxToolCalls: 4,
       temperature: 0.2,
-      statuses: this.deps.statuses,
     });
   }
 
@@ -556,6 +560,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     topics: string[],
     draft: string,
     sources: BriefSource[],
+    contextId: string,
     context: WorkflowContext,
   ): Promise<{ section: string; sources: BriefSource[] } | undefined> {
     const { correlationId, logger } = context;
@@ -567,6 +572,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       const researcher = new FollowupResearch({
         llm: this.deps.llm,
         briefs: this.deps.briefs,
+        contextId,
         webSearch: this.deps.webSearch,
         socialSearch: this.deps.socialSearch,
         defaults: {

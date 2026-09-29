@@ -27,9 +27,28 @@ export interface AppEvents {
   "job.finished": { id: string; name: string; workflow: string; durationMs: number };
   "job.failed": { id: string; name: string; workflow: string; error: string };
 
-  "workflow.started": { workflow: string; correlationId: string; input: unknown };
-  "workflow.finished": { workflow: string; correlationId: string; durationMs: number; output: unknown };
-  "workflow.failed": { workflow: string; correlationId: string; error: string };
+  "workflow.started": {
+    workflow: string;
+    correlationId: string;
+    contextId?: string;
+    trigger?: "schedule" | "matrix" | "manual";
+    input: unknown;
+  };
+  "workflow.finished": {
+    workflow: string;
+    correlationId: string;
+    contextId?: string;
+    trigger?: "schedule" | "matrix" | "manual";
+    durationMs: number;
+    output: unknown;
+  };
+  "workflow.failed": {
+    workflow: string;
+    correlationId: string;
+    contextId?: string;
+    trigger?: "schedule" | "matrix" | "manual";
+    error: string;
+  };
 
   "agent.started": { agent: string; correlationId: string; input: string };
   "agent.tool.invoked": {
@@ -119,6 +138,12 @@ export interface AppEvents {
   "chat.command.received": { channel: string; sender: string; command: string; args: string };
   "chat.command.handled": { channel: string; command: string; reply: string };
   "chat.command.failed": { channel: string; command: string; error: string };
+  "chat.message.received": {
+    channel: string;
+    sender: string;
+    body: string;
+    replyToBot: boolean;
+  };
   "chat.question.received": { channel: string; sender: string; question: string };
   "chat.question.answered": {
     channel: string;

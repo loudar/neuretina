@@ -3,6 +3,7 @@ export interface Topic {
   name: string;
   description?: string;
   muted: boolean;
+  contextId?: string;
   createdAt: number;
 }
 
@@ -31,6 +32,7 @@ export interface Brief {
   artifactId: string;
   createdAt: number;
   correlationId?: string;
+  contextId?: string;
   workflow?: string;
   topics: string[];
   markdown: string;
@@ -52,6 +54,7 @@ export interface ArtifactInfo {
   parentId?: string;
   workflow?: string;
   correlationId?: string;
+  contextId?: string;
   createdAt: number;
   hasContent: boolean;
   hasData: boolean;
@@ -70,6 +73,7 @@ export interface ScheduledJob {
   cron: string;
   timezone?: string;
   workflow: string;
+  contextId?: string;
   input: Record<string, unknown>;
   enabled: boolean;
   createdAt: number;
@@ -81,7 +85,39 @@ export interface ScheduledJob {
 export interface WorkflowInfo {
   id: string;
   description: string;
+  contextId?: string;
+  triggers: string[];
 }
+
+export interface AppContextInfo {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: number;
+  updatedAt: number;
+  topics: number;
+  jobs: number;
+  runs: number;
+  artifacts: number;
+}
+
+export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped";
+
+export interface WorkflowRunInfo {
+  id: string;
+  workflow: string;
+  contextId: string;
+  trigger: string;
+  triggerDetail: Record<string, unknown>;
+  status: WorkflowRunStatus;
+  input: Record<string, unknown>;
+  output?: unknown;
+  error?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export type WorkflowRunDetail = WorkflowRunInfo & { artifacts: ArtifactInfo[] };
 
 export interface DomainEvent<T = unknown> {
   seq: number;
@@ -148,9 +184,14 @@ export async function send<T = unknown>(
 export const commands = {
   config: () => send<AppConfigInfo>("config.get"),
 
+  contexts: {
+    list: () => send<AppContextInfo[]>("context.list"),
+  },
+
   topics: {
-    list: () => send<Topic[]>("topic.list"),
-    create: (input: { name: string; description?: string }) => send<Topic>("topic.create", input),
+    list: (contextId?: string) => send<Topic[]>("topic.list", { contextId }),
+    create: (input: { name: string; description?: string; contextId?: string }) =>
+      send<Topic>("topic.create", input),
     update: (id: string, patch: { name?: string; description?: string; muted?: boolean }) =>
       send<Topic>("topic.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("topic.delete", { id }),
@@ -163,6 +204,7 @@ export const commands = {
       cron: string;
       timezone?: string;
       workflow: string;
+      contextId?: string;
       input?: Record<string, unknown>;
       enabled?: boolean;
     }) => send<ScheduledJob>("job.create", input),
@@ -195,8 +237,11 @@ export const commands = {
 
   workflows: {
     list: () => send<WorkflowInfo[]>("workflow.list"),
-    run: (id: string, input: Record<string, unknown> = {}) =>
-      send<{ started: boolean }>("workflow.run", { id, input }),
+    run: (id: string, input: Record<string, unknown> = {}, contextId?: string) =>
+      send<{ started: boolean }>("workflow.run", { id, input, contextId }),
+    runs: (options: { contextId?: string; workflow?: string; limit?: number } = {}) =>
+      send<WorkflowRunInfo[]>("workflow.run.list", options),
+    runGet: (id: string) => send<WorkflowRunDetail>("workflow.run.get", { id }),
   },
 
   artifacts: {

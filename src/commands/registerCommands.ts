@@ -12,13 +12,19 @@ import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
+import type { ContextStore } from "../domain/contexts/ContextRepository.ts";
 import type { CreateJobInput, JobStore, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
+import type { WorkflowRunStore } from "../domain/runs/WorkflowRunRepository.ts";
 import type { TopicStore } from "../domain/topics/TopicRepository.ts";
+import type { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 
 export interface CommandDeps {
   config: AppConfig;
   bus: EventBus;
+  contexts: ContextStore;
+  runs: WorkflowRunStore;
+  runner: WorkflowRunner;
   artifacts: ArtifactStore;
   topics: TopicStore;
   briefs: BriefStore;
@@ -31,7 +37,7 @@ export interface CommandDeps {
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, artifacts, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
+  const { bus, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -49,13 +55,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     bluesky: { pdsUrl: config.bluesky.pdsUrl },
   }));
 
-  router.register("topic.list", () => topics.list());
+  router.register("topic.list", (payload) => topics.list(optionalString(asRecord(payload), "contextId")));
 
   router.register("topic.create", (payload, context) => {
     const record = asRecord(payload);
     const topic = topics.add({
       name: requireString(record, "name"),
       description: optionalString(record, "description"),
+      contextId: optionalString(record, "contextId"),
     });
     bus.publish(
       "topic.created",
@@ -112,6 +119,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       cron: requireString(record, "cron"),
       timezone: optionalString(record, "timezone"),
       workflow: requireString(record, "workflow"),
+      contextId: optionalString(record, "contextId"),
       input: asOptionalRecord(record, "input"),
       enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
     };
@@ -175,14 +183,50 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return { started: true, jobId: job.id, workflow: job.workflow };
   });
 
+  router.register("context.list", () => {
+    return contexts.list().map((context) => ({
+      ...context,
+      topics: topics.list(context.id).length,
+      jobs: jobs.list().filter((job) => job.contextId === context.id).length,
+      runs: runs.list({ contextId: context.id, limit: 500 }).length,
+      artifacts: artifacts.list({ contextId: context.id, limit: 500 }).length,
+    }));
+  });
+
   router.register("workflow.list", () => workflows.list());
 
-  router.register("workflow.run", (payload) => {
+  router.register("workflow.run.list", (payload) => {
+    const record = asRecord(payload);
+    const limit = typeof record.limit === "number" ? Math.min(Math.max(1, record.limit), 200) : 50;
+    return runs.list({
+      contextId: optionalString(record, "contextId"),
+      workflow: optionalString(record, "workflow"),
+      limit,
+    });
+  });
+
+  router.register("workflow.run.get", (payload) => {
+    const run = runs.get(requireString(asRecord(payload), "id"));
+    return {
+      ...run,
+      artifacts: artifacts.list({ correlationId: run.id, limit: 100 }),
+    };
+  });
+
+  router.register("workflow.run", (payload, context) => {
     const record = asRecord(payload);
     const workflow = workflows.get(requireString(record, "id"));
     const input = asOptionalRecord(record, "input") ?? {};
-    // Failures are recorded as workflow.failed events by the registry.
-    void workflows.run(workflow.id, input).catch(() => undefined);
+    // Failures are recorded as workflow.failed events by the runner.
+    void runner
+      .start({
+        workflow: workflow.id,
+        contextId: optionalString(record, "contextId"),
+        trigger: "manual",
+        input,
+        detail: { source: "webhook", correlationId: context.correlationId },
+      })
+      .catch(() => undefined);
     return { started: true, workflow: workflow.id };
   });
 
@@ -375,6 +419,8 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       kind: optionalString(record, "kind"),
       workflow: optionalString(record, "workflow"),
       parentId: optionalString(record, "parentId"),
+      correlationId: optionalString(record, "correlationId"),
+      contextId: optionalString(record, "contextId"),
       limit: typeof record.limit === "number" ? record.limit : undefined,
     });
   });
@@ -453,9 +499,12 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   // and the persisted event log only contains real activity.
   const READ_ONLY_TYPES = [
     "config.get",
+    "context.list",
     "topic.list",
     "job.list",
     "workflow.list",
+    "workflow.run.list",
+    "workflow.run.get",
     "brief.list",
     "brief.get",
     "brief.audio",
