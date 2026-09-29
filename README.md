@@ -44,6 +44,29 @@ scheduler (Bun.cron, jobs in SQLite)
 Adding a provider means implementing one interface and wiring it in `src/kernel/Kernel.ts`.
 Adding an agent capability means implementing `Tool` and passing it to an `Agent`.
 
+### Swapping implementations
+
+Everything the engine depends on externally sits behind a small interface, and
+`src/kernel/Kernel.ts` is the only place that picks concrete implementations:
+
+| Capability | Interface | Default implementation |
+| --- | --- | --- |
+| LLM text generation | `LlmProvider` (`src/capabilities/llm`) | `OpenAiCompatibleLlmProvider` (OpenCode Go) |
+| Web search | `SearchProvider` (`src/capabilities/search`) | `PerplexitySearchProvider` |
+| Social search | `SearchProvider` | `BlueskySearchProvider` |
+| Financial data | `FinanceProvider` (`src/capabilities/finance`) | `PerplexityFinanceProvider` |
+| Speech | `TextToSpeechProvider` (`src/capabilities/tts`) | `QwenTtsProvider` (local server) |
+| Messaging | `MessagingProvider` (`src/capabilities/messaging`) | `MatrixMessagingProvider` |
+| Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `BriefStore`, `JobStore`, `KeyValueStore` | SQLite repositories (`src/domain`, `src/core/events`) |
+
+`createKernel()` accepts overrides for every provider (`llm`, `webSearch`, `socialSearch`,
+`finance`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, briefs, jobs,
+kv }`) — override all six stores and the kernel never opens SQLite (`kernel.db` is `null`). No
+consumer imports a concrete provider or database: workflows, agents, tools and command handlers
+only know the interfaces. Providers may implement an optional `verify()` (checked with
+`isVerifiable`) so startup validation runs through the interface instead of reaching into config or
+HTTP details.
+
 ### Code mode (efficient tool use)
 
 The researcher does not call search tools one by one. It gets a single `run_code` tool and writes one

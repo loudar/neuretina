@@ -10,19 +10,19 @@ import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import type { ArtifactRepository } from "../domain/artifacts/ArtifactRepository.ts";
-import type { BriefRepository } from "../domain/briefs/BriefRepository.ts";
-import type { CreateJobInput, JobRepository, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
+import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
+import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
+import type { CreateJobInput, JobStore, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
-import type { TopicRepository } from "../domain/topics/TopicRepository.ts";
+import type { TopicStore } from "../domain/topics/TopicRepository.ts";
 
 export interface CommandDeps {
   config: AppConfig;
   bus: EventBus;
-  artifacts: ArtifactRepository;
-  topics: TopicRepository;
-  briefs: BriefRepository;
-  jobs: JobRepository;
+  artifacts: ArtifactStore;
+  topics: TopicStore;
+  briefs: BriefStore;
+  jobs: JobStore;
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
   messaging: MessagingProvider;

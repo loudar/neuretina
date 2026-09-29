@@ -1,6 +1,6 @@
 import type { SearchMedia } from "../../capabilities/search/SearchProvider.ts";
 import { NotFoundError } from "../../core/errors.ts";
-import type { Artifact, ArtifactRepository } from "../artifacts/ArtifactRepository.ts";
+import type { Artifact, ArtifactStore } from "../artifacts/ArtifactRepository.ts";
 
 export interface BriefSource {
   title: string;
@@ -52,8 +52,25 @@ const BRIEF_KIND = "brief";
 const AUDIO_KIND = "audio";
 const MARKDOWN_TYPE = "text/markdown";
 
-export class BriefRepository {
-  constructor(private readonly artifacts: ArtifactRepository) {}
+/** Storage-agnostic brief store; swap the implementation without touching consumers. */
+export interface BriefStore {
+  create(input: CreateBriefInput): Brief;
+  /**
+   * Stores the brief's speech as a generic audio artifact referencing the
+   * brief, and points the brief back at it. Returns the audio artifact id.
+   */
+  attachAudio(id: string, audio: Uint8Array, mimeType: string, durationMs?: number): string;
+  get(id: string, includeAudio?: boolean): BriefWithAudio;
+  getAudio(id: string): { audio: Uint8Array; mimeType: string } | null;
+  list(limit?: number): Brief[];
+  /** Searches earlier briefs (markdown + topics); without a query returns the latest. */
+  search(query: string | undefined, limit?: number): Brief[];
+  latest(): Brief | null;
+  remove(id: string): Brief;
+}
+
+export class BriefRepository implements BriefStore {
+  constructor(private readonly artifacts: ArtifactStore) {}
 
   create(input: CreateBriefInput): Brief {
     const artifact = this.artifacts.create({

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
+import { requestJson } from "../../infra/http/request.ts";
 import { APP_USER_AGENT } from "../../version.ts";
 import type {
   LlmCompletionRequest,
@@ -26,12 +27,14 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   readonly userAgent: string;
 
   private readonly apiKey?: string;
+  private readonly baseUrl: string;
   private readonly client: OpenAI | null;
 
   constructor(options: OpenAiCompatibleLlmOptions) {
     this.name = options.name ?? "openai-compatible";
     this.defaultModel = options.defaultModel;
     this.apiKey = options.apiKey;
+    this.baseUrl = options.baseUrl;
     this.sessionId = options.sessionId ?? crypto.randomUUID();
     this.userAgent = options.userAgent ?? APP_USER_AGENT;
     this.client = options.apiKey
@@ -45,6 +48,30 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 
   get configured(): boolean {
     return this.client !== null;
+  }
+
+  /** Verifies the key/endpoint without spending tokens on a completion. */
+  async verify(): Promise<string> {
+    if (!this.apiKey) {
+      throw new ConfigurationError(
+        "LLM provider is not configured. Set OPENCODE_API_KEY to a valid OpenCode Go API key.",
+      );
+    }
+
+    const response = await requestJson<{ data?: unknown[] }>(
+      this.name,
+      `${this.baseUrl.replace(/\/$/, "")}/models`,
+      {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "x-opencode-session": this.sessionId,
+          "user-agent": this.userAgent,
+        },
+      },
+    );
+
+    const models = Array.isArray(response.data) ? response.data.length : undefined;
+    return models !== undefined ? `reachable, ${models} models` : "reachable";
   }
 
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResult> {

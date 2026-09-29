@@ -1,5 +1,5 @@
 import type { Logger } from "../logger.ts";
-import type { EventStore } from "./EventStore.ts";
+import type { EventLog } from "./EventStore.ts";
 import type { AppEvents } from "./AppEvents.ts";
 import type { DomainEvent, EventHandler, EventInput } from "./types.ts";
 
@@ -19,7 +19,7 @@ export class EventBus {
   private readonly subscriptions = new Set<Subscription>();
 
   constructor(
-    private readonly store: EventStore,
+    private readonly store: EventLog,
     private readonly logger: Logger,
   ) {}
 

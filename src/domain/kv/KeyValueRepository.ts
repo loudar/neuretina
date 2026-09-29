@@ -1,6 +1,13 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
-export class KeyValueRepository {
+/** Storage-agnostic key/value store; swap the implementation freely. */
+export interface KeyValueStore {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  delete(key: string): void;
+}
+
+export class KeyValueRepository implements KeyValueStore {
   constructor(private readonly db: SqliteDatabase) {}
 
   get(key: string): string | null {

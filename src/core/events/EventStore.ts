@@ -11,7 +11,15 @@ interface EventRow {
   payload: string;
 }
 
-export class EventStore {
+/** Storage-agnostic event log; the EventBus only needs this interface. */
+export interface EventLog {
+  append(input: EventInput): DomainEvent;
+  readAfter(seq: number, limit?: number): DomainEvent[];
+  latest(limit?: number): DomainEvent[];
+  count(): number;
+}
+
+export class EventStore implements EventLog {
   constructor(private readonly db: SqliteDatabase) {}
 
   append(input: EventInput): DomainEvent {

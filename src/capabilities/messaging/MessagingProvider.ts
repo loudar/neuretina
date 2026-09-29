@@ -1,3 +1,5 @@
+import type { Verifiable } from "../../core/verifiable.ts";
+
 export interface OutboundTextMessage {
   kind: "text";
   text: string;
@@ -32,14 +34,7 @@ export interface MessagingProvider {
 
 /**
  * Optional capability: providers that can actively verify their configuration
- * (credentials, target channel) without sending a real message.
+ * (credentials, target channel) without sending a real message. Check it with
+ * `isVerifiable` from `src/core/verifiable.ts`.
  */
-export interface VerifiableMessagingProvider extends MessagingProvider {
-  verify(): Promise<string>;
-}
-
-export function isVerifiable(
-  provider: MessagingProvider,
-): provider is VerifiableMessagingProvider {
-  return typeof (provider as Partial<VerifiableMessagingProvider>).verify === "function";
-}
+export interface VerifiableMessagingProvider extends MessagingProvider, Verifiable {}

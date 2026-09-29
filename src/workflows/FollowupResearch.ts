@@ -7,7 +7,7 @@ import type { SearchProvider, SearchRecency } from "../capabilities/search/Searc
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { WorkflowContext } from "../core/workflow/Workflow.ts";
-import type { BriefRepository, BriefSource } from "../domain/briefs/BriefRepository.ts";
+import type { BriefSource, BriefStore } from "../domain/briefs/BriefRepository.ts";
 import { collectSources } from "./agentResults.ts";
 
 export interface FollowupTask {
@@ -17,7 +17,7 @@ export interface FollowupTask {
 
 export interface FollowupResearchDeps {
   llm: LlmProvider;
-  briefs: BriefRepository;
+  briefs: BriefStore;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;
   defaults: {

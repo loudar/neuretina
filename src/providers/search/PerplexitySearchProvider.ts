@@ -33,6 +33,34 @@ export class PerplexitySearchProvider implements SearchProvider {
 
   constructor(private readonly options: PerplexitySearchOptions) {}
 
+  /** Cheap fast-search probe: validates the API key without a full search. */
+  async verify(): Promise<string> {
+    if (!this.options.apiKey) {
+      throw new ConfigurationError(
+        "Perplexity is not configured. Set KEY_PERPLEXITY to a valid API key.",
+      );
+    }
+
+    const response = await requestJson<{ results?: unknown[] }>(
+      this.name,
+      `${this.options.baseUrl}/search`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.options.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: "briefing engine startup check",
+          max_results: 1,
+          search_type: "fast",
+        }),
+      },
+    );
+
+    return `reachable, ${response.results?.length ?? 0} result(s)`;
+  }
+
   async search(query: SearchQuery): Promise<SearchResponse> {
     if (!this.options.apiKey) {
       throw new ConfigurationError(

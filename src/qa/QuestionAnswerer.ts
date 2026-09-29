@@ -4,7 +4,7 @@ import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import type { BriefRepository } from "../domain/briefs/BriefRepository.ts";
+import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
 import { sanitizeNarration, stripMarkdown } from "../workflows/BriefingWorkflow.ts";
 
 const ANSWER_SYSTEM_PROMPT = `You answer short follow-up questions about a briefing you wrote earlier.
@@ -22,7 +22,7 @@ export interface QuestionAnswererDeps {
   llm: LlmProvider;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;
-  briefs: BriefRepository;
+  briefs: BriefStore;
   statuses?: StatusHub;
   defaults: {
     recency: "hour" | "day" | "3days" | "week" | "month" | "year";

@@ -7,7 +7,9 @@ import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { createLogger } from "../src/core/logger.ts";
 import type { DomainEvent } from "../src/core/events/types.ts";
 import type { MessagingProvider, OutboundMessage, SentMessage } from "../src/capabilities/messaging/MessagingProvider.ts";
-import { StubMessaging, stubSearch, testConfig, waitForEvent } from "./support.ts";
+import type { LlmProvider } from "../src/capabilities/llm/LlmProvider.ts";
+import type { TextToSpeechProvider } from "../src/capabilities/tts/TtsProvider.ts";
+import { StubMessaging, StubTts, completion, stubLlm, stubSearch, testConfig, waitForEvent } from "./support.ts";
 import { createKernel } from "../src/kernel/Kernel.ts";
 
 const log = createLogger("test", { level: "error" });
@@ -122,6 +124,8 @@ function buildService(overrides: {
   config?: ReturnType<typeof testConfig>;
   messaging?: MessagingProvider;
   bus?: EventBus;
+  llm?: LlmProvider;
+  tts?: TextToSpeechProvider;
 }) {
   const bus = overrides.bus ?? setupBus();
   const messaging = overrides.messaging ?? new StubMessaging();
@@ -129,13 +133,40 @@ function buildService(overrides: {
     config: overrides.config ?? testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
     bus,
     logger: log,
+    llm: overrides.llm ?? stubLlm(() => completion("ok")),
     webSearch: stubSearch("perplexity", "web", [{ title: "t", url: "https://example.com", snippet: "s", source: "example.com" }]),
     socialSearch: stubSearch("bluesky", "social", [{ title: "t", url: "https://bsky.app/x", snippet: "s", source: "bsky.app" }]),
+    tts: overrides.tts ?? new StubTts(),
     messaging,
     jobs: 1,
     workflows: ["briefing"],
   });
   return { service, bus, messaging };
+}
+
+/** Providers whose live verification fails (used to exercise failed checks). */
+function failingLlm(): LlmProvider & { verify(): Promise<string> } {
+  return {
+    name: "failing-llm",
+    defaultModel: "stub",
+    complete: async () => completion("unused"),
+    verify: async () => {
+      throw new Error("unauthorized");
+    },
+  };
+}
+
+function failingTts(): TextToSpeechProvider & { verify(): Promise<string> } {
+  return {
+    name: "failing-tts",
+    defaultVoiceId: "stub",
+    synthesize: async () => {
+      throw new Error("unused");
+    },
+    verify: async () => {
+      throw new Error("connection refused");
+    },
+  };
 }
 
 describe("StartupService", () => {
@@ -165,7 +196,7 @@ describe("StartupService", () => {
     expect(message.kind).toBe("text");
     if (message.kind === "text") {
       expect(message.text).toContain("[ok] llm");
-      expect(message.text).toContain("local Qwen TTS reachable");
+      expect(message.text).toContain("[ok] tts");
       expect(message.text).toContain("Startup validation: all checks passed.");
     }
 
@@ -173,15 +204,8 @@ describe("StartupService", () => {
   });
 
   test("reports failures in the announcement", async () => {
-    mockFetch(async (input) => {
-      const url = String(input);
-      if (url.endsWith("/v1/models")) return new Response("unauthorized", { status: 401 });
-      if (url.endsWith("/search")) return Response.json({ results: [{}] });
-      if (url.includes("/v1/voices/")) return Response.json({ name: "George" });
-      return new Response("not found", { status: 404 });
-    });
+    const { service, messaging } = buildService({ llm: failingLlm(), tts: failingTts() });
 
-    const { service, messaging } = buildService({});
     const result = await service.run();
 
     expect(result.report.ok).toBe(false);

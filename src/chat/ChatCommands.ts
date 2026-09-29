@@ -8,11 +8,11 @@ import type { DomainEvent } from "../core/events/types.ts";
 import type { Logger } from "../core/logger.ts";
 import type { Scheduler } from "../core/scheduler/Scheduler.ts";
 import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
-import type { JobRepository, ScheduledJob } from "../domain/jobs/JobRepository.ts";
+import type { JobStore, ScheduledJob } from "../domain/jobs/JobRepository.ts";
 
 export interface ChatCommandDeps {
   config: AppConfig;
-  jobs: JobRepository;
+  jobs: JobStore;
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
   messaging: MessagingProvider;

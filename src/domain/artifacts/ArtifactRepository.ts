@@ -68,8 +68,22 @@ const COLUMNS =
   "id, kind, name, content_type, content, metadata, parent_id, workflow, correlation_id, created_at, " +
   "(content IS NOT NULL) AS has_content, (data IS NOT NULL) AS has_data, length(data) AS byte_size";
 
+/** Storage-agnostic artifact store; swap the implementation without touching consumers. */
+export interface ArtifactStore {
+  create(input: CreateArtifactInput): Artifact;
+  get(id: string, options?: { includeData?: boolean }): Artifact;
+  list(options?: ListArtifactsOptions): Artifact[];
+  /** Text search over content, name and metadata (topics, …). */
+  search(query: string | undefined, options?: { kind?: string; limit?: number }): Artifact[];
+  updateMetadata(id: string, patch: Record<string, unknown>): Artifact;
+  /** Replaces the binary payload in place (regenerating a brief's audio). */
+  replaceData(id: string, data: Uint8Array, contentType?: string): Artifact;
+  /** Removes the artifact and everything referencing it as parent. */
+  remove(id: string): Artifact;
+}
+
 /** Stores every workflow output in one table so the engine stays generic. */
-export class ArtifactRepository {
+export class ArtifactRepository implements ArtifactStore {
   constructor(private readonly db: SqliteDatabase) {}
 
   create(input: CreateArtifactInput): Artifact {

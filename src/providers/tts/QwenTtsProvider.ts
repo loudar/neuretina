@@ -1,5 +1,5 @@
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
-import { requestRaw } from "../../infra/http/request.ts";
+import { requestJson, requestRaw } from "../../infra/http/request.ts";
 import type {
   SpeechAudio,
   SpeechRequest,
@@ -33,6 +33,28 @@ export class QwenTtsProvider implements TextToSpeechProvider {
 
   constructor(private readonly options: QwenTtsOptions) {
     this.defaultVoiceId = options.voiceId;
+  }
+
+  /** Verifies the local server is reachable (GET /models). */
+  async verify(): Promise<string> {
+    if (!this.options.baseUrl) {
+      throw new ConfigurationError(
+        "Qwen TTS is not configured. Set QWEN_TTS_BASE_URL to your local server, e.g. http://127.0.0.1:8880/v1.",
+      );
+    }
+
+    const response = await requestJson<{ data?: unknown[] }>(
+      this.name,
+      `${this.options.baseUrl}/models`,
+      {
+        headers: this.options.apiKey
+          ? { Authorization: `Bearer ${this.options.apiKey}` }
+          : {},
+      },
+    );
+
+    const models = Array.isArray(response.data) ? response.data.length : undefined;
+    return `reachable${models !== undefined ? `, ${models} model(s)` : ""}`;
   }
 
   async synthesize(request: SpeechRequest): Promise<SpeechAudio> {

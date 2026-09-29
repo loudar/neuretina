@@ -3,20 +3,22 @@ import { configStatus } from "../config/env.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
+import { isVerifiable } from "../core/verifiable.ts";
 import { StartupValidator } from "../core/startup/StartupValidator.ts";
 import type { CheckOutcome, StartupCheck, StartupReport } from "../core/startup/StartupValidator.ts";
-import { requestJson } from "../infra/http/request.ts";
-import { APP_USER_AGENT } from "../version.ts";
+import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
+import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
-import { isVerifiable } from "../capabilities/messaging/MessagingProvider.ts";
 
 export interface StartupServiceDeps {
   config: AppConfig;
   bus: EventBus;
   logger: Logger;
+  llm: LlmProvider;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;
+  tts: TextToSpeechProvider;
   messaging: MessagingProvider;
   jobs: number;
   workflows: string[];
@@ -52,7 +54,7 @@ export class StartupService {
   }
 
   private buildChecks(): StartupCheck[] {
-    const { config, webSearch, socialSearch, messaging } = this.deps;
+    const { config, llm, webSearch, socialSearch, tts, messaging } = this.deps;
 
     return [
       {
@@ -61,19 +63,8 @@ export class StartupService {
           if (!config.llm.apiKey) {
             return { status: "skipped", detail: "OPENCODE_API_KEY not set" };
           }
-          const url = `${stripTrailingSlash(config.llm.baseUrl)}/models`;
-          const response = await requestJson<{ data?: unknown[] }>("startup", url, {
-            headers: {
-              Authorization: `Bearer ${config.llm.apiKey}`,
-              "x-opencode-session": config.llm.sessionId ?? "briefing-engine-startup",
-              "user-agent": APP_USER_AGENT,
-            },
-          });
-          const models = Array.isArray(response.data) ? response.data.length : undefined;
-          return {
-            status: "ok",
-            detail: models !== undefined ? `reachable, ${models} models` : "reachable",
-          };
+          if (isVerifiable(llm)) return { status: "ok", detail: await llm.verify() };
+          return { status: "ok", detail: "configured" };
         },
       },
       {
@@ -82,23 +73,12 @@ export class StartupService {
           if (!config.perplexity.apiKey) {
             return { status: "skipped", detail: "KEY_PERPLEXITY not set" };
           }
-          const response = await requestJson<{ results?: unknown[] }>(
-            "startup",
-            `${stripTrailingSlash(config.perplexity.baseUrl)}/search`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${config.perplexity.apiKey}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                query: "briefing engine startup check",
-                max_results: 1,
-                search_type: "fast",
-              }),
-            },
-          );
-          return { status: "ok", detail: `reachable, ${response.results?.length ?? 0} result(s)` };
+          if (isVerifiable(webSearch)) return { status: "ok", detail: await webSearch.verify() };
+          const response = await webSearch.search({ query: "briefing engine startup check", limit: 1 });
+          return {
+            status: "ok",
+            detail: `${response.provider} returned ${response.results.length} result(s)`,
+          };
         },
       },
       {
@@ -120,23 +100,8 @@ export class StartupService {
           if (!config.qwenTts.baseUrl) {
             return { status: "skipped", detail: "QWEN_TTS_BASE_URL not set" };
           }
-          const baseUrl = stripTrailingSlash(config.qwenTts.baseUrl);
-          const response = await requestJson<{ data?: unknown[] }>(
-            "startup",
-            `${baseUrl}/models`,
-            {
-              headers: config.qwenTts.apiKey
-                ? { Authorization: `Bearer ${config.qwenTts.apiKey}` }
-                : {},
-            },
-          );
-          const models = Array.isArray(response.data) ? response.data.length : undefined;
-          return {
-            status: "ok",
-            detail: `local Qwen TTS reachable at ${baseUrl}${
-              models !== undefined ? ` (${models} model(s))` : ""
-            }`,
-          };
+          if (isVerifiable(tts)) return { status: "ok", detail: await tts.verify() };
+          return { status: "ok", detail: "configured" };
         },
       },
       {
@@ -230,8 +195,4 @@ export function formatStartupReport(report: StartupReport, meta: StartupReportMe
   );
 
   return lines.join("\n");
-}
-
-function stripTrailingSlash(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url;
 }

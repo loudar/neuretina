@@ -1,5 +1,5 @@
 import { NotFoundError } from "../../core/errors.ts";
-import type { BriefRepository } from "../../domain/briefs/BriefRepository.ts";
+import type { BriefStore } from "../../domain/briefs/BriefRepository.ts";
 import type { Tool } from "../Tool.ts";
 
 export interface PastBriefResult {
@@ -30,7 +30,7 @@ export class BriefGetTool implements Tool<PastBriefResult> {
     required: ["id"],
   };
 
-  constructor(private readonly briefs: BriefRepository) {}
+  constructor(private readonly briefs: BriefStore) {}
 
   async execute(args: Record<string, unknown>): Promise<PastBriefResult> {
     const id = typeof args.id === "string" ? args.id.trim() : "";

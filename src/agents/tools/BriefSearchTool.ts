@@ -1,4 +1,4 @@
-import type { BriefRepository } from "../../domain/briefs/BriefRepository.ts";
+import type { BriefStore } from "../../domain/briefs/BriefRepository.ts";
 import type { Tool } from "../Tool.ts";
 
 export interface PastBriefsResult {
@@ -36,7 +36,7 @@ export class BriefSearchTool implements Tool<PastBriefsResult> {
     required: [],
   };
 
-  constructor(private readonly briefs: BriefRepository) {}
+  constructor(private readonly briefs: BriefStore) {}
 
   async execute(args: Record<string, unknown>): Promise<PastBriefsResult> {
     const query = typeof args.query === "string" ? args.query.trim() : undefined;

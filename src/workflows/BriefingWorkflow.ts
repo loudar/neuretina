@@ -13,9 +13,9 @@ import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsP
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import type { BriefRepository, BriefSource } from "../domain/briefs/BriefRepository.ts";
+import type { BriefSource, BriefStore } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
-import type { Topic, TopicRepository } from "../domain/topics/TopicRepository.ts";
+import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
 import type { Workflow, WorkflowContext } from "../core/workflow/Workflow.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
@@ -31,8 +31,8 @@ export interface BriefingWorkflowInput {
 }
 
 export interface BriefingWorkflowDeps {
-  topics: TopicRepository;
-  briefs: BriefRepository;
+  topics: TopicStore;
+  briefs: BriefStore;
   llm: LlmProvider;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;

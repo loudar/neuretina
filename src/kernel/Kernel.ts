@@ -2,22 +2,22 @@ import { loadConfig, type AppConfig } from "../config/env.ts";
 import { createLogger, type Logger } from "../core/logger.ts";
 import { errorMessage } from "../core/errors.ts";
 import { EventBus } from "../core/events/EventBus.ts";
-import { EventStore } from "../core/events/EventStore.ts";
+import { EventStore, type EventLog } from "../core/events/EventStore.ts";
 import { CommandRouter } from "../core/commands/CommandRouter.ts";
 import { StatusHub } from "../core/status/StatusHub.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
-import { ArtifactRepository } from "../domain/artifacts/ArtifactRepository.ts";
-import { BriefRepository } from "../domain/briefs/BriefRepository.ts";
-import { JobRepository } from "../domain/jobs/JobRepository.ts";
-import { TopicRepository } from "../domain/topics/TopicRepository.ts";
+import { ArtifactRepository, type ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
+import { BriefRepository, type BriefStore } from "../domain/briefs/BriefRepository.ts";
+import { JobRepository, type JobStore } from "../domain/jobs/JobRepository.ts";
+import { TopicRepository, type TopicStore } from "../domain/topics/TopicRepository.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
 import { registerCommands } from "../commands/registerCommands.ts";
 import { StartupService } from "../startup/StartupService.ts";
 import { QuestionAnswerer } from "../qa/QuestionAnswerer.ts";
-import { KeyValueRepository } from "../domain/kv/KeyValueRepository.ts";
+import { KeyValueRepository, type KeyValueStore } from "../domain/kv/KeyValueRepository.ts";
 import { MatrixClient } from "../providers/messaging/MatrixClient.ts";
 import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListener.ts";
 import { createChatCommandHandler } from "../chat/ChatCommands.ts";
@@ -34,9 +34,21 @@ import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import { createApiServer, type ApiServer } from "../api/server.ts";
 
+/** Swap any piece of storage; missing pieces fall back to the SQLite stores. */
+export interface KernelStores {
+  events?: EventLog;
+  artifacts?: ArtifactStore;
+  topics?: TopicStore;
+  briefs?: BriefStore;
+  jobs?: JobStore;
+  kv?: KeyValueStore;
+}
+
 export interface KernelOverrides {
   config?: AppConfig;
   logger?: Logger;
+  /** Storage implementation; the composition root is the only place that picks one. */
+  stores?: KernelStores;
   llm?: LlmProvider;
   webSearch?: SearchProvider;
   socialSearch?: SearchProvider;
@@ -48,13 +60,14 @@ export interface KernelOverrides {
 export interface Kernel {
   config: AppConfig;
   logger: Logger;
-  db: SqliteDatabase;
+  /** The SQLite handle, or null when every store was overridden. */
+  db: SqliteDatabase | null;
   bus: EventBus;
-  store: EventStore;
-  artifacts: ArtifactRepository;
-  topics: TopicRepository;
-  briefs: BriefRepository;
-  jobs: JobRepository;
+  store: EventLog;
+  artifacts: ArtifactStore;
+  topics: TopicStore;
+  briefs: BriefStore;
+  jobs: JobStore;
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
   commands: CommandRouter;
@@ -69,14 +82,27 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const config = overrides.config ?? loadConfig();
   const logger = overrides.logger ?? createLogger("kernel", { level: config.logLevel });
 
-  const db = new SqliteDatabase(config.dbPath);
-  const store = new EventStore(db);
+  const overridden = overrides.stores ?? {};
+  const needsSqlite =
+    !overridden.events ||
+    !overridden.artifacts ||
+    !overridden.topics ||
+    !overridden.briefs ||
+    !overridden.jobs ||
+    !overridden.kv;
+  const db = needsSqlite ? new SqliteDatabase(config.dbPath) : null;
+  const sqlite = (): SqliteDatabase => {
+    if (!db) throw new Error("SQLite storage is not available (all stores were overridden)");
+    return db;
+  };
+
+  const store = overridden.events ?? new EventStore(sqlite());
   const bus = new EventBus(store, logger.child("events"));
 
-  const artifacts = new ArtifactRepository(db);
-  const topics = new TopicRepository(db);
-  const briefs = new BriefRepository(artifacts);
-  const jobs = new JobRepository(db);
+  const artifacts = overridden.artifacts ?? new ArtifactRepository(sqlite());
+  const topics = overridden.topics ?? new TopicRepository(sqlite());
+  const briefs = overridden.briefs ?? new BriefRepository(artifacts);
+  const jobs = overridden.jobs ?? new JobRepository(sqlite());
 
   const llm =
     overrides.llm ??
@@ -196,7 +222,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     statuses,
   });
 
-  const kv = new KeyValueRepository(db);
+  const kv = overridden.kv ?? new KeyValueRepository(sqlite());
   const questionAnswerer = new QuestionAnswerer({
     llm,
     webSearch,
@@ -263,8 +289,10 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       config,
       bus,
       logger: logger.child("startup"),
+      llm,
       webSearch,
       socialSearch,
+      tts,
       messaging,
       jobs: scheduler.registeredCount,
       workflows: workflows.list().map((workflow) => workflow.id),
@@ -283,7 +311,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     chatListener?.stop();
     scheduler.stop();
     api.stop();
-    db.close();
+    db?.close();
   };
 
   return {
@@ -307,7 +335,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   };
 }
 
-function seedDefaultJobIfEmpty(jobs: JobRepository, config: AppConfig, logger: Logger): void {
+function seedDefaultJobIfEmpty(jobs: JobStore, config: AppConfig, logger: Logger): void {
   if (jobs.count() > 0) return;
 
   const job = jobs.create({

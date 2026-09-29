@@ -42,7 +42,19 @@ interface JobRow {
   last_status: string | null;
 }
 
-export class JobRepository {
+/** Storage-agnostic job store; swap the implementation without touching consumers. */
+export interface JobStore {
+  list(): ScheduledJob[];
+  listEnabled(): ScheduledJob[];
+  get(id: string): ScheduledJob;
+  create(input: CreateJobInput): ScheduledJob;
+  update(id: string, patch: UpdateJobInput): ScheduledJob;
+  setRunResult(id: string, status: JobRunStatus, at: number): void;
+  remove(id: string): ScheduledJob;
+  count(): number;
+}
+
+export class JobRepository implements JobStore {
   constructor(private readonly db: SqliteDatabase) {}
 
   list(): ScheduledJob[] {

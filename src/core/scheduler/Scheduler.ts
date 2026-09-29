@@ -1,7 +1,7 @@
 import type { Logger } from "../logger.ts";
 import type { EventBus } from "../events/EventBus.ts";
 import type { WorkflowRegistry } from "../workflow/Workflow.ts";
-import type { JobRepository, ScheduledJob } from "../../domain/jobs/JobRepository.ts";
+import type { JobStore, ScheduledJob } from "../../domain/jobs/JobRepository.ts";
 import { ValidationError, errorMessage } from "../errors.ts";
 
 interface CronHandle {
@@ -10,7 +10,7 @@ interface CronHandle {
 }
 
 export interface SchedulerDeps {
-  jobs: JobRepository;
+  jobs: JobStore;
   workflows: WorkflowRegistry;
   bus: EventBus;
   logger: Logger;

@@ -18,7 +18,18 @@ interface TopicRow {
   created_at: number;
 }
 
-export class TopicRepository {
+/** Storage-agnostic topic store; swap the implementation without touching consumers. */
+export interface TopicStore {
+  list(): Topic[];
+  /** Topics that participate in briefings (muted ones are excluded). */
+  listActive(): Topic[];
+  get(id: string): Topic;
+  add(input: { name: string; description?: string }): Topic;
+  update(id: string, patch: { name?: string; description?: string; muted?: boolean }): Topic;
+  remove(id: string): Topic;
+}
+
+export class TopicRepository implements TopicStore {
   constructor(private readonly db: SqliteDatabase) {}
 
   list(): Topic[] {

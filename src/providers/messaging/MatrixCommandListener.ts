@@ -1,7 +1,7 @@
 import { errorMessage, ProviderError } from "../../core/errors.ts";
 import type { EventBus } from "../../core/events/EventBus.ts";
 import type { Logger } from "../../core/logger.ts";
-import type { KeyValueRepository } from "../../domain/kv/KeyValueRepository.ts";
+import type { KeyValueStore } from "../../domain/kv/KeyValueRepository.ts";
 import type { ChatCommand, ChatCommandSource } from "../../capabilities/chat/ChatChannel.ts";
 import type { MatrixClient } from "./MatrixClient.ts";
 
@@ -15,7 +15,7 @@ export interface QuestionInput {
 
 export interface MatrixCommandListenerOptions {
   client: MatrixClient;
-  kv: KeyValueRepository;
+  kv: KeyValueStore;
   bus: EventBus;
   logger: Logger;
   roomId?: string;
