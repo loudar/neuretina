@@ -99,7 +99,7 @@ export interface AppConfigInfo {
   integrations: {
     llm: boolean;
     perplexity: boolean;
-    elevenlabs: boolean;
+    tts: boolean;
     bluesky: BlueskyMode;
     matrix: boolean;
   };
@@ -111,7 +111,7 @@ export interface AppConfigInfo {
   };
   timezone: string;
   llm: { model: string; baseUrl: string };
-  elevenlabs: { modelId: string; voiceId: string; outputFormat: string };
+  tts: { provider: string; baseUrl: string; model: string; voiceId: string; outputFormat: string };
   matrix: { roomId?: string };
 }
 

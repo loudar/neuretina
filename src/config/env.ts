@@ -49,6 +49,8 @@ export interface AppConfig {
     searchResultsPerProvider: number;
     /** Reputable-source allowlist for web search; empty disables the filter. */
     searchDomains: string[];
+    /** Dispatch follow-up subagents after the first draft. */
+    followups: boolean;
     briefLanguage: string;
   };
   llm: {
@@ -63,6 +65,17 @@ export interface AppConfig {
     /** Model used by the Agent API finance_search tool. */
     financeModel: string;
   };
+  /** Local OpenAI-compatible Qwen3-TTS server (the active speech provider). */
+  qwenTts: {
+    baseUrl: string;
+    model: string;
+    voiceId: string;
+    outputFormat: string;
+    language?: string;
+    speed: number;
+    apiKey?: string;
+  };
+  /** Kept for later; the ElevenLabs provider module is currently unused. */
   elevenlabs: {
     apiKey?: string;
     baseUrl: string;
@@ -153,6 +166,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       searchRecency: recency,
       searchResultsPerProvider: num(env, "DEFAULT_SEARCH_RESULTS", 6),
       searchDomains: parseSearchDomains(env),
+      followups: bool(env, "DEFAULT_FOLLOWUP_RESEARCH", true),
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
     llm: {
@@ -169,6 +183,15 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
         "PERPLEXITY_FINANCE_MODEL",
         "perplexity/glm-5.3-flash",
       )!,
+    },
+    qwenTts: {
+      baseUrl: str(env, "QWEN_TTS_BASE_URL") ?? "",
+      model: str(env, "QWEN_TTS_MODEL", "tts-1")!,
+      voiceId: str(env, "QWEN_TTS_VOICE", "Ryan")!,
+      outputFormat: str(env, "QWEN_TTS_FORMAT", "opus")!,
+      language: str(env, "QWEN_TTS_LANGUAGE"),
+      speed: num(env, "QWEN_TTS_SPEED", 1),
+      apiKey: str(env, "QWEN_TTS_API_KEY"),
     },
     elevenlabs: {
       apiKey: str(env, "KEY_ELEVENLABS"),
@@ -200,7 +223,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
 export interface ConfigStatus {
   llm: boolean;
   perplexity: boolean;
-  elevenlabs: boolean;
+  tts: boolean;
   bluesky: "authenticated" | "public";
   matrix: boolean;
 }
@@ -209,7 +232,7 @@ export function configStatus(config: AppConfig): ConfigStatus {
   return {
     llm: Boolean(config.llm.apiKey),
     perplexity: Boolean(config.perplexity.apiKey),
-    elevenlabs: Boolean(config.elevenlabs.apiKey),
+    tts: Boolean(config.qwenTts.baseUrl),
     bluesky:
       config.bluesky.identifier && config.bluesky.appPassword ? "authenticated" : "public",
     matrix: Boolean(

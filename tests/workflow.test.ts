@@ -35,6 +35,10 @@ interface SetupOptions {
   emptyCompilerOutput?: boolean;
   /** The stub researcher's program calls only the finance lookup. */
   financeOnly?: boolean;
+  /** Enable the follow-up planner/subagents. */
+  followups?: boolean;
+  /** The stub planner reports nothing worth digging into. */
+  noFollowupTasks?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -43,6 +47,7 @@ function setup(options: SetupOptions = {}) {
   const topics = new TopicRepository(db);
   const briefs = new BriefRepository(new ArtifactRepository(db));
   const compilerInputs: string[] = [];
+  const dispatcherInputs: string[] = [];
   let compilerCalls = 0;
 
   const llm = stubLlm((request) => {
@@ -62,6 +67,51 @@ function setup(options: SetupOptions = {}) {
         JSON.stringify({
           markdown: "# Morning brief\n\n## Rust\nAll quiet.\n\n## AI regulation\nHeated debate.",
         }),
+      );
+    }
+
+    if (system.includes("follow-up investigations")) {
+      dispatcherInputs.push(request.messages[1]?.content ?? "");
+      return completion(
+        JSON.stringify({
+          tasks:
+            options.followups && !options.noFollowupTasks
+              ? [{ question: "What are the implications for Rust?" }]
+              : [],
+        }),
+      );
+    }
+
+    if (system.includes("one specific follow-up question")) {
+      const toolMessages = request.messages.filter((message) => message.role === "tool").length;
+      if (toolMessages === 0) {
+        return completion("", [
+          {
+            id: "followup-1",
+            name: "run_code",
+            arguments: {
+              code: `async () => {
+                const [wiki, web] = await Promise.all([
+                  wikipedia_search({ query: "Rust" }),
+                  perplexity_search({ query: "Rust implications" }),
+                ]);
+                return { wiki: wiki.results.length, web: web.results.length };
+              }`,
+            },
+          },
+        ]);
+      }
+      return completion(
+        JSON.stringify({
+          found: true,
+          notes: "Implications: Rust adoption is accelerating https://example.com/article",
+        }),
+      );
+    }
+
+    if (system.includes("Implications")) {
+      return completion(
+        JSON.stringify({ markdown: "Rust adoption keeps accelerating [1]." }),
       );
     }
 
@@ -105,10 +155,16 @@ function setup(options: SetupOptions = {}) {
     tts,
     messaging,
     statuses,
-    defaults: { recency: "day", resultsPerProvider: 5, searchDomains: [], language: "en" },
+    defaults: {
+      recency: "day",
+      resultsPerProvider: 5,
+      searchDomains: [],
+      language: "en",
+      followups: options.followups ?? false,
+    },
   });
 
-  return { workflow, topics, briefs, bus, tts, messaging, statuses, compilerInputs };
+  return { workflow, topics, briefs, bus, tts, messaging, statuses, compilerInputs, dispatcherInputs };
 }
 
 describe("BriefingWorkflow", () => {
@@ -198,7 +254,7 @@ describe("BriefingWorkflow", () => {
   test("falls back to text delivery when speech generation fails", async () => {
     const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
     topics.add({ name: "Rust" });
-    tts.failWith = "ElevenLabs returned HTTP 401";
+    tts.failWith = "local TTS returned HTTP 500";
 
     const output = await workflow.run(
       { deliver: true, generateAudio: true },
@@ -417,8 +473,7 @@ describe("BriefingWorkflow", () => {
     expect(briefs.list()).toHaveLength(0);
   });
 
-  test("passes the collected sources to the compiler for inline citations", async () => {
-    const { workflow, topics, bus, statuses, compilerInputs } = setup();
+    test("passes the collected sources to the compiler for inline citations", async () => {    const { workflow, topics, bus, statuses, compilerInputs } = setup();
     topics.add({ name: "Rust" });
 
     await workflow.run(
@@ -430,6 +485,47 @@ describe("BriefingWorkflow", () => {
     expect(compilerInputs[0]).toContain('"n":1');
     expect(compilerInputs[0]).toContain("Example article");
     expect(compilerInputs[0]).toContain("Another source");
+  });
+
+  test("appends the follow-up findings as an Implications section that is also spoken", async () => {
+    const { workflow, topics, briefs, bus, statuses, compilerInputs, dispatcherInputs } = setup({
+      followups: true,
+    });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c17", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    // The planner saw the first draft...
+    expect(dispatcherInputs[0]).toContain("All quiet");
+    // ...the main brief was not recompiled...
+    expect(compilerInputs).toHaveLength(1);
+    // ...and the findings were appended and read aloud.
+    const stored = briefs.get(output.briefId!);
+    expect(stored.markdown).toContain("## Implications");
+    expect(stored.markdown).toContain("Rust adoption keeps accelerating");
+    expect(stored.narration).toContain("Rust adoption keeps accelerating");
+    expect(stored.narration).not.toContain("[1]");
+  });
+
+  test("skips the second compile when the planner finds nothing worth digging into", async () => {
+    const { workflow, topics, bus, statuses, compilerInputs, dispatcherInputs } = setup({
+      followups: true,
+      noFollowupTasks: true,
+    });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c18", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    expect(dispatcherInputs).toHaveLength(1);
+    expect(compilerInputs).toHaveLength(1);
   });
 
   test("collects finance lookup sources alongside search results", async () => {

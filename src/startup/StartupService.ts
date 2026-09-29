@@ -1,6 +1,6 @@
 import type { AppConfig } from "../config/env.ts";
 import { configStatus } from "../config/env.ts";
-import { errorMessage, ProviderError } from "../core/errors.ts";
+import { errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import { StartupValidator } from "../core/startup/StartupValidator.ts";
@@ -115,42 +115,28 @@ export class StartupService {
         },
       },
       {
-        name: "elevenlabs",
+        name: "tts",
         run: async (): Promise<CheckOutcome> => {
-          if (!config.elevenlabs.apiKey) {
-            return { status: "skipped", detail: "KEY_ELEVENLABS not set" };
+          if (!config.qwenTts.baseUrl) {
+            return { status: "skipped", detail: "QWEN_TTS_BASE_URL not set" };
           }
-          const voiceId = encodeURIComponent(config.elevenlabs.voiceId);
-          try {
-            const voice = await requestJson<{ name?: string }>(
-              "startup",
-              `${stripTrailingSlash(config.elevenlabs.baseUrl)}/v1/voices/${voiceId}`,
-              { headers: { "xi-api-key": config.elevenlabs.apiKey } },
-            );
-            const notes: string[] = [];
-            if (
-              config.elevenlabs.speed !== 1 &&
-              config.elevenlabs.modelId.startsWith("eleven_v4")
-            ) {
-              notes.push(
-                `note: "${config.elevenlabs.modelId}" ignores ELEVENLABS_SPEED — set ELEVENLABS_MODEL_ID=eleven_turbo_v2_5 to apply it`,
-              );
-            }
-            return {
-              status: "ok",
-              detail: `voice "${voice.name ?? config.elevenlabs.voiceId}" available${
-                notes.length > 0 ? ` (${notes.join("; ")})` : ""
-              }`,
-            };
-          } catch (error) {
-            if (error instanceof ProviderError && error.status === 404) {
-              return {
-                status: "failed",
-                detail: `voice "${config.elevenlabs.voiceId}" not found (check ELEVENLABS_VOICE_ID)`,
-              };
-            }
-            throw error;
-          }
+          const baseUrl = stripTrailingSlash(config.qwenTts.baseUrl);
+          const response = await requestJson<{ data?: unknown[] }>(
+            "startup",
+            `${baseUrl}/models`,
+            {
+              headers: config.qwenTts.apiKey
+                ? { Authorization: `Bearer ${config.qwenTts.apiKey}` }
+                : {},
+            },
+          );
+          const models = Array.isArray(response.data) ? response.data.length : undefined;
+          return {
+            status: "ok",
+            detail: `local Qwen TTS reachable at ${baseUrl}${
+              models !== undefined ? ` (${models} model(s))` : ""
+            }`,
+          };
         },
       },
       {

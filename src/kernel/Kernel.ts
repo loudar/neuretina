@@ -25,7 +25,7 @@ import { OpenAiCompatibleLlmProvider } from "../providers/llm/OpenAiCompatibleLl
 import { PerplexitySearchProvider } from "../providers/search/PerplexitySearchProvider.ts";
 import { PerplexityFinanceProvider } from "../providers/finance/PerplexityFinanceProvider.ts";
 import { BlueskySearchProvider } from "../providers/search/BlueskySearchProvider.ts";
-import { ElevenLabsTtsProvider } from "../providers/tts/ElevenLabsTtsProvider.ts";
+import { QwenTtsProvider } from "../providers/tts/QwenTtsProvider.ts";
 import { MatrixMessagingProvider } from "../providers/messaging/MatrixMessagingProvider.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider } from "../capabilities/search/SearchProvider.ts";
@@ -116,14 +116,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
 
   const tts =
     overrides.tts ??
-    new ElevenLabsTtsProvider({
-      apiKey: config.elevenlabs.apiKey,
-      baseUrl: config.elevenlabs.baseUrl,
-      modelId: config.elevenlabs.modelId,
-      voiceId: config.elevenlabs.voiceId,
-      outputFormat: config.elevenlabs.outputFormat,
-      speed: config.elevenlabs.speed,
-      maxCharsPerRequest: config.elevenlabs.maxCharsPerRequest,
+    new QwenTtsProvider({
+      baseUrl: config.qwenTts.baseUrl,
+      model: config.qwenTts.model,
+      voiceId: config.qwenTts.voiceId,
+      outputFormat: config.qwenTts.outputFormat,
+      language: config.qwenTts.language,
+      speed: config.qwenTts.speed,
+      apiKey: config.qwenTts.apiKey,
     });
 
   const matrixClient = new MatrixClient({
@@ -165,6 +165,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
         resultsPerProvider: config.defaults.searchResultsPerProvider,
         searchDomains: config.defaults.searchDomains,
         language: config.defaults.briefLanguage,
+        followups: config.defaults.followups,
       },
     }),
   );
@@ -178,12 +179,6 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   });
 
   seedDefaultJobIfEmpty(jobs, config, logger);
-  if (config.elevenlabs.modelId.startsWith("eleven_v4") && config.elevenlabs.speed !== 1) {
-    logger.warn("ELEVENLABS_SPEED is set but the configured speech model ignores speed", {
-      modelId: config.elevenlabs.modelId,
-      hint: "set ELEVENLABS_MODEL_ID=eleven_turbo_v2_5 to apply ELEVENLABS_SPEED",
-    });
-  }
   scheduler.reload();
 
   const commands = new CommandRouter({ bus, logger: logger.child("commands") });

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { splitText, describeFormat, ElevenLabsTtsProvider } from "../src/providers/tts/ElevenLabsTtsProvider.ts";
 import { buildVoiceContent } from "../src/providers/messaging/MatrixMessagingProvider.ts";
 import { PerplexitySearchProvider, dateDaysAgo } from "../src/providers/search/PerplexitySearchProvider.ts";
+import { QwenTtsProvider } from "../src/providers/tts/QwenTtsProvider.ts";
 import { AGENT_STEP_LIMIT_MESSAGE } from "../src/agents/Agent.ts";
 import { extractJson, stripMarkdown, sanitizeNarration, parseResearchOutcome } from "../src/workflows/BriefingWorkflow.ts";
 
@@ -285,5 +286,61 @@ describe("Perplexity recency and language filters", () => {
 
   test("dateDaysAgo formats MM/DD/YYYY", () => {
     expect(dateDaysAgo(3, new Date(2026, 8, 29, 12).getTime())).toBe("09/26/2026");
+  });
+});
+
+describe("Qwen TTS provider", () => {
+  test("posts to the local OpenAI speech endpoint and maps opus to Ogg", async () => {
+    let url = "";
+    let body: Record<string, unknown> = {};
+    mockFetch(async (input, init) => {
+      url = String(input);
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+    });
+
+    const provider = new QwenTtsProvider({
+      baseUrl: "http://127.0.0.1:8880/v1",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+    });
+
+    const audio = await provider.synthesize({ text: "hello" });
+
+    expect(url).toBe("http://127.0.0.1:8880/v1/audio/speech");
+    expect(body).toMatchObject({
+      model: "tts-1",
+      voice: "Ryan",
+      input: "hello",
+      response_format: "opus",
+    });
+    expect(audio.mimeType).toBe("audio/ogg");
+    expect(audio.extension).toBe("ogg");
+    expect(audio.data).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  test("rejects an empty audio response", async () => {
+    mockFetch(async () => new Response(new Uint8Array(0), { status: 200 }));
+
+    const provider = new QwenTtsProvider({
+      baseUrl: "http://tts.test/v1",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "wav",
+    });
+
+    await expect(provider.synthesize({ text: "x" })).rejects.toThrow(/empty audio/);
+  });
+
+  test("fails clearly when no local server is configured", async () => {
+    const provider = new QwenTtsProvider({
+      baseUrl: "",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+    });
+
+    await expect(provider.synthesize({ text: "x" })).rejects.toThrow(/QWEN_TTS_BASE_URL/);
   });
 });

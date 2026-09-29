@@ -100,7 +100,7 @@ function configuredMatrixConfig() {
   return {
     OPENCODE_API_KEY: "key",
     KEY_PERPLEXITY: "key",
-    KEY_ELEVENLABS: "key",
+    QWEN_TTS_BASE_URL: "http://tts.test/v1",
     BLUESKY_IDENTIFIER: "bot.test",
     BLUESKY_APP_PASSWORD: "pw",
     MATRIX_HOMESERVER_URL: "https://matrix.test",
@@ -114,7 +114,6 @@ function okMockFetch(): void {
     const url = String(input);
     if (url.endsWith("/v1/models")) return Response.json({ data: [{}, {}] });
     if (url.endsWith("/search")) return Response.json({ results: [{}] });
-    if (url.includes("/v1/voices/")) return Response.json({ name: "George" });
     return new Response("not found", { status: 404 });
   });
 }
@@ -154,7 +153,7 @@ describe("StartupService", () => {
       "llm:ok",
       "perplexity:ok",
       "bluesky:ok",
-      "elevenlabs:ok",
+      "tts:ok",
       "web-search:ok",
       "matrix:ok",
     ]);
@@ -166,7 +165,7 @@ describe("StartupService", () => {
     expect(message.kind).toBe("text");
     if (message.kind === "text") {
       expect(message.text).toContain("[ok] llm");
-      expect(message.text).toContain('voice "George" available');
+      expect(message.text).toContain("local Qwen TTS reachable");
       expect(message.text).toContain("Startup validation: all checks passed.");
     }
 
@@ -191,7 +190,8 @@ describe("StartupService", () => {
     const message = (messaging as StubMessaging).sent[0]!.message;
     if (message.kind === "text") {
       expect(message.text).toContain("[failed] llm");
-      expect(message.text).toContain("1 check(s) failed (llm)");
+      expect(message.text).toContain("[failed] tts");
+      expect(message.text).toContain("2 check(s) failed (llm, tts)");
     }
   });
 

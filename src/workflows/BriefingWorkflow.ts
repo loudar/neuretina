@@ -11,12 +11,17 @@ import type { SearchProvider, SearchRecency } from "../capabilities/search/Searc
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import { errorMessage } from "../core/errors.ts";
+import { extractJson } from "../core/json.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { BriefRepository, BriefSource } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import type { Topic, TopicRepository } from "../domain/topics/TopicRepository.ts";
 import type { Workflow, WorkflowContext } from "../core/workflow/Workflow.ts";
 import { markdownToHtml } from "../core/markdown.ts";
+import { collectQueries, collectSources } from "./agentResults.ts";
+import { FollowupResearch } from "./FollowupResearch.ts";
+
+export { extractJson };
 
 export interface BriefingWorkflowInput {
   topics?: string[];
@@ -41,6 +46,8 @@ export interface BriefingWorkflowDeps {
     /** Reputable-source allowlist for web search; empty disables the filter. */
     searchDomains: string[];
     language: string;
+    /** Dispatch follow-up subagents after the first draft. */
+    followups: boolean;
   };
 }
 
@@ -82,7 +89,7 @@ Set "found" to false when nothing relevant to any topic came back.`;
 
 const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral morning briefing. You receive research notes covering several topics (they may overlap) and compile ONE short, conversational brief.
 
-Spoken delivery — this text is read aloud by a text-to-speech model (ElevenLabs), sentence by sentence. Write for the ear:
+Spoken delivery — this text is read aloud by a text-to-speech model, sentence by sentence. Write for the ear:
 - Complete, speakable sentences with a natural rhythm. Avoid fragments, stacked parentheticals, slashes, and symbol-heavy shorthand.
 - Write out anything that sounds wrong when read mechanically: "percent" instead of %, "and" instead of &, natural number and date wording, and expand uncommon abbreviations on first mention.
 - Everyday expressions and idioms are welcome when they fit ("the industry is holding its breath", "a rough week for regulators") — but never let them smuggle in an opinion; keep the neutrality rules below.
@@ -242,13 +249,32 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       throw error;
     }
 
+    // The first draft exists: dispatch subagents to dig into implications and
+    // context it may be missing, then append what they found as an
+    // "Implications" section. A failed follow-up pass never throws away the
+    // draft — it just keeps it.
+    let briefSources = uniqueSources;
+    if (this.deps.defaults.followups) {
+      const deeper = await this.researchFollowups(
+        topicNames,
+        compiled.markdown,
+        uniqueSources,
+        context,
+      );
+      if (deeper) {
+        const markdown = `${compiled.markdown.trimEnd()}\n\n## Implications\n\n${deeper.section.trim()}`;
+        compiled = { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
+        briefSources = deeper.sources;
+      }
+    }
+
     const brief = this.deps.briefs.create({
       correlationId,
       workflow: this.id,
       topics: topicNames,
       markdown: compiled.markdown,
       narration: compiled.narration,
-      sources: uniqueSources,
+      sources: briefSources,
     });
 
     bus.publish(
@@ -268,7 +294,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         briefId: brief.id,
         artifactId: brief.artifactId,
         topics: topicNames,
-        sources: uniqueSources.length,
+        sources: briefSources.length,
         characters: compiled.markdown.length,
       },
       { source: `workflow:${this.id}`, correlationId },
@@ -279,7 +305,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       skipped: false,
       briefId: brief.id,
       topics: topicNames,
-      sources: uniqueSources.length,
+      sources: briefSources.length,
     };
 
     const shouldDeliver = input.deliver ?? true;
@@ -293,7 +319,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       });
       let speech: SpeechAudio | undefined;
       try {
-        speechSpan?.update("Waiting for ElevenLabs");
+        speechSpan?.update("Waiting for the local TTS server");
         speech = await this.deps.tts.synthesize({ text: compiled.narration });
         speechSpan?.done(
           `Speech ready (${Math.round(speech.data.byteLength / 1024)} KB${
@@ -520,6 +546,69 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     });
   }
 
+  /**
+   * Plans follow-up questions from the first draft and dispatches one
+   * subagent per question (Wikipedia, reputable web search, social search,
+   * past briefs), then writes the "Implications" section that gets appended
+   * to the brief. Failures are swallowed so the draft survives.
+   */
+  private async researchFollowups(
+    topics: string[],
+    draft: string,
+    sources: BriefSource[],
+    context: WorkflowContext,
+  ): Promise<{ section: string; sources: BriefSource[] } | undefined> {
+    const { correlationId, logger } = context;
+    const span = context.statuses?.begin(`${correlationId}:followups`, "Digging deeper", {
+      correlationId,
+    });
+
+    try {
+      const researcher = new FollowupResearch({
+        llm: this.deps.llm,
+        briefs: this.deps.briefs,
+        webSearch: this.deps.webSearch,
+        socialSearch: this.deps.socialSearch,
+        defaults: {
+          recency: this.deps.defaults.recency,
+          resultsPerProvider: this.deps.defaults.resultsPerProvider,
+          language: this.deps.defaults.language,
+          searchDomains: this.deps.defaults.searchDomains,
+        },
+      });
+
+      const tasks = await researcher.plan({ topics, draft }, context, span?.id);
+      if (tasks.length === 0) {
+        span?.done("Nothing worth digging into");
+        return undefined;
+      }
+
+      const findings = await researcher.research(tasks, context, span?.id);
+      if (!findings.notes.trim()) {
+        span?.done("Follow-ups found nothing new");
+        return undefined;
+      }
+
+      const mergedSources = dedupeSources([...sources, ...findings.sources]).slice(0, 80);
+      const section = await researcher.writeImplications(findings, mergedSources, context, span?.id);
+      if (!section.trim()) {
+        span?.done("Follow-ups found nothing new");
+        return undefined;
+      }
+
+      span?.done(
+        `Implications ready (${tasks.length} follow-up(s), ${mergedSources.length} source(s))`,
+      );
+      return { section, sources: mergedSources };
+    } catch (error) {
+      span?.failed(`Digging deeper failed (${errorMessage(error)})`);
+      logger.warn("follow-up research failed; keeping the draft", {
+        error: errorMessage(error),
+      });
+      return undefined;
+    }
+  }
+
   private async compile(
     research: { topics: string[]; notes: string; sources: BriefSource[] },
     context: WorkflowContext,
@@ -554,7 +643,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const userContent = compress
       ? JSON.stringify({
           language: this.deps.defaults.language,
-          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact, every inline source link, the split-opinion reporting and the one-paragraph-per-subtopic shape, with no lists or extra sections. Note that it might be read out by elevenlabs text-to-speech, so keep it speakable and natural. Do not invent any material.`,
+          instruction: `This draft is ${compress.words} words; the budget is ${WORD_BUDGET}. Rewrite it shorter, keeping every fact, every inline source link, the split-opinion reporting and the one-paragraph-per-subtopic shape, with no lists or extra sections. Note that it might be read out by a text-to-speech model, so keep it speakable and natural. Do not invent any material.`,
           draft: compress.draft,
         })
       : JSON.stringify({
@@ -635,58 +724,6 @@ function recencyLabel(recency: string): string {
   return RECENCY_LABELS[recency] ?? recency;
 }
 
-function collectSources(result: AgentRunResult): BriefSource[] {
-  const sources: BriefSource[] = [];
-  for (const step of result.steps) {
-    for (const invocation of step.invocations) {
-      const response = invocation.result as
-        | { results?: unknown; provider?: unknown }
-        | undefined;
-      if (!response || !Array.isArray(response.results)) continue;
-      const fallback =
-        typeof response.provider === "string" ? response.provider : invocation.tool;
-      for (const item of response.results) {
-        if (!item || typeof item !== "object") continue;
-        const record = item as Record<string, unknown>;
-        if (typeof record.url !== "string" || !record.url) continue;
-        const snippet =
-          typeof record.snippet === "string" && record.snippet.trim()
-            ? record.snippet.trim()
-            : undefined;
-        const media = Array.isArray(record.media) ? (record.media as BriefSource["media"]) : undefined;
-        sources.push({
-          title:
-            typeof record.title === "string" && record.title ? record.title : record.url,
-          url: record.url,
-          provider: typeof record.provider === "string" ? record.provider : fallback,
-          ...(snippet ? { snippet } : {}),
-          ...(media && media.length > 0 ? { media } : {}),
-        });
-      }
-    }
-  }
-  return sources;
-}
-
-function collectQueries(result: AgentRunResult): string[] {
-  const queries: string[] = [];
-  for (const step of result.steps) {
-    for (const invocation of step.invocations) {
-      const query = invocation.args.query ?? invocation.args.question;
-      if (typeof query === "string" && query.trim()) queries.push(query.trim());
-
-      // Code mode reports the queries made inside the sandbox.
-      const recorded = (invocation.result as { queries?: unknown } | undefined)?.queries;
-      if (Array.isArray(recorded)) {
-        for (const item of recorded) {
-          if (typeof item === "string" && item.trim()) queries.push(item.trim());
-        }
-      }
-    }
-  }
-  return queries;
-}
-
 /**
  * The research agent finishes with `{"found": boolean, "notes": "…",
  * "missingTopics": […]}`. Falls back to treating the raw text as notes when
@@ -749,19 +786,6 @@ export function formatNoMaterialNotice(topics: string[], queries: string[]): str
 
   lines.push("", "No summary or audio was generated.");
   return lines.join("\n");
-}
-
-export function extractJson<T>(text: string): T | undefined {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const candidate = fenced?.[1] ?? text;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return undefined;
-  try {
-    return JSON.parse(candidate.slice(start, end + 1)) as T;
-  } catch {
-    return undefined;
-  }
 }
 
 export function stripMarkdown(text: string): string {

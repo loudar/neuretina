@@ -17,7 +17,8 @@ scheduler (Bun.cron, jobs in SQLite)
                        ├─ bluesky_search  → AT Protocol searchPosts │
                        └─ past_briefs     → SQLite brief history    │
         compiler LLM → neutral markdown brief + spoken narration    │
-        ElevenLabs   → speech audio (eleven_v4)                     │
+        follow-up subagents → implications/context → recompile       │
+        Qwen3-TTS    → speech audio (local server)                  │
         Matrix       → voice message (MSC3245)                      │
                                                                      ▼
                           every step publishes typed events → EventBus → SQLite event log
@@ -32,7 +33,7 @@ scheduler (Bun.cron, jobs in SQLite)
 | --- | --- | --- |
 | Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, logger, errors |
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
-| Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, ElevenLabs, Matrix) |
+| Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, local Qwen3-TTS, Matrix; the ElevenLabs module is kept but unused) |
 | Domain | `src/domain` | SQLite repositories: generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` orchestrating research → compile → TTS → delivery |
@@ -158,20 +159,29 @@ bun test
   enabled for your key; if a lookup fails the researcher continues with web/social results and the
   error is visible in the activity feed.
 
-### ElevenLabs (speech)
+### Qwen3-TTS (speech, local)
 
-- API key → `KEY_ELEVENLABS`.
-- `ELEVENLABS_MODEL_ID=eleven_v4` (highest-quality model; `eleven_v4_turbo` also works).
-- `ELEVENLABS_SPEED` controls the speaking rate (0.7–1.2, default 1.15). **The Eleven v4 family
-  ignores speed** — set `ELEVENLABS_MODEL_ID=eleven_turbo_v2_5` if you want the rate applied
-  (the startup check warns when speed is configured with a v4 model).
-- Pick a voice from the voice library and set `ELEVENLABS_VOICE_ID`.
-- `opus_48000_128` is the default output format because Matrix clients render Ogg/Opus as a
-  native voice bubble.
-- Resilient by default: transient provider failures (auth blips, 429/5xx, network errors) are
-  retried twice with backoff and error messages include the API's own explanation. If speech
-  generation still fails after retries, the compiled brief is **delivered as a text message
-  instead** — a flaky TTS call never throws away a good brief.
+Speech is synthesized by a **local Qwen3-TTS server** speaking the OpenAI `POST /audio/speech`
+interface — no text leaves the machine. Any of the common servers works: vLLM-Omni
+(`vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --omni`), Qwen3-TTS-Openai-Fastapi,
+qwen3-tts-server, or a similar wrapper.
+
+- `QWEN_TTS_BASE_URL` — server base URL including `/v1` (required; e.g.
+  `http://127.0.0.1:8880/v1`). Speech is skipped entirely when it is unset, and briefs are
+  delivered as text.
+- `QWEN_TTS_MODEL` — model name; most local servers accept and ignore it (`tts-1`).
+- `QWEN_TTS_VOICE` — preset speaker (`Ryan`, `vivian`, `serena`, …) or an OpenAI alias
+  (`alloy`, `nova`, …); the server maps aliases.
+- `QWEN_TTS_FORMAT` — `opus` (default) renders as a native voice bubble in Matrix clients;
+  `wav`/`mp3`/`flac`/`aac`/`pcm` also work.
+- `QWEN_TTS_SPEED`, `QWEN_TTS_LANGUAGE` (e.g. `English`) and `QWEN_TTS_API_KEY` are optional.
+- Resilient by default: transient failures (429/5xx, network errors) are retried twice with
+  backoff and error messages include the server's own explanation. If speech generation still
+  fails, the compiled brief is **delivered as a text message instead** — a flaky TTS call never
+  throws away a good brief.
+
+The ElevenLabs provider module is kept in the repo but unused; its `ELEVENLABS_*` settings are
+ignored.
 
 ### Bluesky / AT Protocol search
 
@@ -309,6 +319,14 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
   were tried. Topics that found nothing are marked as missing when other topics did have
   material. The same notice path is used when the agent runs out of steps or returns empty notes,
   and the compiler is never allowed to store an empty brief.
+- **Follow-up research:** once the first draft exists, a planner model looks for claims that deserve
+  a deeper look — implications, causes, missing context — and dispatches up to three subagents (one
+  question each). Every subagent can use Wikipedia, the reputable web search, social search and past
+  briefs and returns compact findings with attributions; their sources are merged into the brief's
+  source list and a short **"Implications" section is appended** to the brief — which is also read
+  aloud with the rest. If nothing qualifies, or the follow-ups find nothing, the draft is kept
+  unchanged, and a failed follow-up never throws away a good brief. Disable the whole step with
+  `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
   an event.
@@ -366,7 +384,7 @@ Built-in message types: `config.get`, `topic.list/create/update/delete`,
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
 - Granular states: `Reasoning`, `Waiting for the model`, `Calling tool <tool>`,
   `Waiting for <tool>`, `Researching "<topic>"`, `Compiling brief` / `Waiting for the compiler
-  model`, `Generating speech` / `Waiting for ElevenLabs`, `Sending voice message` /
+  model`, `Generating speech` / `Waiting for the local TTS server`, `Sending voice message` /
   `Waiting for Matrix`, plus job lifecycle entries (`Running job "…"`, finished/failed) and
   skipped/failed notices. Code-mode runs show `run_code` plus one `agent.tool.*` event for every
   function the program calls inside the sandbox, so each real search stays visible.
@@ -391,7 +409,7 @@ integration. The results are logged and shown in the activity feed; with `STARTU
 - `llm` — `GET /models` on the LLM endpoint (no tokens spent)
 - `perplexity` — one `search_type: "fast"` probe query
 - `bluesky` — a real `searchPosts` call through the PDS (skipped in public mode)
-- `elevenlabs` — verifies the configured voice exists
+- `tts` — the local Qwen3-TTS server answers on `{QWEN_TTS_BASE_URL}/models`
 - `web-search` — one result through the configured search provider
 - `matrix` — active pre-flight: resolves credentials (login if needed), `whoami`, and confirms
   the bot is **joined to the target room**

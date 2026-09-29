@@ -37,18 +37,9 @@ export interface CodeModeResult {
   durationMs: number;
 }
 
-const DESCRIPTION = `Run JavaScript to do research in one step, instead of calling each tool separately. Write one async arrow function that plans and runs the whole lookup and returns only the findings you need. Inside the sandbox these async functions are available:
+const DESCRIPTION_INTRO = `Run JavaScript to do research in one step, instead of calling each tool separately. Write one async arrow function that plans and runs the whole lookup and returns only the findings you need. Inside the sandbox these async functions are available:
 
-perplexity_search({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
-  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).
-bluesky_search({ query, limit?, recency? }) -> same shape
-  Recent Bluesky posts, where hype, skepticism and disagreement show up.
-perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }
-  Structured market data for public companies and ETFs. Ask a business question naming the company or ticker.
-past_briefs({ query?, limit? }) -> { briefs: [{ id, date, topics, excerpt }] }
-  Search earlier briefings by topic or keyword, to build on what was already covered.
-past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
-  Open one earlier briefing in full, using an id from past_briefs.
+{{tools}}
 
 The function must return a JSON-serializable value — that value is all you get back, so filter, merge and trim inside the code (Promise.all, loops, if-statements) and return compact findings rather than raw tool output. console.log is captured and returned with the result.
 
@@ -68,6 +59,28 @@ async () => {
 
 Only the functions above are available: no imports, no network, no filesystem. If a call fails, fix the code and run it again.`;
 
+/** Model-facing docs per sandbox function; the description lists what is provided. */
+const TOOL_DOCS: Record<string, string> = {
+  perplexity_search: `perplexity_search({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
+  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).`,
+  wikipedia_search: `wikipedia_search({ query, limit? }) -> same shape
+  Wikipedia only (all language editions), for background, definitions and context.`,
+  bluesky_search: `bluesky_search({ query, limit?, recency? }) -> same shape
+  Recent Bluesky posts, where hype, skepticism and disagreement show up.`,
+  perplexity_finance: `perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }
+  Structured market data for public companies and ETFs. Ask a business question naming the company or ticker.`,
+  past_briefs: `past_briefs({ query?, limit? }) -> { briefs: [{ id, date, topics, excerpt }] }
+  Search earlier briefings by topic or keyword, to build on what was already covered.`,
+  past_brief: `past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
+  Open one earlier briefing in full, using an id from past_briefs.`,
+};
+
+function describeTools(tools: Tool[]): string {
+  return tools
+    .map((tool) => TOOL_DOCS[tool.name] ?? `${tool.name}({ ... }) -> tool result`)
+    .join("\n\n");
+}
+
 /**
  * Code mode: the model gets one tool, writes a program that calls the real
  * tools inside a sandbox, and only the program's return value and captured
@@ -75,7 +88,7 @@ Only the functions above are available: no imports, no network, no filesystem. I
  */
 export class CodeModeTool implements Tool<CodeModeResult> {
   readonly name = "run_code";
-  readonly description = DESCRIPTION;
+  readonly description: string;
   readonly parameters: Record<string, unknown> = {
     type: "object",
     properties: {
@@ -97,6 +110,7 @@ export class CodeModeTool implements Tool<CodeModeResult> {
   constructor(options: CodeModeToolOptions) {
     if (options.tools.length === 0) throw new Error("CodeModeTool needs at least one tool");
     this.tools = options.tools;
+    this.description = DESCRIPTION_INTRO.replace("{{tools}}", describeTools(this.tools));
     this.maxToolCalls = options.maxToolCalls ?? 12;
     this.maxResultChars = options.maxResultChars ?? 4000;
     this.maxLogChars = options.maxLogChars ?? 1500;

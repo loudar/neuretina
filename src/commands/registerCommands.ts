@@ -38,10 +38,12 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     defaults: config.defaults,
     timezone: config.timezone,
     llm: { model: config.llm.model, baseUrl: config.llm.baseUrl },
-    elevenlabs: {
-      modelId: config.elevenlabs.modelId,
-      voiceId: config.elevenlabs.voiceId,
-      outputFormat: config.elevenlabs.outputFormat,
+    tts: {
+      provider: "qwen-tts",
+      baseUrl: config.qwenTts.baseUrl,
+      model: config.qwenTts.model,
+      voiceId: config.qwenTts.voiceId,
+      outputFormat: config.qwenTts.outputFormat,
     },
     matrix: { roomId: config.matrix.roomId },
     bluesky: { pdsUrl: config.bluesky.pdsUrl },
@@ -244,7 +246,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         detail: brief.topics.join(", "),
       });
       try {
-        status.update("Waiting for ElevenLabs");
+        status.update("Waiting for the local TTS server");
         const speech = await tts.synthesize({ text: brief.narration });
         audioArtifactId = briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
         audio = { audio: speech.data, mimeType: speech.mimeType };

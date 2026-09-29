@@ -29,7 +29,7 @@
           { label: "LLM", ok: config.integrations.llm },
           { label: "Web search", ok: config.integrations.perplexity },
           { label: "Bluesky", ok: config.integrations.bluesky === "authenticated" },
-          { label: "Speech", ok: config.integrations.elevenlabs },
+          { label: "Speech", ok: config.integrations.tts },
           { label: "Matrix", ok: config.integrations.matrix },
         ]
       : [],

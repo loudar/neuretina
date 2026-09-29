@@ -11,6 +11,8 @@ export interface SearchToolOptions {
   defaultLanguage?: string;
   /** Reputable-source allowlist applied by default (empty = no filter). */
   domains?: string[];
+  /** When false the domains are a hard restriction and no scope override is offered. */
+  allowScope?: boolean;
 }
 
 export class SearchTool implements Tool<SearchResponse> {
@@ -23,6 +25,7 @@ export class SearchTool implements Tool<SearchResponse> {
   private readonly defaultRecency?: SearchToolOptions["defaultRecency"];
   private readonly defaultLanguage?: string;
   private readonly domains: string[];
+  private readonly allowScope: boolean;
 
   constructor(options: SearchToolOptions) {
     this.provider = options.provider;
@@ -31,10 +34,11 @@ export class SearchTool implements Tool<SearchResponse> {
     this.defaultRecency = options.defaultRecency;
     this.defaultLanguage = options.defaultLanguage;
     this.domains = options.domains ?? [];
+    this.allowScope = options.allowScope ?? true;
 
     const base = options.description ?? describeKind(this.provider);
     this.description =
-      this.domains.length > 0
+      this.domains.length > 0 && this.allowScope
         ? `${base} Results are limited to a curated allowlist of reputable sources (established outlets, Wikipedia, primary .gov sources) by default; pass scope "open" only when you need an official or niche page that the allowlist cannot cover, such as release notes or documentation.`
         : base;
 
@@ -55,7 +59,7 @@ export class SearchTool implements Tool<SearchResponse> {
         description: `Only return results from this time window (default: ${this.defaultRecency ?? "day"}).`,
       },
     };
-    if (this.domains.length > 0) {
+    if (this.domains.length > 0 && this.allowScope) {
       properties.scope = {
         type: "string",
         enum: ["reputable", "open"],
@@ -73,8 +77,8 @@ export class SearchTool implements Tool<SearchResponse> {
 
     const limit = typeof args.limit === "number" ? args.limit : this.defaultLimit;
     const recency = isRecency(args.recency) ? args.recency : this.defaultRecency;
-    const domains =
-      args.scope === "open" || this.domains.length === 0 ? undefined : this.domains;
+    const open = this.allowScope && args.scope === "open";
+    const domains = open || this.domains.length === 0 ? undefined : this.domains;
 
     return this.provider.search({ query, limit, recency, language: this.defaultLanguage, domains });
   }
