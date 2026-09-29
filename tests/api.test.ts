@@ -349,6 +349,49 @@ describe("webhook gateway", () => {
     expect(missing.body.error).toContain("not found");
   });
 
+  test("generates voice on demand and sends it to Matrix", async () => {
+    const brief = kernel.briefs.create({
+      topics: ["Rust"],
+      markdown: "# Rust\n\nAll quiet.",
+      narration: "Rust is quiet",
+      sources: [],
+    });
+    const messaging = kernel.messaging as StubMessaging;
+    const tts = kernel.tts as StubTts;
+    const messagesBefore = messaging.sent.length;
+
+    const result = await call<{ generated: boolean; bytes: number; eventId: string | null }>(
+      "brief.audio.generate",
+      { id: brief.id },
+    );
+
+    expect(result.generated).toBe(true);
+    expect(result.bytes).toBe(4);
+    expect(result.eventId).toBeTruthy();
+    expect(tts.requests).toHaveLength(1);
+    expect(kernel.briefs.get(brief.id).hasAudio).toBe(true);
+
+    const added = messaging.sent.slice(messagesBefore).map((entry) => entry.message);
+    expect(added).toHaveLength(1);
+    expect(added[0]!.kind).toBe("voice");
+
+    // A second call reuses the stored audio (no regeneration) but sends again.
+    const second = await call<{ generated: boolean }>("brief.audio.generate", { id: brief.id });
+    expect(second.generated).toBe(false);
+    expect(tts.requests).toHaveLength(1);
+    expect(messaging.sent.length).toBe(messagesBefore + 2);
+
+    // regenerate without delivery only produces audio.
+    const third = await call<{ generated: boolean; eventId: string | null }>(
+      "brief.audio.generate",
+      { id: brief.id, regenerate: true, deliver: false },
+    );
+    expect(third.generated).toBe(true);
+    expect(third.eventId).toBeNull();
+    expect(tts.requests).toHaveLength(2);
+    expect(messaging.sent.length).toBe(messagesBefore + 2);
+  });
+
   test("event.pull returns persisted history", async () => {
     const events = await call<DomainEvent[]>("event.pull", { since: 0, limit: 500 });
     const topics = events.map((event) => event.topic);

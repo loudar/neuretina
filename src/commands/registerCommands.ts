@@ -8,6 +8,8 @@ import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
+import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
+import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { BriefRepository } from "../domain/briefs/BriefRepository.ts";
 import type { CreateJobInput, JobRepository, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
@@ -22,10 +24,12 @@ export interface CommandDeps {
   workflows: WorkflowRegistry;
   scheduler: Scheduler;
   messaging: MessagingProvider;
+  tts: TextToSpeechProvider;
+  statuses: StatusHub;
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, topics, briefs, jobs, workflows, scheduler, messaging, config } = deps;
+  const { bus, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -210,6 +214,92 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       { source: "commands", correlationId: context.correlationId },
     );
     return { ok: true, briefId: brief.id };
+  });
+
+  // Generates speech for a stored brief on demand (useful for text-only
+  // briefings) and auto-sends it to Matrix as a voice message.
+  router.register("brief.audio.generate", async (payload, context) => {
+    const record = asRecord(payload);
+    const id = requireString(record, "id");
+    const deliver = record.deliver !== false;
+    const regenerate = record.regenerate === true;
+    const channel = optionalString(record, "channel");
+    const brief = briefs.get(id);
+
+    let audio = briefs.getAudio(id);
+    let durationMs = brief.audioDurationMs;
+    let generated = false;
+
+    if (!audio || regenerate) {
+      const status = statuses.begin(`${context.correlationId}:tts`, "Generating voice", {
+        correlationId: context.correlationId,
+        detail: brief.topics.join(", "),
+      });
+      try {
+        status.update("Waiting for ElevenLabs");
+        const speech = await tts.synthesize({ text: brief.narration });
+        briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
+        audio = { audio: speech.data, mimeType: speech.mimeType };
+        durationMs = speech.durationMs;
+        generated = true;
+        status.done(
+          `Speech ready (${Math.round(speech.data.byteLength / 1024)} KB${
+            speech.durationMs ? `, ${Math.round(speech.durationMs / 1000)}s` : ""
+          })`,
+        );
+        bus.publish(
+          "tts.synthesized",
+          {
+            correlationId: context.correlationId,
+            briefId: id,
+            characters: brief.narration.length,
+            bytes: speech.data.byteLength,
+            durationMs: speech.durationMs ?? 0,
+          },
+          { source: "commands", correlationId: context.correlationId },
+        );
+      } catch (error) {
+        status.failed("Speech generation failed");
+        throw error;
+      }
+    }
+
+    let eventId: string | null = null;
+    if (deliver) {
+      const sendSpan = statuses.begin(`${context.correlationId}:send`, "Sending voice message", {
+        correlationId: context.correlationId,
+      });
+      try {
+        sendSpan.update("Waiting for Matrix");
+        const sent = await messaging.send({
+          kind: "voice",
+          audio: audio.audio,
+          mimeType: audio.mimeType,
+          durationMs,
+          filename: `brief-${dateOf(brief.createdAt)}.${extensionFor(audio.mimeType)}`,
+          caption: `Brief – ${new Date(brief.createdAt).toLocaleString()}`,
+          channel,
+        });
+        eventId = sent.id;
+        sendSpan.done(`Voice message sent (${sent.channel})`);
+        bus.publish(
+          "message.voice.sent",
+          { correlationId: context.correlationId, briefId: id, channel: sent.channel, eventId: sent.id },
+          { source: "commands", correlationId: context.correlationId },
+        );
+      } catch (error) {
+        sendSpan.failed("Sending voice message failed");
+        throw error;
+      }
+    }
+
+    return {
+      briefId: id,
+      generated,
+      bytes: audio.audio.byteLength,
+      durationMs: durationMs ?? null,
+      eventId,
+    };
   });
 
   // Re-sends a stored brief: the summary as formatted text, plus the audio

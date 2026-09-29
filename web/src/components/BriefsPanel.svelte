@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { Button, Chip, Dialog, Icon, ListItem, Select } from "m3-svelte";
+  import { Button, Chip, Dialog, Icon, ListItem, Switch } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
+  import iconMic from "@ktibow/iconset-material-symbols/mic";
+  import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
@@ -18,12 +20,8 @@
   let resending = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
-  let runDelivery = $state("voice");
-
-  const deliveryOptions = [
-    { text: "Voice + text", value: "voice" },
-    { text: "Text only", value: "text" },
-  ];
+  let generating = $state(false);
+  let voiceEnabled = $state(true);
 
   async function refreshList(): Promise<void> {
     try {
@@ -50,7 +48,7 @@
   async function runNow(): Promise<void> {
     busy = true;
     try {
-      await commands.workflows.run("briefing", { generateAudio: runDelivery === "voice" });
+      await commands.workflows.run("briefing", { generateAudio: voiceEnabled });
     } catch (error) {
       reportError(error);
     } finally {
@@ -68,6 +66,21 @@
       reportError(error);
     } finally {
       resending = false;
+    }
+  }
+
+  async function generateVoice(): Promise<void> {
+    if (!selected || generating) return;
+    generating = true;
+    try {
+      const result = await commands.briefs.generateAudio(selected.id);
+      reportSuccess(
+        `Voice generated (${Math.round(result.bytes / 1024)} KB) and sent to Matrix`,
+      );
+    } catch (error) {
+      reportError(error);
+    } finally {
+      generating = false;
     }
   }
 
@@ -111,7 +124,20 @@
     <div class="toolbar">
       <h2>Briefs</h2>
       <div class="actions">
-        <Select label="Delivery" options={deliveryOptions} bind:value={runDelivery} />
+        <label
+          class="voice-toggle"
+          title={voiceEnabled
+            ? "Voice + text — switch off for text-only delivery"
+            : "Text only — switch on to include the voice message"}
+        >
+          <Switch
+            bind:checked={voiceEnabled}
+            icons="both"
+            checkedIcon={iconMic}
+            uncheckedIcon={iconMicOff}
+          />
+          <span class="voice-label">Voice</span>
+        </label>
         <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
           <Icon icon={iconPlay} /> Run briefing now
         </Button>
@@ -140,6 +166,11 @@
       <div class="toolbar">
         <h2>{selected.topics.join(", ") || "Untitled brief"}</h2>
         <div class="actions">
+          {#if !selected.hasAudio}
+            <Button variant="tonal" iconType="left" onclick={generateVoice} disabled={generating}>
+              <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
+            </Button>
+          {/if}
           <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
             <Icon icon={iconSend} /> Re-send
           </Button>
@@ -201,6 +232,21 @@
 <style>
   audio {
     width: 100%;
+  }
+
+  .voice-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    color: var(--m3c-on-surface-variant);
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .voice-label {
+    line-height: 1;
   }
 
   .entry {

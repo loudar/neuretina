@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { Button, Icon, ListItem, Select, TextFieldOutlined } from "m3-svelte";
+  import { Button, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
+  import iconMic from "@ktibow/iconset-material-symbols/mic";
+  import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import { commands, type ScheduledJob, type WorkflowInfo } from "../lib/api";
@@ -24,14 +26,10 @@
   let name = $state("morning-brief");
   let cron = $state("0 7 * * *");
   let workflow = $state("briefing");
-  let delivery = $state("voice");
+  let voiceEnabled = $state(true);
   let defaultCronApplied = false;
 
   const workflowOptions = $derived(workflows.map((entry) => ({ text: entry.id, value: entry.id })));
-  const deliveryOptions = [
-    { text: "Voice + text", value: "voice" },
-    { text: "Text only", value: "text" },
-  ];
 
   async function refresh(): Promise<void> {
     try {
@@ -61,7 +59,7 @@
         name: name.trim(),
         cron: cron.trim(),
         workflow,
-        input: { generateAudio: delivery === "voice" },
+        input: { generateAudio: voiceEnabled },
       });
     } catch (error) {
       reportError(error);
@@ -117,7 +115,20 @@
     <TextFieldOutlined label="Name" bind:value={name} />
     <TextFieldOutlined label="Cron expression" bind:value={cron} enter={create} />
     <Select label="Workflow" options={workflowOptions} bind:value={workflow} />
-    <Select label="Delivery" options={deliveryOptions} bind:value={delivery} />
+    <label
+      class="voice-toggle"
+      title={voiceEnabled
+        ? "Voice + text — switch off for text-only delivery"
+        : "Text only — switch on to include the voice message"}
+    >
+      <Switch
+        bind:checked={voiceEnabled}
+        icons="both"
+        checkedIcon={iconMic}
+        uncheckedIcon={iconMicOff}
+      />
+      <span class="voice-label">Voice</span>
+    </label>
     <Button variant="filled" iconType="left" onclick={create} disabled={busy}>
       <Icon icon={iconAdd} /> Add task
     </Button>
@@ -135,11 +146,22 @@
         {/snippet}
           {#snippet trailing()}
             <div class="actions">
+              <label
+                class="voice-toggle"
+                title={job.input.generateAudio === false
+                  ? "Text only — switch on to include the voice message"
+                  : "Voice + text — switch off for text-only delivery"}
+              >
+                <Switch
+                  checked={job.input.generateAudio !== false}
+                  icons="both"
+                  checkedIcon={iconMic}
+                  uncheckedIcon={iconMicOff}
+                  onchange={() => toggleVoice(job)}
+                />
+              </label>
               <Button variant="tonal" iconType="left" onclick={() => run(job.id)}>
                 <Icon icon={iconPlay} /> Run
-              </Button>
-              <Button variant="text" onclick={() => toggleVoice(job)}>
-                {job.input.generateAudio === false ? "Enable voice" : "Disable voice"}
               </Button>
               <Button variant="text" onclick={() => toggle(job)}>
                 {job.enabled ? "Disable" : "Enable"}
@@ -153,3 +175,21 @@
     {/snippet}
   </DataList>
 </Panel>
+
+<style>
+  .voice-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    color: var(--m3c-on-surface-variant);
+    font-size: 0.85rem;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .voice-label {
+    line-height: 1;
+  }
+</style>
+

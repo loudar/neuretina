@@ -146,6 +146,14 @@ export const commands = {
     get: (id: string) => send<Brief>("brief.get", { id }),
     audio: (id: string) => send<BriefAudio | null>("brief.audio", { id }),
     remove: (id: string) => send<{ ok: boolean; briefId: string }>("brief.delete", { id }),
+    generateAudio: (id: string, options: { regenerate?: boolean; deliver?: boolean } = {}) =>
+      send<{
+        briefId: string;
+        generated: boolean;
+        bytes: number;
+        durationMs: number | null;
+        eventId: string | null;
+      }>("brief.audio.generate", { id, ...options }),
     send: (id: string) =>
       send<{ briefId: string; sent: Array<{ kind: string; eventId: string }> }>("brief.send", {
         id,

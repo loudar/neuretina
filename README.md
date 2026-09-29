@@ -205,9 +205,12 @@ confirmation dialog.
   TTS-aware (speakable sentences, symbols written out, everyday expressions kept neutral) and the
   narration is derived from the summary itself, so the audio reads the same text minus the links.
 - **Voice is optional per run:** scheduled tasks accept `{"generateAudio": false}` (the Jobs UI
-  has a *Delivery* selector at creation and a *Disable voice* toggle per task), and the manual
-  "Run briefing now" button has its own *Delivery* selector — text-only runs skip TTS entirely
-  and deliver just the formatted summary. The Briefs view also has a **Re-send** button, and
+  has a mic toggle at creation and per task), and the manual "Run briefing now" button has its
+  own mic toggle — text-only runs skip TTS entirely and deliver just the formatted summary.
+- **Voice on demand:** a text-only brief can get its audio later from the Briefs view
+  (*Generate voice*) or via `brief.audio.generate { id }` — the speech is generated, stored, and
+  automatically sent to Matrix as a voice message. `regenerate: true` forces new audio,
+  `deliver: false` only generates. The Briefs view also has a **Re-send** button, and
   `brief.send { id }` does the same over the webhook.
 - **Relevance-checked research:** the researcher agent finishes with a `{"found": <bool>, "notes":
   …}` verdict, and its tool budget is capped. Search engines return junk even for nonsense
@@ -259,9 +262,9 @@ without any streaming connection. Read-only message types (`event.*`, `*.list`, 
 itself.
 
 Built-in message types: `config.get`, `topic.list/create/update/delete`,
-`job.list/create/update/delete/run`, `workflow.list/run`, `brief.list/get/audio/send/delete`,
-`event.pull/wait`. Adding one is `router.register("my.type", handler)` in
-`src/commands/registerCommands.ts`.
+`job.list/create/update/delete/run`, `workflow.list/run`,
+`brief.list/get/audio/audio.generate/send/delete`, `event.pull/wait`. Adding one is
+`router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
 ## Live activity feed (WebSocket)
 
