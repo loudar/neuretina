@@ -27,7 +27,7 @@
   let editName = $state("");
   let editDescription = $state("");
   let saving = $state(false);
-  let toggling = $state(false);
+  let togglingId = $state<string | null>(null);
 
   const selected = $derived(topics.find((topic) => topic.id === selectedId) ?? null);
 
@@ -83,11 +83,11 @@
     }
   }
 
-  async function toggleMute(): Promise<void> {
-    if (!selected || toggling) return;
-    toggling = true;
+  async function toggleMute(topic: Topic): Promise<void> {
+    if (togglingId) return;
+    togglingId = topic.id;
     try {
-      const updated = await commands.topics.update(selected.id, { muted: !selected.muted });
+      const updated = await commands.topics.update(topic.id, { muted: !topic.muted });
       reportSuccess(
         updated.muted
           ? `"${updated.name}" excluded from briefings`
@@ -96,7 +96,7 @@
     } catch (error) {
       reportError(error);
     } finally {
-      toggling = false;
+      togglingId = null;
     }
   }
 
@@ -132,6 +132,24 @@
           {#snippet leading()}
             <Icon icon={topic.muted ? iconVisibilityOff : iconLabel} />
           {/snippet}
+          {#snippet trailing()}
+            <label
+              class="include-toggle"
+              title={topic.muted
+                ? "Excluded from briefings — turn on to include"
+                : "Included in briefings — turn off to exclude"}
+              onclick={(event) => event.stopPropagation()}
+            >
+              <Switch
+                checked={!topic.muted}
+                icons="both"
+                checkedIcon={iconVisibility}
+                uncheckedIcon={iconVisibilityOff}
+                onchange={() => toggleMute(topic)}
+                disabled={togglingId === topic.id}
+              />
+            </label>
+          {/snippet}
         </ListItem>
       </div>
     {/snippet}
@@ -152,8 +170,8 @@
           icons="both"
           checkedIcon={iconVisibility}
           uncheckedIcon={iconVisibilityOff}
-          onchange={toggleMute}
-          disabled={toggling}
+          onchange={() => toggleMute(selected)}
+          disabled={togglingId === selected.id}
         />
         <span class="toggle-label">{selected.muted ? "Excluded" : "Included"}</span>
       </label>

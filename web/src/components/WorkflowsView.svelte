@@ -2,12 +2,14 @@
   import { Button, Chip, Icon, ListItem, Select } from "m3-svelte";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
   import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
+  import iconChevronRight from "@ktibow/iconset-material-symbols/chevron-right";
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import {
     commands,
     type AppContextInfo,
+    type ArtifactInfo,
     type WorkflowInfo,
     type WorkflowRunDetail,
     type WorkflowRunInfo,
@@ -15,6 +17,7 @@
   import { reportError } from "../lib/feedback";
   import { formatDateTime, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
+  import ArtifactDrawer from "./ArtifactDrawer.svelte";
   import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
   import StatusFeedPanel from "./StatusFeed.svelte";
@@ -25,6 +28,7 @@
   let contextFilter = $state("all");
   let selectedWorkflowId = $state<string | null>(null);
   let selected = $state<WorkflowRunDetail | null>(null);
+  let openedArtifact = $state<ArtifactInfo | null>(null);
 
   const contextOptions = $derived([
     { text: "All contexts", value: "all" },
@@ -83,6 +87,7 @@
     if (selectedWorkflowId === workflow.id) return;
     selectedWorkflowId = workflow.id;
     selected = null;
+    openedArtifact = null;
     try {
       await loadRuns();
     } catch (error) {
@@ -101,10 +106,12 @@
   async function selectRun(run: WorkflowRunInfo): Promise<void> {
     if (selected?.id === run.id) {
       selected = null;
+      openedArtifact = null;
       return;
     }
     try {
       selected = await commands.workflows.runGet(run.id);
+      openedArtifact = null;
     } catch (error) {
       reportError(error);
     }
@@ -148,9 +155,9 @@
 </script>
 
 <Pane variant="list" width="19rem" title="Workflows">
-  {#snippet actions()}
+  <div class="filters">
     <Select label="Context" options={contextOptions} bind:value={contextFilter} />
-  {/snippet}
+  </div>
 
   <DataList items={visibleWorkflows} empty="No workflows in this context.">
     {#snippet children(workflow)}
@@ -239,11 +246,18 @@
     <h3 class="subhead">Artifacts</h3>
     <DataList items={selected.artifacts} empty="This run produced no artifacts.">
       {#snippet children(artifact)}
-        <ListItem
-          overline={artifact.kind}
-          headline={artifact.name ?? artifact.id.slice(0, 8)}
-          supporting={`${artifact.contentType} · ${formatDateTime(artifact.createdAt)}`}
-        />
+        <div class="entry" class:selected={openedArtifact?.id === artifact.id}>
+          <ListItem
+            onclick={() => (openedArtifact = artifact)}
+            overline={artifact.kind}
+            headline={artifact.name ?? artifact.id.slice(0, 8)}
+            supporting={`${artifact.contentType} · ${formatDateTime(artifact.createdAt)}`}
+          >
+            {#snippet trailing()}
+              <Icon icon={iconChevronRight} />
+            {/snippet}
+          </ListItem>
+        </div>
       {/snippet}
     </DataList>
   {:else}
@@ -251,10 +265,18 @@
   {/if}
 </Pane>
 
+{#if openedArtifact}
+  <ArtifactDrawer artifact={openedArtifact} onclose={() => (openedArtifact = null)} />
+{/if}
+
 <style>
   .subhead {
     margin: 1.25rem 0 0.5rem;
     padding-inline: 0.25rem;
+  }
+
+  .filters {
+    padding: 0.25rem 0.25rem 0.6rem;
   }
 
   .entry {

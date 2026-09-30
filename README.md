@@ -147,7 +147,9 @@ stores definitions; execution lives in `WorkflowRunner`.
 
 The Workflows tab is a drill-down: pick a workflow from the list (context filter on top, **Run
 now** per workflow), then pick a run from that workflow's runs sidebar, then inspect the run —
-live status feed, output/error preview and the artifacts it produced. `workflow.list`,
+live status feed, output/error preview and the artifacts it produced. Clicking an artifact opens
+it in a right-hand drawer: briefs render as markdown with citation pills, audio plays inline,
+images preview, other artifacts show their text or metadata. `workflow.list`,
 `workflow.run.list`, `workflow.run.get` and `workflow.run` (manual trigger, optional `contextId`)
 are also available over the webhook.
 
@@ -361,11 +363,12 @@ produced. The Activity card at the top keeps showing the live overview of everyt
 ## Topics and scheduled tasks
 
 - **Topics** are managed in the UI (or by sending `topic.create` / `topic.update` /
-  `topic.delete` / `topic.list` through the webhook), including a **mute toggle** — muted topics
-  are excluded from every briefing until unmuted. One LLM-planned research run covers all topics
-  at once (they may overlap), the compiler merges everything into a single brief, and the
-  researcher can pull concrete market numbers (quotes, revenue, margins, guidance, estimates)
-  through Perplexity finance lookups when a topic involves a public company or the markets.
+  `topic.delete` / `topic.list` through the webhook), including a **mute toggle** in the list and
+  the details pane — muted topics are excluded from every briefing until unmuted. One LLM-planned
+  research run covers all topics at once (they may overlap), the compiler merges everything into a
+  single brief, and the researcher can pull concrete market numbers (quotes, revenue, margins,
+  guidance, estimates) through Perplexity finance lookups when a topic involves a public company
+  or the markets.
 - **Delivery is two messages by default:** the compiled summary as a formatted text message
   (markdown rendered to Matrix `formatted_body`) followed by the voice message. The summary is
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is

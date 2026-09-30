@@ -88,7 +88,6 @@
     {#snippet fab()}
       <div class="brand">
         <h2>Briefing Engine</h2>
-        <small class="muted">build {new Date(__BUILD_STAMP__).toLocaleString()}</small>
       </div>
     {/snippet}
 
@@ -132,10 +131,15 @@
     overflow: hidden;
   }
 
+  /* The M3 rail reserves 44/56px; tighten it to align the pill with the items. */
+  .shell :global(.rail.rail) {
+    padding-top: 2rem;
+    padding-bottom: 1.25rem;
+  }
+
   .brand {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
     padding-bottom: 0.25rem;
   }
 
@@ -144,18 +148,12 @@
     line-height: 1.25;
   }
 
-  .brand small {
-    font-size: 0.7rem;
-    line-height: 1.3;
-  }
-
   .rail-footer {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.4rem;
     margin-top: auto;
-    padding: 0 1rem 0.5rem;
+    padding: 0 20px;
   }
 
   .health :global(button.m3-container) {
@@ -163,20 +161,20 @@
   }
 
   .health.up :global(button.m3-container) {
-    background-color: #2e7d32;
-    color: #ffffff;
+    background-color: light-dark(#e7f4ea, #22392a);
+    color: light-dark(#1f6f36, #a9d9b4);
   }
 
   .health.up :global(button.m3-container .leading) {
-    color: #ffffff;
+    color: inherit;
   }
 
   .health.down :global(button.m3-container) {
-    background-color: var(--m3c-error);
-    color: var(--m3c-on-error);
+    background-color: var(--m3c-error-container);
+    color: var(--m3c-on-error-container);
   }
 
   .health.down :global(button.m3-container .leading) {
-    color: var(--m3c-on-error);
+    color: inherit;
   }
 </style>

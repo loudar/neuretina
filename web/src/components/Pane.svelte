@@ -65,24 +65,32 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    padding: 0.9rem 1rem 0.65rem;
+    height: 3.5rem;
+    flex: none;
+    padding: 0 1rem;
     border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
   .titles {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    justify-content: center;
+    gap: 0;
     min-width: 0;
   }
 
   .titles h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .titles small {
+    font-size: 0.72rem;
+    line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

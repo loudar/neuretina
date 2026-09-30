@@ -7,11 +7,20 @@
   let filter = $state("");
   let selectedId = $state<string | null>(null);
 
-  const filtered = $derived(
-    [...eventStream.events]
-      .reverse()
-      .filter((event) => event.topic.toLowerCase().includes(filter.toLowerCase())),
-  );
+  // Newest first, de-duplicated by seq (the feed is append-only but a batch
+  // must never be able to break the keyed list).
+  const filtered = $derived.by(() => {
+    const needle = filter.toLowerCase();
+    const seen = new Set<number>();
+    const out: DomainEvent[] = [];
+    for (let index = eventStream.events.length - 1; index >= 0; index--) {
+      const event = eventStream.events[index]!;
+      if (seen.has(event.seq)) continue;
+      seen.add(event.seq);
+      if (event.topic.toLowerCase().includes(needle)) out.push(event);
+    }
+    return out;
+  });
 
   const selected = $derived(
     eventStream.events.find((event) => event.id === selectedId) ?? null,
@@ -35,7 +44,7 @@
     <p class="muted">No events yet.</p>
   {:else}
     <div class="event-list">
-      {#each filtered as event (event.id)}
+      {#each filtered as event (event.seq)}
         <button
           type="button"
           class="event"

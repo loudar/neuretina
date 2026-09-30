@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, ListItem, Switch, TextFieldOutlined } from "m3-svelte";
-  import iconArticle from "@ktibow/iconset-material-symbols/article";
+  import { Button, Dialog, Icon, Switch, TextFieldOutlined } from "m3-svelte";
   import iconClose from "@ktibow/iconset-material-symbols/close";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconExpandMore from "@ktibow/iconset-material-symbols/expand-more";
@@ -159,30 +158,26 @@
   <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
     {#snippet children(brief)}
       <div class="entry" class:selected={selected?.id === brief.id}>
-        <ListItem onclick={() => select(brief.id)} headline={formatListDate(brief.createdAt)}>
-          {#snippet leading()}
-            <Icon icon={iconArticle} />
-          {/snippet}
-          {#snippet trailing()}
-            <div class="badges">
-              <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
-                <Icon icon={iconLabel} size={14} />{brief.topics.length}
-              </span>
-              <span class="badge sources" title={`${brief.sources.length} source(s)`}>
-                <Icon icon={iconLink} size={14} />{brief.sources.length}
-              </span>
-              <span
-                class="badge audio"
-                class:has-audio={brief.hasAudio}
-                title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
-              >
-                <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
-                  ? "audio"
-                  : "text"}
-              </span>
-            </div>
-          {/snippet}
-        </ListItem>
+        <button type="button" class="brief-row" onclick={() => select(brief.id)}>
+          <span class="brief-date">{formatListDate(brief.createdAt)}</span>
+          <span class="badges">
+            <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
+              <Icon icon={iconLabel} size={14} />{brief.topics.length}
+            </span>
+            <span class="badge sources" title={`${brief.sources.length} source(s)`}>
+              <Icon icon={iconLink} size={14} />{brief.sources.length}
+            </span>
+            <span
+              class="badge audio"
+              class:has-audio={brief.hasAudio}
+              title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
+            >
+              <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
+                ? "audio"
+                : "text"}
+            </span>
+          </span>
+        </button>
       </div>
     {/snippet}
   </DataList>
@@ -361,6 +356,35 @@
   .entry.selected {
     background-color: var(--m3c-secondary-container);
     color: var(--m3c-on-secondary-container);
+  }
+
+  .brief-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.3rem;
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: none;
+    border-radius: var(--m3-shape-medium);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .entry:not(.selected) .brief-row:hover {
+    background-color: var(--m3c-surface-container-high);
+  }
+
+  .brief-date {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.95rem;
+    font-weight: 500;
   }
 
   .badges {

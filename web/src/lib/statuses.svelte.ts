@@ -55,6 +55,8 @@ export class StatusFeed {
     };
 
     socket.onclose = () => {
+      // Ignore closes from sockets we already replaced (remounts, reconnects).
+      if (this.socket !== socket) return;
       this.connected = false;
       this.socket = null;
       if (!this.running) return;
