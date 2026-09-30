@@ -530,10 +530,17 @@
     return workflow.user ? workflow.title : workflow.id;
   }
 
+  /** List supporting text; user workflows show no summary line. */
   function workflowSupporting(workflow: WorkflowInfo): string {
     if (!workflow.user) {
       return `${workflow.description} · triggers ${workflow.triggers.join(", ") || "none"}`;
     }
+    return "";
+  }
+
+  /** Details header subtitle with the workflow's configured inputs. */
+  function workflowSummary(workflow: WorkflowInfo): string {
+    if (!workflow.user) return workflowSupporting(workflow);
     const topicIds = workflow.inputValues?.topics;
     const topicCount = Array.isArray(topicIds) ? topicIds.length : 0;
     const channelCount = attachments.get(workflow.id)?.length ?? 0;
@@ -771,7 +778,7 @@
       <Pane
         variant="detail"
         title={selectedWorkflow ? workflowHeadline(selectedWorkflow) : "Workflow details"}
-        subtitle={selectedWorkflow ? workflowSupporting(selectedWorkflow) : undefined}
+        subtitle={selectedWorkflow ? workflowSummary(selectedWorkflow) : undefined}
       >
         {#snippet actions()}
           {#if selectedUser}

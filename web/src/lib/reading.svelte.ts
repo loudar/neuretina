@@ -1,0 +1,43 @@
+/**
+ * Reading preferences shared by every markdown view (brief details, artifact
+ * details), so the two stay in sync.
+ */
+export type ReadingSize = "small" | "medium" | "large";
+
+export const READING_SIZES: ReadingSize[] = ["small", "medium", "large"];
+
+const STORAGE_KEY = "briefs.readingSize";
+
+const READING_SIZE_CSS: Record<ReadingSize, string> = {
+  small: "0.95rem",
+  medium: "calc(0.95rem + 2px)",
+  large: "calc(0.95rem + 4px)",
+};
+
+function readStoredSize(): ReadingSize {
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    stored = null;
+  }
+  return stored === "small" || stored === "medium" || stored === "large" ? stored : "medium";
+}
+
+class ReadingPrefs {
+  size = $state<ReadingSize>(readStoredSize());
+
+  setSize(size: ReadingSize): void {
+    this.size = size;
+    try {
+      localStorage.setItem(STORAGE_KEY, size);
+    } catch {}
+  }
+
+  /** CSS font size for the current preference. */
+  get css(): string {
+    return READING_SIZE_CSS[this.size];
+  }
+}
+
+export const readingPrefs = new ReadingPrefs();
