@@ -634,15 +634,18 @@
               <Icon icon={iconSchedule} />
             {/snippet}
             {#snippet trailing()}
-              <Button
-                variant="tonal"
-                iconType="full"
-                title="Run now"
-                onclick={() => runNow(workflow.id)}
-                disabled={!workflow.triggers.includes("manual")}
-              >
-                <Icon icon={iconPlay} />
-              </Button>
+              {#if workflow.triggers.includes("manual")}
+                <span class="run-button">
+                  <Button
+                    variant="filled"
+                    iconType="full"
+                    title="Run now"
+                    onclick={() => runNow(workflow.id)}
+                  >
+                    <Icon icon={iconPlay} />
+                  </Button>
+                </span>
+              {/if}
             {/snippet}
           </ListItem>
         </div>
@@ -985,6 +988,13 @@
 
   .workflow-form {
     width: min(24rem, 100%);
+  }
+
+  /* The run action stands out with the tertiary accent color. */
+  .run-button {
+    display: contents;
+    --m3c-primary: var(--m3c-tertiary);
+    --m3c-on-primary: var(--m3c-on-tertiary);
   }
 
   .hint {
