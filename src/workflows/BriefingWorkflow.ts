@@ -6,10 +6,10 @@ import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
 import type { LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
-import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
+import type { DeliveryRouter } from "../delivery/DeliveryService.ts";
 import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
@@ -28,9 +28,13 @@ export { extractJson };
 
 export interface BriefingWorkflowInput {
   topics?: string[];
+  /**
+   * Topic ids selected by a user workflow; pins the briefing to those topics
+   * regardless of names. An empty array means "no topics" and skips the run.
+   */
+  topicIds?: string[];
   deliver?: boolean;
   generateAudio?: boolean;
-  channel?: string;
 }
 
 export interface BriefingWorkflowDeps {
@@ -41,7 +45,8 @@ export interface BriefingWorkflowDeps {
   socialSearch: SearchProvider;
   finance: FinanceProvider;
   tts: TextToSpeechProvider;
-  messaging: MessagingProvider;
+  /** Routes the brief through the workflow's attached delivery channels. */
+  delivery: DeliveryRouter;
   statuses?: StatusHub;
   defaults: {
     recency: SearchRecency;
@@ -60,7 +65,7 @@ export interface BriefingWorkflowOutput {
   topics: string[];
   sources: number;
   audioBytes?: number;
-  messageEventId?: string;
+  deliveredChannels?: number;
   reason?: string;
 }
 
@@ -439,7 +444,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
       if (!speech) {
         if (shouldDeliver) {
-          output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
+          output.deliveredChannels = await this.deliverBrief(
+            brief.id,
+            { markdown: brief.markdown, sources: brief.sources, narration: compiled.narration },
+            context,
+          );
           progress.delivered = true;
           checkpoint();
         }
@@ -485,35 +494,17 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       }
 
       if (shouldDeliver) {
-        output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
-
-        const sendSpan = this.deps.statuses?.begin(`${correlationId}:send`, "Sending voice message", {
-          correlationId,
-        });
-        let sent;
-        try {
-          sendSpan?.update("Waiting for Matrix");
-          sent = await this.deps.messaging.send({
-            kind: "voice",
+        output.deliveredChannels = await this.deliverBrief(
+          brief.id,
+          {
+            markdown: brief.markdown,
+            sources: brief.sources,
+            narration: compiled.narration,
             audio: speech.data,
-            mimeType: speech.mimeType,
-            durationMs: speech.durationMs,
-            filename: `morning-brief-${dateStamp()}.${speech.extension}`,
-            caption: `Morning brief – ${dateStamp()}`,
-            channel: input.channel,
-          });
-          sendSpan?.done(`Voice message sent (${sent.channel})`);
-        } catch (error) {
-          sendSpan?.failed("Sending voice message failed");
-          throw error;
-        }
-
-        bus.publish(
-          "message.voice.sent",
-          { correlationId, briefId: brief.id, channel: sent.channel, eventId: sent.id },
-          { source: `workflow:${this.id}`, correlationId },
+            audioMime: speech.mimeType,
+          },
+          context,
         );
-        record("voice brief delivered", { channel: sent.channel, eventId: sent.id });
       }
 
       progress.delivered = true;
@@ -522,7 +513,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     }
 
     if (shouldDeliver) {
-      output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
+      output.deliveredChannels = await this.deliverBrief(
+        brief.id,
+        { markdown: brief.markdown, sources: brief.sources, narration: compiled.narration },
+        context,
+      );
       progress.delivered = true;
       checkpoint();
     }
@@ -530,36 +525,49 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     return output;
   }
 
-  /** Sends the compiled brief as a formatted text message (markdown → HTML). */
-  private async deliverSummary(
-    markdown: string,
-    sources: BriefSource[],
-    channel: string | undefined,
-    context: WorkflowContext,
-  ): Promise<string> {
-    const { bus, correlationId } = context;
+  /**
+   * Routes the brief through the delivery channels attached to this workflow:
+   * the summary as formatted text and, when speech exists, the voice message.
+   * Per-channel failures are recorded by the service and never abort the run.
+   */
+  private async deliverBrief(
+    briefId: string,
+    payload: {
+      markdown: string;
+      sources: BriefSource[];
+      narration: string;
+      audio?: Uint8Array;
+      audioMime?: string;
+    },
+    context: WorkflowRunContext,
+    spanText = "Delivering brief",
+  ): Promise<number> {
+    const { correlationId } = context;
     context.signal?.throwIfAborted();
-    const sendSpan = this.deps.statuses?.begin(`${correlationId}:summary`, "Sending summary", {
+    const span = this.deps.statuses?.begin(`${correlationId}:deliver`, spanText, {
       correlationId,
     });
     try {
-      sendSpan?.update("Waiting for Matrix");
-      const text = buildBriefMessage(markdown, sources);
-      const sent = await this.deps.messaging.send({
-        kind: "text",
-        text,
-        html: markdownToHtml(text),
-        channel,
+      const summary = buildBriefMessage(payload.markdown, payload.sources);
+      const results = await this.deps.delivery.deliver({
+        briefId,
+        runId: correlationId,
+        // The workflow being run owns the channels: a user workflow instance
+        // delivers through its own attachments, not the built-in briefing's.
+        workflow: context.run?.workflow ?? this.id,
+        summary,
+        html: markdownToHtml(summary),
+        narration: payload.narration,
+        audio: payload.audio,
+        audioMime: payload.audioMime,
       });
-      sendSpan?.done(`Summary sent (${sent.channel})`);
-      bus.publish(
-        "message.text.sent",
-        { correlationId, channel: sent.channel, eventId: sent.id },
-        { source: `workflow:${this.id}`, correlationId },
-      );
-      return sent.id;
+      const sent = results.filter((result) => result.status === "sent").length;
+      const failed = results.length - sent;
+      span?.done(`Delivered to ${sent} channel(s)${failed ? ` — ${failed} failed` : ""}`);
+      context.logger.info("brief delivered", { briefId, channels: results.length, sent, failed });
+      return results.length;
     } catch (error) {
-      sendSpan?.failed("Sending summary failed");
+      span?.failed(`Delivery failed (${errorMessage(error)})`);
       throw error;
     }
   }
@@ -572,7 +580,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     topicNames: string[],
     queries: string[],
     input: BriefingWorkflowInput,
-    context: WorkflowContext,
+    context: WorkflowRunContext,
   ): Promise<BriefingWorkflowOutput> {
     const { bus, logger, correlationId } = context;
     const uniqueQueries = [...new Set(queries)].slice(0, 12);
@@ -587,28 +595,12 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     if (input.deliver ?? true) {
       const notice = formatNoMaterialNotice(topicNames, uniqueQueries);
-      const sendSpan = this.deps.statuses?.begin(
-        `${correlationId}:send`,
+      await this.deliverBrief(
+        correlationId,
+        { markdown: notice, sources: [], narration: notice },
+        context,
         "Sending nothing-found notice",
-        { correlationId },
       );
-      try {
-        sendSpan?.update("Waiting for Matrix");
-        const sent = await this.deps.messaging.send({
-          kind: "text",
-          text: notice,
-          channel: input.channel,
-        });
-        sendSpan?.done(`Nothing-found notice sent (${sent.channel})`);
-        bus.publish(
-          "message.text.sent",
-          { correlationId, channel: sent.channel, eventId: sent.id },
-          { source: `workflow:${this.id}`, correlationId },
-        );
-      } catch (error) {
-        sendSpan?.failed("Sending the notice failed");
-        throw error;
-      }
     }
 
     return { skipped: true, topics: topicNames, sources: 0, reason };
@@ -617,6 +609,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private resolveTopics(input: BriefingWorkflowInput, contextId: string): Topic[] {
     // Muted topics are never part of a briefing, not even when requested.
     const active = this.deps.topics.listActive(contextId);
+
+    // User workflows pin the exact topic ids; an empty list selects nothing.
+    if (input.topicIds !== undefined) {
+      const selected = new Set(input.topicIds);
+      return active.filter((topic) => selected.has(topic.id));
+    }
+
     if (!input.topics || input.topics.length === 0) return active;
 
     const requested = new Set(input.topics.map((name) => name.trim().toLowerCase()));
@@ -1005,10 +1004,6 @@ export function sanitizeNarration(text: string): string {
     .replace(/\s+([.,;:!?])/g, "$1")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-}
-
-function dateStamp(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /** File extension for a stored brief's audio, derived from its MIME type. */

@@ -8,6 +8,10 @@
     variant?: "list" | "detail";
     /** Width of a list pane (CSS length). */
     width?: string;
+    /** Allow the pane width to be dragged. Defaults to list panes. */
+    resizable?: boolean;
+    /** Key used to remember the dragged width across reloads. */
+    storageKey?: string;
     actions?: Snippet;
     children: Snippet;
   }
@@ -17,12 +21,109 @@
     subtitle,
     variant = "detail",
     width = "22rem",
+    resizable = variant === "list",
+    storageKey,
     actions,
     children,
   }: Props = $props();
+
+  const MIN_WIDTH_REM = 13;
+  const MAX_WIDTH_REM = 40;
+  const DEFAULT_WIDTH_REM = 22;
+
+  function rootFontSize(): number {
+    const parsed = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 16;
+  }
+
+  function clampWidth(value: number, rootSize = rootFontSize()): number {
+    return Math.min(Math.max(value, MIN_WIDTH_REM * rootSize), MAX_WIDTH_REM * rootSize);
+  }
+
+  function propWidth(rootSize = rootFontSize()): number {
+    const trimmed = width.trim();
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return DEFAULT_WIDTH_REM * rootSize;
+    return trimmed.endsWith("rem") ? parsed * rootSize : parsed;
+  }
+
+  function storedWidth(): number | null {
+    if (!storageKey) return null;
+    try {
+      const raw = localStorage.getItem(`briefing.pane.${storageKey}`);
+      const parsed = raw === null ? Number.NaN : Number.parseFloat(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const canResize = $derived(resizable && variant === "list");
+
+  let currentWidth = $state(clampWidth(storedWidth() ?? propWidth()));
+  let dragging = $state(false);
+  let dragStartX = 0;
+  let dragStartWidth = 0;
+
+  $effect(() => {
+    if (!dragging) return;
+    const previous = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.userSelect = previous;
+    };
+  });
+
+  function persistWidth(): void {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(`briefing.pane.${storageKey}`, String(Math.round(currentWidth)));
+    } catch {}
+  }
+
+  function startResize(event: PointerEvent): void {
+    dragStartX = event.clientX;
+    dragStartWidth = currentWidth;
+    dragging = true;
+    const target = event.currentTarget as HTMLElement;
+    target.setPointerCapture(event.pointerId);
+  }
+
+  function onMove(event: PointerEvent): void {
+    if (!dragging) return;
+    currentWidth = clampWidth(dragStartWidth + (event.clientX - dragStartX));
+  }
+
+  function endResize(event: PointerEvent): void {
+    if (!dragging) return;
+    dragging = false;
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    persistWidth();
+  }
+
+  function resetWidth(): void {
+    currentWidth = propWidth();
+    if (!storageKey) return;
+    try {
+      localStorage.removeItem(`briefing.pane.${storageKey}`);
+    } catch {}
+  }
+
+  function onKeydown(event: KeyboardEvent): void {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    currentWidth = clampWidth(currentWidth + (event.key === "ArrowLeft" ? -16 : 16));
+    persistWidth();
+  }
 </script>
 
-<section class="pane {variant}" style:width={variant === "list" ? width : undefined}>
+<section
+  class="pane {variant}"
+  class:resizable={canResize}
+  class:dragging
+  style:width={canResize ? `${currentWidth}px` : variant === "list" ? width : undefined}
+>
   {#if title}
     <header class="head">
       <div class="titles">
@@ -38,15 +139,40 @@
   <div class="body">
     {@render children()}
   </div>
+
+  {#if canResize}
+    <div
+      class="resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      onpointerdown={startResize}
+      onpointermove={onMove}
+      onpointerup={endResize}
+      ondblclick={resetWidth}
+      tabindex="0"
+      onkeydown={onKeydown}
+    ></div>
+  {/if}
 </section>
 
 <style>
   .pane {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .pane.resizable {
+    /* Let the resize handle straddle the pane edge. */
+    overflow: visible;
+  }
+
+  .pane.dragging {
+    user-select: none;
   }
 
   .pane.list {
@@ -113,5 +239,23 @@
 
   .pane.list .body {
     padding: 0.5rem 0.75rem 1.5rem;
+  }
+
+  .resizer {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: -3px;
+    width: 6px;
+    cursor: col-resize;
+    background-color: var(--m3c-primary);
+    opacity: 0;
+    touch-action: none;
+    z-index: 1;
+  }
+
+  .resizer:hover,
+  .resizer:active,
+  .resizer:focus-visible {
+    opacity: 0.5;
   }
 </style>

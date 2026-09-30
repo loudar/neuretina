@@ -73,6 +73,11 @@ export class WorkflowRegistry {
     this.workflows.set(workflow.id, workflow as Workflow);
   }
 
+  /** Removes a workflow definition; nothing happens when it is unknown. */
+  unregister(id: string): void {
+    this.workflows.delete(id);
+  }
+
   get(id: string): Workflow {
     const workflow = this.workflows.get(id);
     if (!workflow) throw new NotFoundError(`Workflow "${id}" is not registered`);

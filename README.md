@@ -279,52 +279,61 @@ the whole research run.
 Without credentials it falls back to the public AppView, but Bluesky currently load-sheds
 unauthenticated `searchPosts` with `HTTP 403`, so app-password auth is strongly recommended.
 
-### Matrix voice messages
+### Delivery channels
 
-What you need:
+Briefs are delivered through configurable **delivery channels** (Settings → Delivery tab; the
+former `MATRIX_*` environment variables are gone — on the first boot after an upgrade the old
+Matrix configuration is migrated into a channel automatically). Three channel types exist:
 
-1. Homeserver URL → `MATRIX_HOMESERVER_URL` (e.g. `https://matrix.illegal.trading`).
-2. Credentials — **either**:
-   - `MATRIX_USERNAME` + `MATRIX_PASSWORD`: the simplest option if you don't have a token. The app
-     logs in with `m.login.password` on first use and caches the token (re-login on 401).
-   - **or** a static **access token** → `MATRIX_ACCESS_TOKEN`. Many newer clients (including Sable)
-     no longer show the access token in their settings UI, so the reliable way is the login API:
+- **Matrix** — config: `homeserverUrl`, a delivery target — `roomId`, or `dmUserId` (a
+  `@user:server` Matrix ID: the bot opens the DM room with that user on the first delivery and
+  reuses it afterwards, tracked via its `m.direct` account data) — and credentials (`accessToken`
+  **or** `username` + `password`), plus an optional `allowedSenders` list (comma-separated Matrix
+  IDs; empty allows anyone in the room). The app logs in with `m.login.password` on first use and
+  caches the token (re-login on 401). Many newer clients (including Sable) no longer show the
+  access token in their settings UI, so the reliable way is the login API:
 
-     ```bash
-     curl -X POST https://matrix.illegal.trading/_matrix/client/v3/login \
-       -H "Content-Type: application/json" \
-       -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"bot"},
-            "password":"your-password"}'
-     ```
+  ```bash
+  curl -X POST https://matrix.illegal.trading/_matrix/client/v3/login \
+    -H "Content-Type: application/json" \
+    -d '{"type":"m.login.password","identifier":{"type":"m.id.user","user":"bot"},
+         "password":"your-password"}'
+  ```
 
-   The response contains `access_token` — use that. (Synapse also accepts an app/user access
-   token created via admin tooling.) A static token never expires unless the server expires it.
+  The response contains `access_token` — use that. (Synapse also accepts an app/user access
+  token created via admin tooling.) A static token never expires unless the server expires it.
 
-   **`.env` quoting warning:** Bun expands `$VAR` inside `.env` values **regardless of quoting** —
-   a password like `Correct$Horse#1` is silently altered on load ("Invalid identifier or
-   password" at login). Write literal `$` as `\$` and quote values containing `#`:
+  **Quoting warning (when pasting a password from a `.env` file):** Bun expands `$VAR` inside
+  `.env` values **regardless of quoting** — a password like `Correct$Horse#1` is silently altered
+  on load ("Invalid identifier or password" at login). Write literal `$` as `\$` and quote values
+  containing `#` (in Coolify, set values in the UI instead — they are passed as-is).
 
-   ```env
-   MATRIX_PASSWORD="Correct\$Horse#1"
-   ```
+  **Important:** the room must **not be end-to-end encrypted**. A plain HTTP bot cannot produce
+  Megolm keys; E2EE rooms would require a full crypto stack. Create an unencrypted room (or an
+  unencrypted DM) for deliveries. At delivery time the audio is uploaded via the authenticated
+  media API (`/_matrix/client/v1/media/upload`, legacy fallback included) and sent as an
+  `m.audio` message annotated with `org.matrix.msc3245.voice` (plus `org.matrix.msc1767.audio`
+  duration), which Element and other clients render as a voice message with waveform/play button.
 
-   Alternatively, in Coolify set the env var in its UI (passed through as-is, no file parsing) —
-   or skip the password entirely and use `MATRIX_ACCESS_TOKEN`.
-3. **Room ID** to deliver to → `MATRIX_ROOM_ID` (e.g. `!abcdef:matrix.illegal.trading`).
+- **Discord** — config: `webhookUrl`. Text is posted as the webhook message content (truncated to
+  Discord's 2000-character limit); the delivery event id is the created message id. Discord
+  channels receive text only — the voice pass delivers the summary with a note instead of audio.
 
-**Important:** the room must **not be end-to-end encrypted**. A plain HTTP bot cannot produce
-Megolm keys; E2EE rooms would require a full crypto stack. Create an unencrypted room (or an
-unencrypted DM) for deliveries.
+- **Email** — config: `host`, `port?`, `secure?`, `username?`/`password?`, `from`, `to` (SMTP via
+  nodemailer). The summary goes out as text (+HTML when available); the voice pass attaches the
+  audio file.
 
-At delivery time the audio is uploaded via the authenticated media API
-(`/_matrix/client/v1/media/upload`, legacy fallback included) and sent as an `m.audio` message
-annotated with `org.matrix.msc3245.voice` (plus `org.matrix.msc1767.audio` duration), which
-Element and other clients render as a voice message with waveform/play button.
+Channels are attachable to workflows (`workflow_delivery_channels`, several channels per
+workflow and several channels of the same type are fine). The briefing workflow delivers the
+summary as formatted text and — when speech synthesis succeeded — the voice message to every
+enabled channel attached to it, recording one delivery row per channel and pass with its status
+(`delivery.list`). `delivery.channel.verify` runs a live pre-flight (Matrix identity + room
+membership, webhook reachability, SMTP handshake).
 
 ### Matrix chat commands
 
-With `MATRIX_CHAT_COMMANDS=true` (default) the bot listens in the configured room via
-`/sync` long-polling and reacts to text messages:
+When a matrix delivery channel exists, the bot listens in its room via `/sync` long-polling and
+reacts to text messages:
 
 | Command | Effect |
 | --- | --- |
@@ -334,10 +343,9 @@ With `MATRIX_CHAT_COMMANDS=true` (default) the bot listens in the configured roo
 | `/help` | usage |
 
 Details: the sync position is persisted (SQLite `kv` table), so restarts never replay history or
-re-execute old commands; the bot ignores its own messages; `MATRIX_ALLOWED_SENDERS`
-(comma-separated Matrix IDs) can restrict who may issue commands — by default anyone in the room
-can. Sync errors back off and resume automatically, and a re-login transparently resets the sync
-position.
+re-execute old commands; the bot ignores its own messages; the channel's `allowedSenders` config
+can restrict who may issue commands — by default anyone in the room can. Sync errors back off
+and resume automatically, and a re-login transparently resets the sync position.
 
 **Follow-up questions:** every allowed message is handed to the trigger dispatcher (plain messages
 are still treated as commands). The `qa` workflow is bound to Matrix messages that are replies to
@@ -379,7 +387,8 @@ run id before the run finishes so the UI can navigate to it.
 
 The Briefs list shows each brief with colour-coded badges (topic count, source count, audio
 availability). The details view shows the full summary, plays the stored audio, offers
-**Re-send** to deliver the brief to Matrix again (formatted summary + voice), **Generate voice**
+**Re-send** to deliver the brief through delivery channels again (formatted summary + voice),
+**Generate voice**
 for text-only briefs, and can **delete** a brief behind an M3 confirmation dialog.
 
 The Workflows tab shows contexts, workflow definitions (with **Run now**), recent runs and — when
@@ -517,7 +526,7 @@ Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
 - Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling brief` /
   `Waiting for the compiler model`, `Generating speech` / `Waiting for the local TTS server`,
-  `Sending voice message` / `Waiting for Matrix`, follow-up spans, plus job lifecycle entries
+  `Delivering brief`, follow-up spans, plus job lifecycle entries
   (`Running job "…"`, finished/failed) and skipped/failed notices. Tool- and model-level activity
   (`Calling tool <tool>`, `Model requested N tool call(s)`, …) is **not** surfaced to the UI — it
   stays in the persisted event log as `agent.tool.*` / `agent.*` events for debugging.
@@ -544,8 +553,9 @@ integration. The results are logged and shown in the activity feed; with `STARTU
 - `bluesky` — a real `searchPosts` call through the PDS (skipped in public mode)
 - `tts` — the local Qwen3-TTS server answers on `{QWEN_TTS_BASE_URL}/models`
 - `web-search` — one result through the configured search provider
-- `matrix` — active pre-flight: resolves credentials (login if needed), `whoami`, and confirms
-  the bot is **joined to the target room**
+- `matrix` — active pre-flight against the first enabled matrix delivery channel: resolves
+  credentials (login if needed), `whoami`, and confirms the bot is **joined to the target room**;
+  skipped when no matrix channel exists
 - unconfigured integrations are reported as `skipped` (not failures); each check has a 20s timeout
 
 Every check and the summary are published as events (`system.check.completed`,
@@ -557,7 +567,7 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.started/finished/failed/deleted`,
 `agent.*` (including
 `agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `brief.*`, `tts.synthesized`,
-`message.voice.sent`, `settings.updated`, `hook.received`, `chat.*` (commands,
+`delivery.updated` / `delivery.status`, `settings.updated`, `hook.received`, `chat.*` (commands,
 `chat.message.received` for every allowed
 message, and follow-up Q&A), `system.*`. Events are
 persisted in SQLite (`events` table) and read back through the webhook via `event.pull` /

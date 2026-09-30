@@ -146,7 +146,6 @@ export function createChatCommandHandler(
       `[${status.perplexity ? "ok" : "skipped"}] perplexity`,
       `[${status.bluesky === "authenticated" ? "ok" : "skipped"}] bluesky (${status.bluesky})`,
       `[${status.tts ? "ok" : "skipped"}] qwen-tts (${deps.config.qwenTts.baseUrl})`,
-      `[${status.matrix ? "ok" : "skipped"}] matrix`,
     ];
     return `Configuration status:\n${lines.join("\n")}`;
   }

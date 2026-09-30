@@ -166,6 +166,54 @@ export const migrations: Migration[] = [
       ALTER TABLE workflow_runs ADD COLUMN checkpoint TEXT;
     `,
   },
+  {
+    id: 11,
+    name: "delivery_channels",
+    sql: `
+      CREATE TABLE IF NOT EXISTS delivery_channels (
+        id         TEXT PRIMARY KEY,
+        type       TEXT NOT NULL,
+        name       TEXT NOT NULL,
+        config     TEXT NOT NULL DEFAULT '{}',
+        enabled    INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workflow_delivery_channels (
+        workflow   TEXT NOT NULL,
+        channel_id TEXT NOT NULL REFERENCES delivery_channels(id) ON DELETE CASCADE,
+        PRIMARY KEY (workflow, channel_id)
+      );
+      CREATE TABLE IF NOT EXISTS deliveries (
+        id         TEXT PRIMARY KEY,
+        brief_id   TEXT NOT NULL,
+        run_id     TEXT,
+        channel_id TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        status     TEXT NOT NULL,
+        event_id   TEXT,
+        error      TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_deliveries_brief ON deliveries (brief_id);
+      CREATE INDEX IF NOT EXISTS idx_deliveries_run ON deliveries (run_id);
+      CREATE INDEX IF NOT EXISTS idx_deliveries_channel ON deliveries (channel_id);
+    `,
+  },
+  {
+    id: 12,
+    name: "user_workflows",
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_workflows (
+        id         TEXT PRIMARY KEY,
+        name       TEXT NOT NULL,
+        topics     TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

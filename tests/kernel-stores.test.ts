@@ -5,10 +5,12 @@ import { EventStore } from "../src/core/events/EventStore.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { ContextRepository } from "../src/domain/contexts/ContextRepository.ts";
+import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
+import { UserWorkflowRepository } from "../src/domain/workflows/UserWorkflowRepository.ts";
 import { testConfig } from "./support.ts";
 
 describe("kernel storage overrides", () => {
@@ -24,6 +26,8 @@ describe("kernel storage overrides", () => {
       kv: new KeyValueRepository(memory),
       contexts: new ContextRepository(memory),
       runs: new WorkflowRunRepository(memory),
+      deliveries: new DeliveryRepository(memory),
+      userWorkflows: new UserWorkflowRepository(memory),
     };
 
     const kernel = await createKernel({ config: testConfig(), stores });

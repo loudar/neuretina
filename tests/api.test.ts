@@ -3,7 +3,7 @@ import { createKernel, type Kernel } from "../src/kernel/Kernel.ts";
 import { createLogger } from "../src/core/logger.ts";
 import type { DomainEvent } from "../src/core/events/types.ts";
 import {
-  StubMessaging,
+  StubDeliveryService,
   StubTts,
   completion,
   stubLlm,
@@ -14,8 +14,10 @@ import {
 
 let kernel: Kernel;
 let base: string;
+let delivery: StubDeliveryService;
 
 beforeAll(async () => {
+  delivery = new StubDeliveryService();
   kernel = await createKernel({
     config: testConfig(),
     logger: createLogger("test", { level: "error" }),
@@ -23,7 +25,7 @@ beforeAll(async () => {
     webSearch: stubSearch("perplexity", "web"),
     socialSearch: stubSearch("bluesky", "social"),
     tts: new StubTts(),
-    messaging: new StubMessaging(),
+    delivery,
   });
   base = `http://127.0.0.1:${kernel.api.port}`;
 });
@@ -426,7 +428,7 @@ describe("webhook gateway", () => {
     }
   });
 
-  test("re-sends a stored brief as formatted text plus audio", async () => {
+  test("re-sends a stored brief through the requested delivery channels", async () => {
     const brief = kernel.briefs.create({
       correlationId: "c-brief",
       topics: ["Rust"],
@@ -439,31 +441,82 @@ describe("webhook gateway", () => {
       ],
     });
     kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg", 1000);
+    const channel = kernel.deliveries.createChannel({ type: "matrix", name: "Matrix", config: {} });
 
-    const messaging = kernel.messaging as StubMessaging;
-    const before = messaging.sent.length;
-
-    const result = await call<{ briefId: string; sent: Array<{ kind: string }> }>("brief.send", {
-      id: brief.id,
-    });
+    const result = await call<{
+      briefId: string;
+      results: Array<{ channelId: string; status: string; eventId?: string }>;
+    }>("brief.send", { id: brief.id, channels: [channel.id] });
 
     expect(result.briefId).toBe(brief.id);
-    expect(result.sent.map((entry) => entry.kind)).toEqual(["text", "voice"]);
+    // The injected stub delivery service answers with its canned result.
+    expect(result.results).toEqual([{ channelId: "chan-1", status: "sent", eventId: "event-1" }]);
 
-    const added = messaging.sent.slice(before).map((entry) => entry.message);
-    expect(added).toHaveLength(2);
-    const summary = added[0]!;
-    expect(summary.kind).toBe("text");
-    if (summary.kind === "text") {
-      expect(summary.text).toContain("# Rust");
-      expect(summary.text).toContain("**Sources**");
-      expect(summary.text).toContain("[Example](https://example.com/article)");
-      expect(summary.text).toContain("[News](https://news.example.org/story)");
-      expect(summary.text).not.toContain("example.com/other");
-      expect(summary.html).toContain("<h2>Rust</h2>");
-      expect(summary.html).toContain('href="https://example.com/article"');
-    }
-    expect(added[1]!.kind).toBe("voice");
+    const input = delivery.delivered.at(-1)!;
+    expect(input.briefId).toBe(brief.id);
+    expect(input.channels).toEqual([channel.id]);
+    expect(input.summary).toContain("# Rust");
+    expect(input.summary).toContain("**Sources**");
+    expect(input.summary).toContain("[Example](https://example.com/article)");
+    expect(input.summary).toContain("[News](https://news.example.org/story)");
+    expect(input.summary).not.toContain("example.com/other");
+    expect(input.html).toContain("<h2>Rust</h2>");
+    expect(input.html).toContain('href="https://example.com/article"');
+    expect(input.audio).toEqual(new Uint8Array([1, 2, 3]));
+    expect(input.audioMime).toBe("audio/ogg");
+  });
+
+  test("manages delivery channels through the gateway", async () => {
+    const created = await call<{
+      id: string;
+      type: string;
+      name: string;
+      config: Record<string, unknown>;
+      enabled: boolean;
+    }>("delivery.channel.create", {
+      type: "discord",
+      name: "War room",
+      config: { webhookUrl: "https://discord.test/hook" },
+    });
+    expect(created.type).toBe("discord");
+    expect(created.name).toBe("War room");
+    expect(created.config).toEqual({ webhookUrl: "https://discord.test/hook" });
+
+    const updated = await call<{ name: string; enabled: boolean }>("delivery.channel.update", {
+      id: created.id,
+      name: "War room v2",
+      enabled: false,
+    });
+    expect(updated.name).toBe("War room v2");
+    expect(updated.enabled).toBe(false);
+
+    await call("delivery.attach", { workflow: "briefing", channelId: created.id });
+    const workflows = await call<Array<{ workflow: string; channelIds: string[] }>>(
+      "delivery.workflows",
+    );
+    expect(workflows.find((entry) => entry.workflow === "briefing")?.channelIds).toContain(
+      created.id,
+    );
+
+    const rows = await call<Array<{ channelId: string }>>("delivery.list", {});
+    expect(rows).toEqual([]);
+
+    await call("delivery.detach", { workflow: "briefing", channelId: created.id });
+    const afterDetach =
+      (await call<Array<{ workflow: string; channelIds: string[] }>>("delivery.workflows")).find(
+        (entry) => entry.workflow === "briefing",
+      )?.channelIds ?? [];
+    expect(afterDetach).not.toContain(created.id);
+
+    const missingChannel = await post({
+      type: "delivery.attach",
+      payload: { workflow: "briefing", channelId: "missing" },
+    });
+    expect(missingChannel.status).toBe(404);
+
+    const deleted = await call<{ ok: boolean }>("delivery.channel.delete", { id: created.id });
+    expect(deleted.ok).toBe(true);
+    expect((await call<Array<{ id: string }>>("delivery.channel.list")).map((c) => c.id)).not.toContain(created.id);
   });
 
   test("deletes a stored brief", async () => {
@@ -539,47 +592,52 @@ describe("webhook gateway", () => {
     expect(gone.status).toBe(404);
   });
 
-  test("generates voice on demand and sends it to Matrix", async () => {
+  test("generates voice on demand and delivers it through the channels", async () => {
     const brief = kernel.briefs.create({
       topics: ["Rust"],
       markdown: "# Rust\n\nAll quiet.",
       narration: "Rust is quiet",
       sources: [],
     });
-    const messaging = kernel.messaging as StubMessaging;
     const tts = kernel.tts as StubTts;
-    const messagesBefore = messaging.sent.length;
+    const deliveredBefore = delivery.delivered.length;
 
-    const result = await call<{ generated: boolean; bytes: number; eventId: string | null }>(
-      "brief.audio.generate",
-      { id: brief.id },
-    );
+    const result = await call<{
+      briefId: string;
+      generated: boolean;
+      bytes: number;
+      durationMs: number | null;
+      eventId: string | null;
+      results: Array<{ channelId: string; status: string; eventId?: string }>;
+    }>("brief.audio.generate", { id: brief.id });
 
     expect(result.generated).toBe(true);
     expect(result.bytes).toBe(4);
     expect(result.eventId).toBeTruthy();
+    expect(result.results).toEqual([{ channelId: "chan-1", status: "sent", eventId: "event-1" }]);
     expect(tts.requests).toHaveLength(1);
     expect(kernel.briefs.get(brief.id).hasAudio).toBe(true);
 
-    const added = messaging.sent.slice(messagesBefore).map((entry) => entry.message);
-    expect(added).toHaveLength(1);
-    expect(added[0]!.kind).toBe("voice");
+    const input = delivery.delivered.at(-1)!;
+    expect(input.kinds).toEqual(["voice"]);
+    expect(input.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
 
-    // A second call reuses the stored audio (no regeneration) but sends again.
+    // A second call reuses the stored audio (no regeneration) but delivers again.
     const second = await call<{ generated: boolean }>("brief.audio.generate", { id: brief.id });
     expect(second.generated).toBe(false);
     expect(tts.requests).toHaveLength(1);
-    expect(messaging.sent.length).toBe(messagesBefore + 2);
+    expect(delivery.delivered).toHaveLength(deliveredBefore + 2);
 
     // regenerate without delivery only produces audio.
-    const third = await call<{ generated: boolean; eventId: string | null }>(
+    const third = await call<{ generated: boolean; eventId: string | null; results: unknown[] }>(
       "brief.audio.generate",
       { id: brief.id, regenerate: true, deliver: false },
     );
     expect(third.generated).toBe(true);
     expect(third.eventId).toBeNull();
+    expect(third.results).toEqual([]);
     expect(tts.requests).toHaveLength(2);
-    expect(messaging.sent.length).toBe(messagesBefore + 2);
+    expect(delivery.delivered).toHaveLength(deliveredBefore + 2);
   });
 
   test("event.pull returns persisted history", async () => {

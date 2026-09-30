@@ -91,7 +91,7 @@
   }
 </script>
 
-<Pane variant="list" width="24rem" title="Artifacts">
+<Pane variant="list" width="24rem" title="Artifacts" storageKey="artifacts">
   <div class="search">
     <TextFieldOutlined
       label="Search artifacts"

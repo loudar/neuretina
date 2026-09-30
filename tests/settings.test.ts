@@ -112,9 +112,6 @@ describe("SettingsService", () => {
     service.set("QWEN_TTS_SPEED", "1.25");
     expect(config.qwenTts.speed).toBe(1.25);
 
-    service.set("MATRIX_ALLOWED_SENDERS", "@a:x.org, @b:x.org");
-    expect(config.matrix.allowedSenders).toEqual(["@a:x.org", "@b:x.org"]);
-
     service.set("DEFAULT_SEARCH_DOMAINS", "off");
     expect(config.defaults.searchDomains).toEqual([]);
   });
@@ -124,7 +121,6 @@ describe("SettingsService", () => {
 
     expect(() => service.set("DEFAULT_SEARCH_RESULTS", "many")).toThrow();
     expect(() => service.set("DEFAULT_SEARCH_RECENCY", "fortnight")).toThrow();
-    expect(() => service.set("MATRIX_CHAT_COMMANDS", "maybe")).toThrow();
     expect(() => service.set("NOPE", "1")).toThrow();
     expect(kv.get("setting:DEFAULT_SEARCH_RESULTS")).toBeNull();
   });

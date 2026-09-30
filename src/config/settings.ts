@@ -64,15 +64,6 @@ function toBool(value: string | undefined, fallback: boolean): boolean {
   return !["false", "0", "no", "off"].includes(value.trim().toLowerCase());
 }
 
-function toList(value: string | undefined): string[] | undefined {
-  if (!value) return undefined;
-  const items = value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return items.length > 0 ? items : undefined;
-}
-
 /** Same semantics as `parseSearchDomains`: `off` disables, at most 20 entries. */
 function toSearchDomains(value: string | undefined): string[] {
   if (!value) return [...DEFAULT_SEARCH_DOMAINS];
@@ -287,75 +278,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     default: "https://public.api.bsky.app",
     apply: (config, value) => {
       config.bluesky.publicUrl = optional(value) ?? "https://public.api.bsky.app";
-    },
-  },
-
-  {
-    key: "MATRIX_HOMESERVER_URL",
-    group: "Matrix",
-    label: "Homeserver URL",
-    kind: "string",
-    apply: (config, value) => {
-      config.matrix.homeserverUrl = optional(value);
-    },
-  },
-  {
-    key: "MATRIX_ACCESS_TOKEN",
-    group: "Matrix",
-    label: "Access token",
-    description: "Either a token or username + password must be set.",
-    kind: "secret",
-    apply: (config, value) => {
-      config.matrix.accessToken = optional(value);
-    },
-  },
-  {
-    key: "MATRIX_USERNAME",
-    group: "Matrix",
-    label: "Username",
-    kind: "string",
-    apply: (config, value) => {
-      config.matrix.username = optional(value);
-    },
-  },
-  {
-    key: "MATRIX_PASSWORD",
-    group: "Matrix",
-    label: "Password",
-    kind: "secret",
-    apply: (config, value) => {
-      config.matrix.password = optional(value);
-    },
-  },
-  {
-    key: "MATRIX_ROOM_ID",
-    group: "Matrix",
-    label: "Room ID",
-    description: "Room that receives the briefs.",
-    kind: "string",
-    apply: (config, value) => {
-      config.matrix.roomId = optional(value);
-    },
-  },
-  {
-    key: "MATRIX_CHAT_COMMANDS",
-    group: "Matrix",
-    label: "Chat commands",
-    description: "Listen in the room and react to /start, /list, /status and /help.",
-    kind: "boolean",
-    default: "true",
-    apply: (config, value) => {
-      config.matrix.chatCommands = toBool(value, true);
-    },
-  },
-  {
-    key: "MATRIX_ALLOWED_SENDERS",
-    group: "Matrix",
-    label: "Allowed senders",
-    description: "Comma-separated Matrix IDs allowed to issue commands; empty allows anyone.",
-    kind: "list",
-    apply: (config, value) => {
-      config.matrix.allowedSenders = toList(value);
     },
   },
 

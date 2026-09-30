@@ -127,6 +127,101 @@ export class MatrixClient {
     return `${who} joined ${roomId}`;
   }
 
+  /**
+   * Resolves the bot's direct-message room with `userId`: a joined room from
+   * the `m.direct` account data is reused, otherwise a private DM room is
+   * created (the bot joins as its creator and invites the user) and recorded
+   * in `m.direct` so later deliveries find it again.
+   */
+  async ensureDirectRoom(userId: string): Promise<string> {
+    const target = normalizeMatrixUserId(userId);
+    this.assertConfigured();
+
+    const me = await this.ensureUserId();
+    const direct = await this.directRooms(me);
+    for (const roomId of direct[target] ?? []) {
+      if (await this.isJoined(roomId, me)) return roomId;
+    }
+
+    const created = await this.request<{ room_id?: string }>(
+      "POST",
+      "/_matrix/client/v3/createRoom",
+      {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          preset: "trusted_private_chat",
+          is_direct: true,
+          invite: [target],
+        }),
+      },
+    );
+    if (!created.room_id) {
+      throw new ProviderError(this.name, "createRoom did not return a room id");
+    }
+
+    // Remembering the DM is best effort: if the account data write fails the
+    // delivery still works, later runs just create the room again.
+    try {
+      await this.saveDirectRoom(me, direct, target, created.room_id);
+    } catch {
+      // ignored
+    }
+    return created.room_id;
+  }
+
+  private async directRooms(me: string): Promise<Record<string, string[]>> {
+    let data: Record<string, unknown> = {};
+    try {
+      data = await this.request<Record<string, unknown>>(
+        "GET",
+        `/_matrix/client/v3/user/${encodeURIComponent(me)}/account_data/m.direct`,
+      );
+    } catch (error) {
+      if (error instanceof ProviderError && error.status === 404) return {};
+      throw error;
+    }
+
+    const rooms: Record<string, string[]> = {};
+    for (const [userId, value] of Object.entries(data)) {
+      if (Array.isArray(value)) {
+        rooms[userId] = value.filter((entry): entry is string => typeof entry === "string");
+      }
+    }
+    return rooms;
+  }
+
+  private async saveDirectRoom(
+    me: string,
+    rooms: Record<string, string[]>,
+    userId: string,
+    roomId: string,
+  ): Promise<void> {
+    const next = { ...rooms, [userId]: [...(rooms[userId] ?? []), roomId] };
+    await this.request(
+      "PUT",
+      `/_matrix/client/v3/user/${encodeURIComponent(me)}/account_data/m.direct`,
+      {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      },
+    );
+  }
+
+  private async isJoined(roomId: string, userId: string): Promise<boolean> {
+    try {
+      const member = await this.request<{ membership?: string }>(
+        "GET",
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.member/${encodeURIComponent(userId)}`,
+      );
+      return member.membership === "join";
+    } catch (error) {
+      if (error instanceof ProviderError && (error.status === 403 || error.status === 404)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   assertConfigured(roomId?: string): void {
     if (!this.homeserver) {
       throw new ConfigurationError("Matrix is not configured. Set MATRIX_HOMESERVER_URL.");
@@ -185,6 +280,20 @@ export class MatrixClient {
       throw error;
     }
   }
+}
+
+const MATRIX_USER_ID_PATTERN = /^@[^:\s]+:[^\s]+$/;
+
+/** Accepts "@user:server" (or "user:server") and rejects anything else. */
+export function normalizeMatrixUserId(value: string): string {
+  const trimmed = value.trim();
+  const withSigil = trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+  if (!MATRIX_USER_ID_PATTERN.test(withSigil)) {
+    throw new ConfigurationError(
+      `Matrix user id "${value}" is not valid; use the @user:server form`,
+    );
+  }
+  return withSigil;
 }
 
 /**

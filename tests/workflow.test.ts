@@ -3,6 +3,8 @@ import { BriefingWorkflow, type BriefingProgress } from "../src/workflows/Briefi
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
+import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
+import { DeliveryService } from "../src/delivery/DeliveryService.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
@@ -10,12 +12,13 @@ import { CostTracker } from "../src/core/cost/CostTracker.ts";
 import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { createLogger } from "../src/core/logger.ts";
 import type { DomainEvent } from "../src/core/events/types.ts";
+import type { WorkflowRun } from "../src/domain/runs/WorkflowRunRepository.ts";
 import type {
   LlmCompletionRequest,
   LlmCompletionResult,
 } from "../src/capabilities/llm/LlmProvider.ts";
 import {
-  StubMessaging,
+  StubChannelSender,
   StubTts,
   completion,
   sampleResults,
@@ -169,7 +172,19 @@ function setup(options: SetupOptions = {}) {
 
   const statuses = new StatusHub();
   const tts = new StubTts();
-  const messaging = new StubMessaging();
+  const deliveryStore = new DeliveryRepository(db);
+  const sender = new StubChannelSender();
+  const delivery = new DeliveryService({
+    store: deliveryStore,
+    bus,
+    logger: log,
+    createSender: () => sender,
+  });
+  // One enabled matrix channel attached to the briefing workflow.
+  deliveryStore.attach(
+    "briefing",
+    deliveryStore.createChannel({ type: "matrix", name: "Matrix", config: {} }).id,
+  );
 
   const workflow = new BriefingWorkflow({
     topics,
@@ -179,7 +194,7 @@ function setup(options: SetupOptions = {}) {
     socialSearch: stubSearch("bluesky", "social", options.socialResults ?? [sampleResults[1]!]),
     finance: stubFinance(options.financeResults ?? []),
     tts,
-    messaging,
+    delivery,
     statuses,
     defaults: {
       recency: "day",
@@ -196,7 +211,8 @@ function setup(options: SetupOptions = {}) {
     briefs,
     bus,
     tts,
-    messaging,
+    sender,
+    deliveryStore,
     statuses,
     compilerInputs,
     dispatcherInputs,
@@ -217,7 +233,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("researches topics, compiles a brief, synthesizes audio and delivers it", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    const { workflow, topics, briefs, bus, tts, sender, deliveryStore, statuses } = setup();
     topics.add({ name: "Rust" });
     topics.add({ name: "AI regulation" });
 
@@ -249,32 +265,42 @@ describe("BriefingWorkflow", () => {
     expect(tts.requests[0]).not.toContain("Sources");
 
     // Summary as formatted text (with clickable sources) first, then voice.
-    expect(messaging.sent).toHaveLength(2);
-    const summary = messaging.sent[0]!.message;
+    expect(sender.sent).toHaveLength(2);
+    const summary = sender.sent[0]!;
     expect(summary.kind).toBe("text");
-    if (summary.kind === "text") {
-      expect(summary.text).toContain("# Morning brief");
-      expect(summary.text).toContain("**Sources**");
-      expect(summary.text).toContain("](https://");
-      // The spoken narration must not contain the links.
-      expect(tts.requests[0]).not.toContain("example.com");
-      expect(summary.html).toContain("<h2>Morning brief</h2>");
-      expect(summary.html).toContain("<h3>Rust</h3>");
-      expect(summary.html).toContain('href="https://example.com/article"');
-    }
-    expect(messaging.sent[1]?.message.kind).toBe("voice");
+    expect(summary.text).toContain("# Morning brief");
+    expect(summary.text).toContain("**Sources**");
+    expect(summary.text).toContain("](https://");
+    // The spoken narration must not contain the links.
+    expect(tts.requests[0]).not.toContain("example.com");
+    expect(summary.html).toContain("<h2>Morning brief</h2>");
+    expect(summary.html).toContain("<h3>Rust</h3>");
+    expect(summary.html).toContain('href="https://example.com/article"');
+    expect(sender.sent[1]?.kind).toBe("voice");
+    expect(sender.sent[1]?.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
+
+    // One recorded delivery row per channel and pass, all settled.
+    const rows = deliveryStore.deliveries({ briefId: output.briefId });
+    expect(rows.map((row) => `${row.kind}:${row.status}`)).toEqual(["text:sent", "voice:sent"]);
 
     const topicsEmitted = events.map((event) => event.topic);
     expect(topicsEmitted).toContain("brief.research.started");
     expect(topicsEmitted).toContain("brief.generated");
     expect(topicsEmitted).toContain("tts.synthesized");
-    expect(topicsEmitted).toContain("message.text.sent");
-    expect(topicsEmitted).toContain("message.voice.sent");
+    expect(topicsEmitted).toContain("delivery.status");
     expect(topicsEmitted).toContain("agent.tool.succeeded");
+
+    const deliveryEvents = events.filter((event) => event.topic === "delivery.status");
+    const statusesEmitted = deliveryEvents.map(
+      (event) =>
+        `${(event.payload as { kind: string }).kind}:${(event.payload as { status: string }).status}`,
+    );
+    expect(statusesEmitted).toContain("text:pending");
+    expect(statusesEmitted).toContain("voice:sent");
   });
 
   test("can generate a brief without audio or delivery", async () => {
-    const { workflow, topics, briefs, tts, messaging, statuses } = setup();
+    const { workflow, topics, briefs, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -285,11 +311,11 @@ describe("BriefingWorkflow", () => {
     expect(output.briefId).toBeTruthy();
     expect(briefs.get(output.briefId!).hasAudio).toBe(false);
     expect(tts.requests).toHaveLength(0);
-    expect(messaging.sent).toHaveLength(0);
+    expect(sender.sent).toHaveLength(0);
   });
 
   test("falls back to text delivery when speech generation fails", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
     tts.failWith = "local TTS returned HTTP 500";
 
@@ -304,17 +330,14 @@ describe("BriefingWorkflow", () => {
     expect(briefs.get(output.briefId!).hasAudio).toBe(false);
 
     expect(tts.requests).toHaveLength(1);
-    expect(messaging.sent).toHaveLength(1);
-    const message = messaging.sent[0]!.message;
-    expect(message.kind).toBe("text");
-    if (message.kind === "text") {
-      expect(message.text).toContain("# Morning brief");
-      expect(message.html).toContain("<h2>Morning brief</h2>");
-    }
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0]?.kind).toBe("text");
+    expect(sender.sent[0]?.text).toContain("# Morning brief");
+    expect(sender.sent[0]?.html).toContain("<h2>Morning brief</h2>");
   });
 
   test("sends a text notice instead of a brief when nothing was found", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup({
+    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup({
       webResults: [],
       socialResults: [],
       researchVerdict: false,
@@ -334,15 +357,12 @@ describe("BriefingWorkflow", () => {
     expect(briefs.list()).toHaveLength(0);
     expect(tts.requests).toHaveLength(0);
 
-    expect(messaging.sent).toHaveLength(1);
-    const message = messaging.sent[0]!.message;
-    expect(message.kind).toBe("text");
-    if (message.kind === "text") {
-      expect(message.text).toContain("No brief today");
-      expect(message.text).toContain("very obscure topic");
-      expect(message.text).toContain('Queries tried: "t"');
-      expect(message.text).toContain("No summary or audio was generated.");
-    }
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0]?.kind).toBe("text");
+    expect(sender.sent[0]?.text).toContain("No brief today");
+    expect(sender.sent[0]?.text).toContain("very obscure topic");
+    expect(sender.sent[0]?.text).toContain('Queries tried: "t"');
+    expect(sender.sent[0]?.text).toContain("No summary or audio was generated.");
 
     const skipEvent = events.find((event) => event.topic === "brief.skipped");
     expect(skipEvent?.payload).toMatchObject({ topics: ["very obscure topic"] });
@@ -351,7 +371,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("delivers text only when voice is disabled", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -363,8 +383,8 @@ describe("BriefingWorkflow", () => {
     expect(output.audioBytes).toBeUndefined();
     expect(briefs.get(output.briefId!).hasAudio).toBe(false);
     expect(tts.requests).toHaveLength(0);
-    expect(messaging.sent).toHaveLength(1);
-    expect(messaging.sent[0]?.message.kind).toBe("text");
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0]?.kind).toBe("text");
   });
 
   test("compresses an over-long draft before delivering", async () => {
@@ -422,7 +442,7 @@ describe("BriefingWorkflow", () => {
   test("ignores irrelevant search results when the researcher reports found=false", async () => {
     // Perplexity returns *something* even for nonsense queries, so the source
     // count alone cannot detect "nothing meaningful" — the agent's verdict must.
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup({
+    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup({
       researchVerdict: false,
     });
     topics.add({ name: "zzzuq flurble" });
@@ -438,10 +458,12 @@ describe("BriefingWorkflow", () => {
     expect(output.skipped).toBe(true);
     expect(briefs.list()).toHaveLength(0);
     expect(tts.requests).toHaveLength(0);
-    expect(messaging.sent).toHaveLength(1);
-    expect(messaging.sent[0]?.message.kind).toBe("text");
+    expect(sender.sent).toHaveLength(1);
+    expect(sender.sent[0]?.kind).toBe("text");
     expect(events.map((event) => event.topic)).not.toContain("brief.generated");
-    expect(events.map((event) => event.topic)).not.toContain("message.voice.sent");
+    expect(events.filter((event) => event.topic === "delivery.status").every(
+      (event) => (event.payload as { kind: string }).kind === "text",
+    )).toBe(true);
 
     const researched = events.find((event) => event.topic === "brief.research.completed");
     expect(researched?.payload).toMatchObject({ found: false });
@@ -682,7 +704,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("resumes from checkpointed progress without re-running research or the compiler", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses, llmRequests } = setup();
+    const { workflow, topics, briefs, bus, tts, sender, statuses, llmRequests } = setup();
     topics.add({ name: "Rust" });
 
     const events: DomainEvent[] = [];
@@ -730,14 +752,14 @@ describe("BriefingWorkflow", () => {
     expect(stored.hasAudio).toBe(true);
     expect(stored.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
     expect(tts.requests).toHaveLength(1);
-    expect(messaging.sent).toHaveLength(2);
-    expect(messaging.sent[1]?.message.kind).toBe("voice");
+    expect(sender.sent).toHaveLength(2);
+    expect(sender.sent[1]?.kind).toBe("voice");
 
     expect(checkpoints.at(-1)).toMatchObject({ briefId: output.briefId, delivered: true });
   });
 
   test("reuses stored audio when resuming a run whose brief already has it", async () => {
-    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const research = {
@@ -776,13 +798,74 @@ describe("BriefingWorkflow", () => {
     expect(second.briefId).toBe(first.briefId);
     // No second synthesis; the stored audio was reused for the voice message.
     expect(tts.requests).toHaveLength(1);
-    expect(messaging.sent).toHaveLength(2);
-    const voice = messaging.sent[1]!.message;
+    expect(sender.sent).toHaveLength(2);
+    const voice = sender.sent[1]!;
     expect(voice.kind).toBe("voice");
-    if (voice.kind === "voice") {
-      expect(voice.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
-      expect(voice.mimeType).toBe("audio/ogg");
-    }
+    expect(voice.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(voice.mimeType).toBe("audio/ogg");
+  });
+
+  test("honors topicIds: only the selected topic ids are briefed", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup();
+    topics.add({ name: "Rust" });
+    const crypto = topics.add({ name: "Crypto" });
+    const regulation = topics.add({ name: "AI regulation" });
+
+    const output = await workflow.run(
+      { topicIds: [crypto.id, regulation.id], topics: ["Rust"], deliver: false, generateAudio: false },
+      { correlationId: "c24", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    // The ids win over the requested names; the order follows the active topics.
+    expect(output.topics).toEqual(["AI regulation", "Crypto"]);
+    expect(briefs.latest()?.topics).toEqual(["AI regulation", "Crypto"]);
+  });
+
+  test("an empty topicIds array skips the briefing with the no-topics reason", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup();
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { topicIds: [], deliver: false, generateAudio: false },
+      { correlationId: "c25", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(true);
+    expect(output.reason).toBe("No topics configured");
+    expect(briefs.list()).toHaveLength(0);
+  });
+
+  test("delivers through the channels of the workflow being run", async () => {
+    const { workflow, topics, bus, statuses, deliveryStore } = setup();
+    topics.add({ name: "Rust" });
+
+    const briefingChannel = deliveryStore.attachments().find(
+      (attachment) => attachment.workflow === "briefing",
+    )!.channelId;
+    const userChannel = deliveryStore.createChannel({ type: "matrix", name: "User" }).id;
+    deliveryStore.attach("user-1", userChannel);
+
+    const run: WorkflowRun = {
+      id: "run-user-1",
+      workflow: "user-1",
+      contextId: "morning-briefing",
+      trigger: "manual",
+      triggerDetail: {},
+      status: "running",
+      input: {},
+      startedAt: Date.now(),
+    };
+
+    const output = await workflow.run(
+      { deliver: true, generateAudio: false },
+      { correlationId: "c26", bus, logger: log, statuses, run },
+    );
+
+    const rows = deliveryStore.deliveries({ briefId: output.briefId });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.channelId).toBe(userChannel);
+    expect(rows[0]?.channelId).not.toBe(briefingChannel);
   });
 });
 

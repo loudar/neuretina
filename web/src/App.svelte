@@ -9,6 +9,7 @@
   import iconHistory from "@ktibow/iconset-material-symbols/history";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
+  import iconSend from "@ktibow/iconset-material-symbols/send";
   import iconSettings from "@ktibow/iconset-material-symbols/settings";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
   import { eventStream } from "./lib/events.svelte";
@@ -20,6 +21,7 @@
   import TopicsView from "./components/TopicsView.svelte";
   import JobsView from "./components/JobsView.svelte";
   import WorkflowsView from "./components/WorkflowsView.svelte";
+  import DeliveryView from "./components/DeliveryView.svelte";
   import ArtifactsView from "./components/ArtifactsView.svelte";
   import EventsView from "./components/EventsView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
@@ -32,6 +34,7 @@
     { label: "Topics", value: "topics", icon: iconLabel },
     { label: "Scheduled tasks", value: "jobs", icon: iconSchedule },
     { label: "Workflows", value: "workflows", icon: iconBolt },
+    { label: "Delivery", value: "delivery", icon: iconSend },
     { label: "Artifacts", value: "artifacts", icon: iconCategory },
     { label: "Live events", value: "events", icon: iconHistory },
     { label: "Settings", value: "settings", icon: iconSettings },
@@ -142,6 +145,8 @@
     <JobsView defaultCron={config?.defaults.briefCron} />
   {:else if tab === "workflows"}
     <WorkflowsView />
+  {:else if tab === "delivery"}
+    <DeliveryView />
   {:else if tab === "artifacts"}
     <ArtifactsView />
   {:else if tab === "settings"}

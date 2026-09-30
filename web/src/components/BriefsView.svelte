@@ -7,7 +7,7 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
-  import { commands, type Brief } from "../lib/api";
+  import { commands, type Brief, type DeliveryChannelInfo } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -26,6 +26,11 @@
   let deleting = $state(false);
   let generating = $state(false);
   let voiceEnabled = $state(true);
+
+  let resendOpen = $state(false);
+  let resendChannels = $state<DeliveryChannelInfo[]>([]);
+  let resendSelected = $state<string[]>([]);
+  let resendLoading = $state(false);
 
   type ReadingSize = "small" | "medium" | "large";
 
@@ -124,12 +129,52 @@
     }
   }
 
+  // Re-send targets the channels currently attached to the brief's workflow;
+  // the dialog picks a subset of them per send.
+  async function openResend(): Promise<void> {
+    const brief = selected;
+    if (!brief) return;
+    resendOpen = true;
+    resendChannels = [];
+    resendSelected = [];
+    resendLoading = true;
+    try {
+      const [channels, deliveryWorkflows] = await Promise.all([
+        commands.delivery.channels(),
+        commands.delivery.workflows(),
+      ]);
+      const attached = deliveryWorkflows.find((entry) => entry.workflow === brief.workflow);
+      const attachedChannels = attached
+        ? channels.filter((channel) => attached.channelIds.includes(channel.id))
+        : [];
+      resendChannels = attachedChannels;
+      resendSelected = attachedChannels.slice(0, 1).map((channel) => channel.id);
+    } catch (error) {
+      reportError(error);
+    } finally {
+      resendLoading = false;
+    }
+  }
+
+  function toggleResendChannel(id: string): void {
+    resendSelected = resendSelected.includes(id)
+      ? resendSelected.filter((entry) => entry !== id)
+      : [...resendSelected, id];
+  }
+
   async function resend(): Promise<void> {
-    if (!selected || resending) return;
+    if (!selected || resending || resendSelected.length === 0) return;
     resending = true;
     try {
-      const result = await commands.briefs.send(selected.id);
-      reportSuccess(`Brief re-sent (${result.sent.length} message(s))`);
+      const result = await commands.briefs.send(selected.id, resendSelected);
+      const sent = result.results.filter((entry) => entry.status === "sent").length;
+      const failed = result.results.length - sent;
+      if (sent === 0) {
+        reportError(`Brief delivery failed on all ${failed} channel(s)`);
+      } else {
+        reportSuccess(`Brief sent to ${sent} channel(s)${failed > 0 ? `, ${failed} failed` : ""}`);
+      }
+      resendOpen = false;
     } catch (error) {
       reportError(error);
     } finally {
@@ -183,7 +228,7 @@
   );
 </script>
 
-<Pane variant="list" title="Briefs">
+<Pane variant="list" title="Briefs" storageKey="briefs">
   {#snippet actions()}
     <label
       class="voice-toggle"
@@ -247,7 +292,7 @@
           <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
         </Button>
       {/if}
-      <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
+      <Button variant="tonal" iconType="left" onclick={() => void openResend()} disabled={resending}>
         <Icon icon={iconSend} /> Re-send
       </Button>
       <span class="danger">
@@ -296,6 +341,46 @@
     <p class="muted">Select a brief to read it and play the audio.</p>
   {/if}
 
+  <Dialog headline="Re-send this brief?" bind:open={resendOpen}>
+    <p>
+      Deliver "{selected?.topics.join(", ") || "Untitled brief"}" to the selected delivery
+      channels.
+    </p>
+    {#if resendLoading}
+      <p class="muted">Loading channels…</p>
+    {:else if resendChannels.length === 0}
+      <p class="muted">No delivery channels attached to this workflow.</p>
+    {:else}
+      <div class="resend-channels">
+        {#each resendChannels as channel (channel.id)}
+          <label
+            class="resend-channel"
+            title={channel.enabled ? "" : "This channel is disabled"}
+          >
+            <Switch
+              checked={resendSelected.includes(channel.id)}
+              onchange={() => toggleResendChannel(channel.id)}
+            />
+            <span>{channel.name}{channel.enabled ? "" : " (disabled)"}</span>
+            <span class="provider-tag" data-provider={channel.type}>{channel.type}</span>
+          </label>
+        {/each}
+      </div>
+    {/if}
+    {#snippet buttons()}
+      <Button variant="text" onclick={() => (resendOpen = false)} disabled={resending}>
+        Cancel
+      </Button>
+      <Button
+        variant="filled"
+        onclick={() => void resend()}
+        disabled={resending || resendSelected.length === 0}
+      >
+        {resending ? "Sending…" : "Send"}
+      </Button>
+    {/snippet}
+  </Dialog>
+
   <Dialog headline="Delete this brief?" bind:open={confirmingDelete}>
     <p>
       "{selected?.topics.join(", ") || "Untitled brief"}" from
@@ -317,6 +402,20 @@
   audio {
     width: 100%;
     margin-bottom: 0.75rem;
+  }
+
+  .resend-channels {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .resend-channel {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
   }
 
   .voice-toggle {

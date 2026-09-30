@@ -1,5 +1,4 @@
 import type { AppConfig } from "../config/env.ts";
-import { configStatus } from "../config/env.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
@@ -20,6 +19,8 @@ export interface StartupServiceDeps {
   socialSearch: SearchProvider;
   tts: TextToSpeechProvider;
   messaging: MessagingProvider;
+  /** Summary of the first enabled matrix delivery channel; absent = no Matrix. */
+  matrix?: { roomId?: string } | null;
   jobs: number;
   workflows: string[];
 }
@@ -54,7 +55,7 @@ export class StartupService {
   }
 
   private buildChecks(): StartupCheck[] {
-    const { config, llm, webSearch, socialSearch, tts, messaging } = this.deps;
+    const { config, llm, webSearch, socialSearch, tts, messaging, matrix } = this.deps;
 
     return [
       {
@@ -117,13 +118,13 @@ export class StartupService {
       {
         name: "matrix",
         run: async (): Promise<CheckOutcome> => {
-          if (!configStatus(config).matrix) {
-            return { status: "skipped", detail: "Matrix not configured" };
+          if (!matrix) {
+            return { status: "skipped", detail: "no matrix delivery channel" };
           }
           if (isVerifiable(messaging)) {
             return { status: "ok", detail: await messaging.verify() };
           }
-          return { status: "ok", detail: "credentials and room configured" };
+          return { status: "ok", detail: "channel configured" };
         },
       },
     ];
@@ -132,15 +133,15 @@ export class StartupService {
   private async announce(
     report: StartupReport,
   ): Promise<StartupServiceResult["announce"]> {
-    const { config, bus, messaging } = this.deps;
+    const { config, bus, messaging, matrix } = this.deps;
 
     if (!config.startup.announce) {
       this.logger.info("startup announcement disabled (set STARTUP_ANNOUNCE=true to enable)");
       return { status: "skipped", detail: "STARTUP_ANNOUNCE is disabled" };
     }
 
-    if (!configStatus(config).matrix) {
-      this.logger.info("startup announcement skipped (Matrix not configured)");
+    if (!matrix) {
+      this.logger.info("startup announcement skipped (no matrix delivery channel)");
       return { status: "skipped", detail: "Matrix not configured" };
     }
 

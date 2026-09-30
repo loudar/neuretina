@@ -102,15 +102,6 @@ export interface AppConfig {
     pdsUrl?: string;
     publicUrl: string;
   };
-  matrix: {
-    homeserverUrl?: string;
-    accessToken?: string;
-    username?: string;
-    password?: string;
-    roomId?: string;
-    chatCommands: boolean;
-    allowedSenders?: string[];
-  };
 }
 
 export type Env = Record<string, string | undefined>;
@@ -228,24 +219,24 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       pdsUrl: str(env, "BLUESKY_PDS_URL"),
       publicUrl: str(env, "BLUESKY_PUBLIC_URL", "https://public.api.bsky.app")!,
     },
-    matrix: {
-      homeserverUrl: str(env, "MATRIX_HOMESERVER_URL"),
-      accessToken: str(env, "MATRIX_ACCESS_TOKEN"),
-      username: str(env, "MATRIX_USERNAME"),
-      password: str(env, "MATRIX_PASSWORD"),
-      roomId: str(env, "MATRIX_ROOM_ID"),
-      chatCommands: bool(env, "MATRIX_CHAT_COMMANDS", true),
-      allowedSenders: list(env, "MATRIX_ALLOWED_SENDERS"),
-    },
   };
 }
+
+/** Environment variables whose database overrides the Matrix boot migration consumes. */
+export const LEGACY_MATRIX_KEYS = [
+  "MATRIX_HOMESERVER_URL",
+  "MATRIX_ACCESS_TOKEN",
+  "MATRIX_USERNAME",
+  "MATRIX_PASSWORD",
+  "MATRIX_ROOM_ID",
+  "MATRIX_ALLOWED_SENDERS",
+] as const;
 
 export interface ConfigStatus {
   llm: boolean;
   perplexity: boolean;
   tts: boolean;
   bluesky: "authenticated" | "public";
-  matrix: boolean;
 }
 
 export function configStatus(config: AppConfig): ConfigStatus {
@@ -255,10 +246,5 @@ export function configStatus(config: AppConfig): ConfigStatus {
     tts: Boolean(config.qwenTts.baseUrl),
     bluesky:
       config.bluesky.identifier && config.bluesky.appPassword ? "authenticated" : "public",
-    matrix: Boolean(
-      config.matrix.homeserverUrl &&
-        config.matrix.roomId &&
-        (config.matrix.accessToken || (config.matrix.username && config.matrix.password)),
-    ),
   };
 }

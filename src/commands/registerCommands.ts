@@ -2,14 +2,13 @@ import type { AppConfig } from "../config/env.ts";
 import { configStatus } from "../config/env.ts";
 import type { SettingsService } from "../config/settings.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
-import { ValidationError, errorMessage } from "../core/errors.ts";
+import { ValidationError, NotFoundError, errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
-import type { WorkflowRegistry } from "../core/workflow/Workflow.ts";
-import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
+import type { WorkflowRegistry, Workflow } from "../core/workflow/Workflow.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
@@ -19,7 +18,20 @@ import type { CreateJobInput, JobStore, UpdateJobInput } from "../domain/jobs/Jo
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
 import type { WorkflowRunStore } from "../domain/runs/WorkflowRunRepository.ts";
 import type { TopicStore } from "../domain/topics/TopicRepository.ts";
+import type {
+  UserWorkflow,
+  UserWorkflowStore,
+} from "../domain/workflows/UserWorkflowRepository.ts";
 import type { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
+import type { DeliveryRouter } from "../delivery/DeliveryService.ts";
+import type { DeliveryAttempt } from "../delivery/DeliveryService.ts";
+import type {
+  DeliveryChannel,
+  DeliveryStore,
+  UpdateChannelInput,
+} from "../domain/delivery/DeliveryRepository.ts";
+import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
+import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 
 export interface CommandDeps {
   config: AppConfig;
@@ -33,31 +45,45 @@ export interface CommandDeps {
   briefs: BriefStore;
   jobs: JobStore;
   workflows: WorkflowRegistry;
+  /** Core (built-in) workflow instances by id; customizations are rows under the same id. */
+  coreWorkflows: ReadonlyMap<string, Workflow>;
   scheduler: Scheduler;
-  messaging: MessagingProvider;
+  delivery: DeliveryRouter;
+  deliveries: DeliveryStore;
+  userWorkflows: UserWorkflowStore;
   tts: TextToSpeechProvider;
   statuses: StatusHub;
   settings: SettingsService;
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, statuses, settings, config } = deps;
+  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, coreWorkflows, scheduler, statuses, settings, config, delivery, deliveries, userWorkflows } = deps;
 
-  router.register("config.get", () => ({
-    integrations: configStatus(config),
-    defaults: config.defaults,
-    timezone: config.timezone,
-    llm: { model: config.llm.model, baseUrl: config.llm.baseUrl },
-    tts: {
-      provider: "qwen-tts",
-      baseUrl: config.qwenTts.baseUrl,
-      model: config.qwenTts.model,
-      voiceId: config.qwenTts.voiceId,
-      outputFormat: config.qwenTts.outputFormat,
-    },
-    matrix: { roomId: config.matrix.roomId },
-    bluesky: { pdsUrl: config.bluesky.pdsUrl },
-  }));
+  router.register("config.get", () => {
+    const matrixChannel = deliveries
+      .channels()
+      .find((channel) => channel.type === "matrix" && channel.enabled);
+    const roomId =
+      typeof matrixChannel?.config.roomId === "string" && matrixChannel.config.roomId.trim()
+        ? matrixChannel.config.roomId
+        : undefined;
+
+    return {
+      integrations: { ...configStatus(config), matrix: Boolean(matrixChannel) },
+      defaults: config.defaults,
+      timezone: config.timezone,
+      llm: { model: config.llm.model, baseUrl: config.llm.baseUrl },
+      tts: {
+        provider: "qwen-tts",
+        baseUrl: config.qwenTts.baseUrl,
+        model: config.qwenTts.model,
+        voiceId: config.qwenTts.voiceId,
+        outputFormat: config.qwenTts.outputFormat,
+      },
+      matrix: { roomId },
+      bluesky: { pdsUrl: config.bluesky.pdsUrl },
+    };
+  });
 
   router.register("settings.list", () => settings.list());
 
@@ -211,7 +237,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     }));
   });
 
-  router.register("workflow.list", () => workflows.list());
+  router.register("workflow.list", () => {
+    const userById = new Map(userWorkflows.list().map((workflow) => [workflow.id, workflow]));
+    return workflows.list().map((info) => {
+      const user = userById.get(info.id);
+      return user ? { ...info, user: true, topicIds: user.topicIds } : info;
+    });
+  });
 
   router.register("workflow.run.list", (payload) => {
     const record = asRecord(payload);
@@ -332,6 +364,76 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return { started: true, workflow: workflow.id, runId };
   });
 
+  // ── User workflows ───────────────────────────────────────────────────────
+  // Instances of the briefing pipeline over a chosen subset of topics; the
+  // kernel registers each row as a runnable workflow on workflow.user.changed.
+
+  router.register("workflow.user.list", () => userWorkflows.list().map(toUserWorkflowInfo));
+
+  router.register("workflow.user.create", (payload, context) => {
+    const record = asRecord(payload);
+    const workflow = userWorkflows.add({
+      name: requireString(record, "name"),
+      topicIds: requireTopicIds(record, topics),
+    });
+    publishUserWorkflowChanged(bus, "create", workflow.id, context.correlationId);
+    return toUserWorkflowInfo(workflow);
+  });
+
+  router.register("workflow.user.update", (payload, context) => {
+    const record = asRecord(payload);
+    const id = requireString(record, "id");
+
+    // No row yet: updating a registered (built-in) workflow under its own id
+    // starts customizing it, so the UI needs no separate create call. The id
+    // stays the workflow's id, keeping scheduled jobs and delivery channel
+    // attachments pointing at it.
+    if (userWorkflows.get(id) === null) {
+      if (!workflows.list().some((workflow) => workflow.id === id)) {
+        throw new NotFoundError(`User workflow ${id} not found`);
+      }
+      const workflow = userWorkflows.upsert(id, {
+        name: record.name !== undefined ? requireString(record, "name") : id,
+        topicIds: requireTopicIds(record, topics),
+      });
+      publishUserWorkflowChanged(bus, "update", workflow.id, context.correlationId);
+      return toUserWorkflowInfo(workflow);
+    }
+
+    const patch: { name?: string; topicIds?: string[] } = {};
+    if (record.name !== undefined) patch.name = requireString(record, "name");
+    if (record.topicIds !== undefined) patch.topicIds = requireTopicIds(record, topics);
+
+    const workflow = userWorkflows.update(id, patch);
+    publishUserWorkflowChanged(bus, "update", workflow.id, context.correlationId);
+    return toUserWorkflowInfo(workflow);
+  });
+
+  router.register("workflow.user.remove", (payload, context) => {
+    const id = requireString(asRecord(payload), "id");
+
+    // A core workflow survives losing its customization: scheduled jobs and
+    // delivery channels reference the workflow itself, not the name/topics
+    // row, so only the row is removed.
+    if (coreWorkflows.has(id)) {
+      const workflow = userWorkflows.remove(id);
+      publishUserWorkflowChanged(bus, "delete", workflow.id, context.correlationId);
+      return { ok: true };
+    }
+
+    if (jobs.list().some((job) => job.workflow === id)) {
+      throw new ValidationError(
+        `Workflow ${id} is referenced by a scheduled task; delete or reassign the scheduled task(s) first`,
+      );
+    }
+
+    const workflow = userWorkflows.remove(id);
+    deliveries.detachWorkflow(id);
+    publishDeliveryUpdated(bus, "detach", context.correlationId);
+    publishUserWorkflowChanged(bus, "delete", workflow.id, context.correlationId);
+    return { ok: true };
+  });
+
   router.register("brief.list", (payload) => {
     const record = asRecord(payload);
     const limit = typeof record.limit === "number" ? Math.min(Math.max(1, record.limit), 200) : 50;
@@ -372,13 +474,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   // Generates speech for a stored brief on demand (useful for text-only
-  // briefings) and auto-sends it to Matrix as a voice message.
+  // briefings) and delivers it as a voice message through the brief's
+  // delivery channels.
   router.register("brief.audio.generate", async (payload, context) => {
     const record = asRecord(payload);
     const id = requireString(record, "id");
     const deliver = record.deliver !== false;
     const regenerate = record.regenerate === true;
-    const channel = optionalString(record, "channel");
     const brief = briefs.get(id);
 
     let audio = briefs.getAudio(id);
@@ -432,31 +534,34 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       }
     }
 
+    let results: DeliveryAttempt[] = [];
     let eventId: string | null = null;
     if (deliver) {
-      const sendSpan = statuses.begin(`${context.correlationId}:send`, "Sending voice message", {
+      const sendSpan = statuses.begin(`${context.correlationId}:send`, "Delivering voice message", {
         correlationId: context.correlationId,
       });
       try {
-        sendSpan.update("Waiting for Matrix");
-        const sent = await deps.messaging.send({
-          kind: "voice",
+        const summary = buildBriefMessage(brief.markdown, brief.sources);
+        results = await deps.delivery.deliver({
+          briefId: id,
+          runId: context.correlationId,
+          kinds: ["voice"],
+          summary,
+          html: markdownToHtml(summary),
+          narration: brief.narration,
           audio: audio.audio,
-          mimeType: audio.mimeType,
-          durationMs,
-          filename: `brief-${dateOf(brief.createdAt)}.${extensionFor(audio.mimeType)}`,
-          caption: `Brief – ${new Date(brief.createdAt).toLocaleString()}`,
-          channel,
+          audioMime: audio.mimeType,
         });
-        eventId = sent.id;
-        sendSpan.done(`Voice message sent (${sent.channel})`);
-        bus.publish(
-          "message.voice.sent",
-          { correlationId: context.correlationId, briefId: id, channel: sent.channel, eventId: sent.id },
-          { source: "commands", correlationId: context.correlationId },
+        const firstSent = results.find((result) => result.status === "sent" && result.eventId);
+        eventId = firstSent?.eventId ?? null;
+        const sent = results.filter((result) => result.status === "sent").length;
+        sendSpan.done(
+          sent === results.length
+            ? `Voice delivered to ${sent} channel(s)`
+            : `Voice delivered to ${sent} channel(s) — ${results.length - sent} failed`,
         );
       } catch (error) {
-        sendSpan.failed("Sending voice message failed");
+        sendSpan.failed("Delivering the voice message failed");
         throw error;
       }
     }
@@ -466,53 +571,117 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       generated,
       bytes: audio.audio.byteLength,
       durationMs: durationMs ?? null,
+      results,
       eventId,
     };
   });
 
-  // Re-sends a stored brief: the summary as formatted text, plus the audio
-  // as a voice message when one exists.
+  // Re-sends a stored brief through the requested delivery channels: the
+  // summary as formatted text, plus the audio as a voice message when one
+  // exists. Without explicit channels the brief workflow's attached channels
+  // are used.
   router.register("brief.send", async (payload, context) => {
     const record = asRecord(payload);
     const id = requireString(record, "id");
-    const channel = optionalString(record, "channel");
+    const channels = optionalChannelIds(record);
     const brief = briefs.get(id);
-    const sent: Array<{ kind: "text" | "voice"; eventId: string }> = [];
+    const audio = briefs.getAudio(id);
 
     const text = buildBriefMessage(brief.markdown, brief.sources);
-    const textMessage = await deps.messaging.send({
-      kind: "text",
-      text,
+    const results = await deps.delivery.deliver({
+      briefId: id,
+      runId: context.correlationId,
+      channels,
+      summary: text,
       html: markdownToHtml(text),
-      channel,
+      narration: brief.narration,
+      audio: audio?.audio,
+      audioMime: audio?.mimeType,
     });
-    bus.publish(
-      "message.text.sent",
-      { correlationId: context.correlationId, channel: textMessage.channel, eventId: textMessage.id },
-      { source: "commands", correlationId: context.correlationId },
-    );
-    sent.push({ kind: "text", eventId: textMessage.id });
 
-    const audio = briefs.getAudio(id);
-    if (audio) {
-      const voice = await deps.messaging.send({
-        kind: "voice",
-        audio: audio.audio,
-        mimeType: audio.mimeType,
-        durationMs: brief.audioDurationMs,
-        filename: `brief-${dateOf(brief.createdAt)}.${extensionFor(audio.mimeType)}`,
-        caption: `Brief – ${new Date(brief.createdAt).toLocaleString()}`,
-        channel,
-      });
-      bus.publish(
-        "message.voice.sent",
-        { correlationId: context.correlationId, briefId: id, channel: voice.channel, eventId: voice.id },
-        { source: "commands", correlationId: context.correlationId },
-      );
-      sent.push({ kind: "voice", eventId: voice.id });
+    return { briefId: id, results };
+  });
+
+  // ── Delivery channels ────────────────────────────────────────────────────
+
+  router.register("delivery.channel.list", () => deliveries.channels());
+
+  router.register("delivery.channel.create", (payload, context) => {
+    const record = asRecord(payload);
+    assertChannelType(record.type);
+    const channel = deliveries.createChannel({
+      type: record.type,
+      name: requireString(record, "name"),
+      config: asOptionalRecord(record, "config") ?? {},
+    });
+    publishDeliveryUpdated(bus, "create", context.correlationId);
+    return channel;
+  });
+
+  router.register("delivery.channel.update", (payload, context) => {
+    const record = asRecord(payload);
+    const id = requireString(record, "id");
+
+    const patch: UpdateChannelInput = {};
+    if (record.name !== undefined) patch.name = requireString(record, "name");
+    if (record.config !== undefined) patch.config = asOptionalRecord(record, "config");
+    if (record.enabled !== undefined) {
+      if (typeof record.enabled !== "boolean") {
+        throw new ValidationError(`"enabled" must be a boolean`);
+      }
+      patch.enabled = record.enabled;
     }
 
-    return { briefId: id, sent };
+    const channel = deliveries.updateChannel(id, patch);
+    publishDeliveryUpdated(bus, "update", context.correlationId);
+    return channel;
+  });
+
+  router.register("delivery.channel.delete", (payload, context) => {
+    const channel: DeliveryChannel = deliveries.removeChannel(
+      requireString(asRecord(payload), "id"),
+    );
+    logger.info("delivery channel deleted", { id: channel.id, type: channel.type });
+    publishDeliveryUpdated(bus, "delete", context.correlationId);
+    return { ok: true };
+  });
+
+  // Live check of one channel's configuration; failures are reported in the
+  // result (not as an error) so the UI can show the reason inline.
+  router.register("delivery.channel.verify", async (payload) => {
+    const channel = deliveries.channel(requireString(asRecord(payload), "id"));
+    try {
+      const sender = createDeliverySender(channel.type, channel.config);
+      return { ok: true, detail: await sender.verify() };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
+  });
+
+  router.register("delivery.workflows", () => deliveries.workflows());
+
+  router.register("delivery.attach", (payload, context) => {
+    const record = asRecord(payload);
+    const workflow = requireString(record, "workflow");
+    workflows.get(workflow);
+    deliveries.attach(workflow, requireString(record, "channelId"));
+    publishDeliveryUpdated(bus, "attach", context.correlationId);
+    return { ok: true };
+  });
+
+  router.register("delivery.detach", (payload, context) => {
+    const record = asRecord(payload);
+    deliveries.detach(requireString(record, "workflow"), requireString(record, "channelId"));
+    publishDeliveryUpdated(bus, "detach", context.correlationId);
+    return { ok: true };
+  });
+
+  router.register("delivery.list", (payload) => {
+    const record = asRecord(payload);
+    return deliveries.deliveries({
+      briefId: optionalString(record, "briefId"),
+      runId: optionalString(record, "runId"),
+    });
   });
 
   router.register("artifact.list", (payload) => {
@@ -620,6 +789,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "topic.list",
     "job.list",
     "workflow.list",
+    "workflow.user.list",
     "workflow.run.list",
     "workflow.run.get",
     "brief.list",
@@ -630,6 +800,9 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "artifact.search",
     "artifact.content",
     "artifact.data",
+    "delivery.channel.list",
+    "delivery.workflows",
+    "delivery.list",
     "event.pull",
     "event.wait",
   ];
@@ -675,15 +848,68 @@ function clampNumber(value: unknown, fallback: number, min: number, max: number)
   return Math.min(Math.max(Math.floor(value), min), max);
 }
 
-function dateOf(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 10);
+function publishDeliveryUpdated(
+  bus: EventBus,
+  action: "create" | "update" | "delete" | "attach" | "detach",
+  correlationId?: string,
+): void {
+  bus.publish("delivery.updated", { action }, { source: "commands", correlationId });
 }
 
-function extensionFor(mimeType: string): string {
-  if (mimeType.includes("ogg") || mimeType.includes("opus")) return "ogg";
-  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-  if (mimeType.includes("wav")) return "wav";
-  return "bin";
+function publishUserWorkflowChanged(
+  bus: EventBus,
+  action: "create" | "update" | "delete",
+  workflowId: string,
+  correlationId?: string,
+): void {
+  bus.publish(
+    "workflow.user.changed",
+    { action, workflowId },
+    { source: "commands", correlationId },
+  );
+}
+
+function toUserWorkflowInfo(workflow: UserWorkflow): {
+  id: string;
+  name: string;
+  topicIds: string[];
+} {
+  return { id: workflow.id, name: workflow.name, topicIds: workflow.topicIds };
+}
+
+/** Non-empty array of ids that all exist in the topic store. */
+function requireTopicIds(record: Record<string, unknown>, topics: TopicStore): string[] {
+  const value = record.topicIds;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ValidationError(`"topicIds" must be a non-empty array of topic ids`);
+  }
+
+  const known = new Set(topics.list().map((topic) => topic.id));
+  const ids = value.map((entry, index) => {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new ValidationError(`"topicIds[${index}]" must be a non-empty string`);
+    }
+    const id = entry.trim();
+    if (!known.has(id)) throw new ValidationError(`Topic ${id} not found`);
+    return id;
+  });
+
+  return [...new Set(ids)];
+}
+
+/** Optional array of channel ids (`brief.send`), validated element-wise. */
+function optionalChannelIds(record: Record<string, unknown>): string[] | undefined {
+  const value = record.channels;
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) {
+    throw new ValidationError(`"channels" must be an array of channel ids`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new ValidationError(`"channels[${index}]" must be a non-empty string`);
+    }
+    return entry.trim();
+  });
 }
 
 export function eventWaitTimeoutMs(payload: unknown): number {

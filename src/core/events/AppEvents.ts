@@ -65,6 +65,10 @@ export interface AppEvents {
     /** Number of artifacts removed along with the run, if requested. */
     artifacts: number;
   };
+  "workflow.user.changed": {
+    action: "create" | "update" | "delete";
+    workflowId: string;
+  };
 
   "agent.started": { agent: string; correlationId: string; input: string };
   "agent.tool.invoked": {
@@ -148,6 +152,19 @@ export interface AppEvents {
   };
 
   "settings.updated": { key: string; action: "set" | "cleared" };
+
+  /** Any channel/attachment change; consumers refetch the delivery state. */
+  "delivery.updated": { action: "create" | "update" | "delete" | "attach" | "detach" };
+  /** One delivery attempt through a channel, from recording to settlement. */
+  "delivery.status": {
+    briefId: string;
+    runId?: string;
+    channelId: string;
+    kind: "text" | "voice";
+    status: "pending" | "sent" | "failed";
+    eventId?: string;
+    error?: string;
+  };
 
   "message.received": { type: string; correlationId: string; payload: unknown };
   "command.completed": { type: string; correlationId: string; result: unknown };

@@ -129,7 +129,7 @@
   }
 </script>
 
-<Pane variant="list" title="Topics">
+<Pane variant="list" title="Topics" storageKey="topics">
   <div class="add-form">
     <TextFieldOutlined label="New topic" bind:value={name} enter={add} />
     <TextFieldOutlinedMultiline label="Context (optional)" rows={2} bind:value={description} />

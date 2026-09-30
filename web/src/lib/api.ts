@@ -87,6 +87,16 @@ export interface WorkflowInfo {
   description: string;
   contextId?: string;
   triggers: string[];
+  /** Set for user-created workflow instances. */
+  user?: boolean;
+  /** Topic ids selected for user workflows (undefined = all topics). */
+  topicIds?: string[];
+}
+
+export interface UserWorkflowInfo {
+  id: string;
+  name: string;
+  topicIds: string[];
 }
 
 export interface AppContextInfo {
@@ -189,6 +199,36 @@ export interface SettingInfo {
   stored: boolean;
 }
 
+export type DeliveryChannelType = "matrix" | "discord" | "email";
+
+export interface DeliveryChannelInfo {
+  id: string;
+  type: DeliveryChannelType;
+  name: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeliveryWorkflowInfo {
+  workflow: string;
+  channelIds: string[];
+}
+
+export interface DeliveryRecord {
+  id: string;
+  briefId: string;
+  runId?: string;
+  channelId: string;
+  kind: "text" | "voice";
+  status: "pending" | "sent" | "failed";
+  eventId?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /**
  * Sends a message through the webhook gateway and returns the handler result
  * from the same HTTP response. Every interaction with the backend uses this.
@@ -274,10 +314,39 @@ export const commands = {
         durationMs: number | null;
         eventId: string | null;
       }>("brief.audio.generate", { id, ...options }),
-    send: (id: string) =>
-      send<{ briefId: string; sent: Array<{ kind: string; eventId: string }> }>("brief.send", {
-        id,
-      }),
+    send: (id: string, channels: string[]) => send<{ briefId: string; results: Array<{ channelId: string; status: string; eventId?: string; error?: string }> }>("brief.send", {
+      id,
+      channels,
+    }),
+  },
+
+  userWorkflows: {
+    list: () => send<UserWorkflowInfo[]>("workflow.user.list"),
+    create: (input: { name: string; topicIds: string[] }) =>
+      send<UserWorkflowInfo>("workflow.user.create", input),
+    update: (id: string, patch: { name?: string; topicIds?: string[] }) =>
+      send<UserWorkflowInfo>("workflow.user.update", { id, ...patch }),
+    remove: (id: string) => send<{ ok: boolean }>("workflow.user.remove", { id }),
+  },
+
+  delivery: {
+    channels: () => send<DeliveryChannelInfo[]>("delivery.channel.list"),
+    createChannel: (input: { type: DeliveryChannelType; name: string; config?: Record<string, unknown> }) =>
+      send<DeliveryChannelInfo>("delivery.channel.create", input),
+    updateChannel: (
+      id: string,
+      patch: { name?: string; config?: Record<string, unknown>; enabled?: boolean },
+    ) => send<DeliveryChannelInfo>("delivery.channel.update", { id, ...patch }),
+    removeChannel: (id: string) => send<{ ok: boolean }>("delivery.channel.delete", { id }),
+    verifyChannel: (id: string) =>
+      send<{ ok: boolean; detail: string }>("delivery.channel.verify", { id }),
+    workflows: () => send<DeliveryWorkflowInfo[]>("delivery.workflows"),
+    attach: (workflow: string, channelId: string) =>
+      send<{ ok: boolean }>("delivery.attach", { workflow, channelId }),
+    detach: (workflow: string, channelId: string) =>
+      send<{ ok: boolean }>("delivery.detach", { workflow, channelId }),
+    list: (filter: { briefId?: string; runId?: string } = {}) =>
+      send<DeliveryRecord[]>("delivery.list", filter),
   },
 
   workflows: {

@@ -1,4 +1,4 @@
-import { loadConfig, type AppConfig, type Env } from "../config/env.ts";
+import { loadConfig, type AppConfig, type Env, LEGACY_MATRIX_KEYS } from "../config/env.ts";
 import { SettingsService } from "../config/settings.ts";
 import { createLogger, type Logger } from "../core/logger.ts";
 import { errorMessage } from "../core/errors.ts";
@@ -9,7 +9,7 @@ import { StatusHub, type StatusStore } from "../core/status/StatusHub.ts";
 import { StatusRepository } from "../domain/status/StatusRepository.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
-import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
+import { WorkflowRegistry, type Workflow } from "../core/workflow/Workflow.ts";
 import { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
@@ -27,7 +27,19 @@ import {
   type WorkflowRunStore,
 } from "../domain/runs/WorkflowRunRepository.ts";
 import { TopicRepository, type TopicStore } from "../domain/topics/TopicRepository.ts";
+import {
+  UserWorkflowRepository,
+  type UserWorkflowStore,
+} from "../domain/workflows/UserWorkflowRepository.ts";
+import {
+  DeliveryRepository,
+  type DeliveryChannel,
+  type DeliveryStore,
+} from "../domain/delivery/DeliveryRepository.ts";
+import { DeliveryService, type DeliveryRouter } from "../delivery/DeliveryService.ts";
+import { matrixChannelConfig } from "../providers/delivery/MatrixDeliveryChannel.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
+import { createUserWorkflowSync } from "../workflows/UserBriefingWorkflow.ts";
 import { QuestionWorkflow } from "../workflows/QuestionWorkflow.ts";
 import { registerCommands } from "../commands/registerCommands.ts";
 import { StartupService } from "../startup/StartupService.ts";
@@ -59,6 +71,8 @@ export interface KernelStores {
   jobs?: JobStore;
   kv?: KeyValueStore;
   statuses?: StatusStore;
+  deliveries?: DeliveryStore;
+  userWorkflows?: UserWorkflowStore;
 }
 
 export interface KernelOverrides {
@@ -74,6 +88,7 @@ export interface KernelOverrides {
   finance?: FinanceProvider;
   tts?: TextToSpeechProvider;
   messaging?: MessagingProvider;
+  delivery?: DeliveryRouter;
 }
 
 export interface Kernel {
@@ -89,6 +104,8 @@ export interface Kernel {
   topics: TopicStore;
   briefs: BriefStore;
   jobs: JobStore;
+  deliveries: DeliveryStore;
+  userWorkflows: UserWorkflowStore;
   settings: SettingsService;
   workflows: WorkflowRegistry;
   runner: WorkflowRunner;
@@ -115,7 +132,9 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     !overridden.topics ||
     !overridden.briefs ||
     !overridden.jobs ||
-    !overridden.kv;
+    !overridden.kv ||
+    !overridden.deliveries ||
+    !overridden.userWorkflows;
   const db = needsSqlite ? new SqliteDatabase(config.dbPath) : null;
   const sqlite = (): SqliteDatabase => {
     if (!db) throw new Error("SQLite storage is not available (all stores were overridden)");
@@ -133,11 +152,25 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const briefs = overridden.briefs ?? new BriefRepository(artifacts);
   const jobs = overridden.jobs ?? new JobRepository(sqlite());
   const kv = overridden.kv ?? new KeyValueRepository(sqlite());
+  const deliveries = overridden.deliveries ?? new DeliveryRepository(sqlite());
+  const userWorkflows = overridden.userWorkflows ?? new UserWorkflowRepository(sqlite());
 
   // Settings live in the database and are shadowed by the environment; the
   // boot-time config is the base that database overrides are layered onto.
   const settings = new SettingsService({ kv, env, config, bus });
   settings.applyAll();
+
+  // One-time migration: the former MATRIX_* configuration (env or stored
+  // setting overrides) becomes the first delivery channel.
+  migrateLegacyMatrixChannel(deliveries, env, kv, logger.child("delivery"));
+
+  const delivery =
+    overrides.delivery ??
+    new DeliveryService({
+      store: deliveries,
+      bus,
+      logger: logger.child("delivery"),
+    });
 
   // Provider instances are rebuilt whenever a setting changes; consumers get
   // them through getters (the detour through `bag`), so a swap is picked up
@@ -189,25 +222,34 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       timeoutMs: config.qwenTts.timeoutMs,
     });
 
-  const buildMatrixClient = (): MatrixClient =>
-    new MatrixClient({
-      homeserverUrl: config.matrix.homeserverUrl,
-      accessToken: config.matrix.accessToken,
-      username: config.matrix.username,
-      password: config.matrix.password,
+  // Matrix consumers (delivery senders, startup check, chat listener) are all
+  // driven by the first enabled matrix delivery channel now.
+  const firstMatrixChannel = (): DeliveryChannel | undefined =>
+    deliveries.channels().find((channel) => channel.type === "matrix" && channel.enabled);
+
+  const buildMatrixClient = (): MatrixClient => {
+    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
+    return new MatrixClient({
+      homeserverUrl: matrix?.homeserverUrl,
+      accessToken: matrix?.accessToken,
+      username: matrix?.username,
+      password: matrix?.password,
     });
+  };
 
   let matrixClient = buildMatrixClient();
 
-  const buildMessaging = (): MessagingProvider =>
-    new MatrixMessagingProvider({
-      homeserverUrl: config.matrix.homeserverUrl,
-      accessToken: config.matrix.accessToken,
-      username: config.matrix.username,
-      password: config.matrix.password,
-      roomId: config.matrix.roomId,
+  const buildMessaging = (): MessagingProvider => {
+    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
+    return new MatrixMessagingProvider({
+      homeserverUrl: matrix?.homeserverUrl,
+      accessToken: matrix?.accessToken,
+      username: matrix?.username,
+      password: matrix?.password,
+      roomId: matrix?.roomId,
       client: matrixClient,
     });
+  };
 
   const bag = {
     llm: overrides.llm ?? buildLlm(),
@@ -262,49 +304,65 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     },
   };
 
-  workflows.register(
-    new BriefingWorkflow({
-      topics,
-      briefs,
-      statuses,
-      defaults: researchDefaults,
-      get llm() {
-        return bag.llm;
-      },
-      get webSearch() {
-        return bag.webSearch;
-      },
-      get socialSearch() {
-        return bag.socialSearch;
-      },
-      get finance() {
-        return bag.finance;
-      },
-      get tts() {
-        return bag.tts;
-      },
-      get messaging() {
-        return bag.messaging;
-      },
-    }),
-  );
+  const briefing = new BriefingWorkflow({
+    topics,
+    briefs,
+    statuses,
+    defaults: researchDefaults,
+    get llm() {
+      return bag.llm;
+    },
+    get webSearch() {
+      return bag.webSearch;
+    },
+    get socialSearch() {
+      return bag.socialSearch;
+    },
+    get finance() {
+      return bag.finance;
+    },
+    get tts() {
+      return bag.tts;
+    },
+    delivery,
+  });
+  workflows.register(briefing);
 
-  workflows.register(
-    new QuestionWorkflow({
-      briefs,
-      statuses,
-      defaults: researchDefaults,
-      get llm() {
-        return bag.llm;
-      },
-      get webSearch() {
-        return bag.webSearch;
-      },
-      get socialSearch() {
-        return bag.socialSearch;
-      },
-    }),
-  );
+  const question = new QuestionWorkflow({
+    briefs,
+    statuses,
+    defaults: researchDefaults,
+    get llm() {
+      return bag.llm;
+    },
+    get webSearch() {
+      return bag.webSearch;
+    },
+    get socialSearch() {
+      return bag.socialSearch;
+    },
+  });
+  workflows.register(question);
+
+  // Core workflows can be customized through a user workflow row under their
+  // own id (the sync below replaces the registration); this map restores the
+  // built-in implementation when the customization is removed.
+  const coreWorkflows = new Map<string, Workflow>([
+    [briefing.id, briefing],
+    [question.id, question],
+  ]);
+
+  // User workflow instances are runnable workflows too: register them before
+  // the runner exists so boot-time resumeInterrupted can find their runs.
+  const syncUserWorkflows = createUserWorkflowSync(workflows, briefing, userWorkflows, coreWorkflows);
+  syncUserWorkflows();
+  bus.subscribe("workflow.user.changed", () => {
+    try {
+      syncUserWorkflows();
+    } catch (error) {
+      logger.error("syncing user workflows failed", { error: errorMessage(error) });
+    }
+  });
 
   const runner = new WorkflowRunner({
     workflows,
@@ -352,26 +410,29 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     briefs,
     jobs,
     workflows,
+    coreWorkflows,
     scheduler,
     statuses,
     settings,
+    delivery,
+    deliveries,
+    userWorkflows,
     get tts() {
       return bag.tts;
-    },
-    get messaging() {
-      return bag.messaging;
     },
   });
 
   const createChatListener = (client: MatrixClient): MatrixCommandListener | null => {
-    if (!config.matrix.chatCommands) return null;
+    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
+    if (!matrix?.roomId) return null;
+
     return new MatrixCommandListener({
       client,
       kv,
       bus,
       logger: logger.child("matrix-chat"),
-      roomId: config.matrix.roomId,
-      allowedSenders: config.matrix.allowedSenders,
+      roomId: matrix.roomId,
+      allowedSenders: matrix.allowedSenders,
       onCommand: createChatCommandHandler({
         config,
         jobs,
@@ -447,13 +508,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     { source: "kernel" },
   );
 
-  if (config.matrix.chatCommands && chatListener) {
+  if (chatListener) {
     void chatListener.start().catch((error) => {
       logger.error("command listener failed to start", { error: errorMessage(error) });
     });
   }
 
   if (config.startup.enabled) {
+    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
     const startup = new StartupService({
       config,
       bus,
@@ -463,6 +525,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       socialSearch: bag.socialSearch,
       tts: bag.tts,
       messaging: bag.messaging,
+      matrix: matrix ?? null,
       jobs: scheduler.registeredCount,
       workflows: workflows.list().map((workflow) => workflow.id),
     });
@@ -495,6 +558,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     topics,
     briefs,
     jobs,
+    deliveries,
+    userWorkflows,
     settings,
     workflows,
     runner,
@@ -526,4 +591,61 @@ function seedDefaultJobIfEmpty(jobs: JobStore, config: AppConfig, logger: Logger
   });
 
   logger.info("seeded default scheduled job", { id: job.id, cron: job.cron });
+}
+
+/**
+ * Boot migration: moves the removed MATRIX_* configuration (environment
+ * values win over stored setting overrides, as before) into the first
+ * matrix delivery channel. Runs only while no delivery channel exists; the
+ * legacy setting overrides are consumed (deleted) either way.
+ */
+function migrateLegacyMatrixChannel(
+  deliveries: DeliveryStore,
+  env: Env,
+  kv: KeyValueStore,
+  logger: Logger,
+): void {
+  const read = (key: string): string | undefined => {
+    const fromEnv = env[key];
+    if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+    return kv.get(`setting:${key}`) ?? undefined;
+  };
+
+  const homeserverUrl = read("MATRIX_HOMESERVER_URL");
+  const roomId = read("MATRIX_ROOM_ID");
+  const accessToken = read("MATRIX_ACCESS_TOKEN");
+  const username = read("MATRIX_USERNAME");
+  const password = read("MATRIX_PASSWORD");
+  // Stored the way the delivery UI form writes it (comma-separated string).
+  const allowedSenders = read("MATRIX_ALLOWED_SENDERS")
+    ?.split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .join(", ");
+
+  // The Matrix settings no longer exist; remove stale database overrides.
+  for (const key of LEGACY_MATRIX_KEYS) kv.delete(`setting:${key}`);
+
+  if (deliveries.countChannels() > 0) return;
+  if (!homeserverUrl || !roomId || !(accessToken || (username && password))) {
+    logger.info("no legacy Matrix configuration found; nothing was migrated");
+    return;
+  }
+
+  const channel = deliveries.createChannel({
+    type: "matrix",
+    name: "Matrix",
+    config: {
+      homeserverUrl,
+      roomId,
+      ...(accessToken ? { accessToken } : {}),
+      ...(username ? { username } : {}),
+      ...(password ? { password } : {}),
+      ...(allowedSenders ? { allowedSenders } : {}),
+    },
+  });
+  logger.info("migrated the Matrix configuration into a delivery channel", {
+    id: channel.id,
+    roomId,
+  });
 }

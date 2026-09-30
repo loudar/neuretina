@@ -98,17 +98,16 @@ describe("formatStartupReport", () => {
   });
 });
 
-function configuredMatrixConfig() {
-  return {
+/** All integrations configured (the Matrix delivery channel is passed as a dep). */
+function configuredConfig(overrides: Record<string, string | undefined> = {}) {
+  return testConfig({
     OPENCODE_API_KEY: "key",
     KEY_PERPLEXITY: "key",
     QWEN_TTS_BASE_URL: "http://tts.test/v1",
     BLUESKY_IDENTIFIER: "bot.test",
     BLUESKY_APP_PASSWORD: "pw",
-    MATRIX_HOMESERVER_URL: "https://matrix.test",
-    MATRIX_ACCESS_TOKEN: "token",
-    MATRIX_ROOM_ID: "!room:matrix.test",
-  };
+    ...overrides,
+  });
 }
 
 function okMockFetch(): void {
@@ -126,11 +125,13 @@ function buildService(overrides: {
   bus?: EventBus;
   llm?: LlmProvider;
   tts?: TextToSpeechProvider;
+  /** First enabled matrix delivery channel summary; absent = no Matrix. */
+  matrix?: { roomId?: string } | null;
 }) {
   const bus = overrides.bus ?? setupBus();
   const messaging = overrides.messaging ?? new StubMessaging();
   const service = new StartupService({
-    config: overrides.config ?? testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
+    config: overrides.config ?? configuredConfig({ STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
     bus,
     logger: log,
     llm: overrides.llm ?? stubLlm(() => completion("ok")),
@@ -138,6 +139,7 @@ function buildService(overrides: {
     socialSearch: stubSearch("bluesky", "social", [{ title: "t", url: "https://bsky.app/x", snippet: "s", source: "bsky.app" }]),
     tts: overrides.tts ?? new StubTts(),
     messaging,
+    matrix: overrides.matrix ?? null,
     jobs: 1,
     workflows: ["briefing"],
   });
@@ -172,7 +174,9 @@ function failingTts(): TextToSpeechProvider & { verify(): Promise<string> } {
 describe("StartupService", () => {
   test("validates all integrations and announces the report to Matrix", async () => {
     okMockFetch();
-    const { service, bus, messaging } = buildService({});
+    const { service, bus, messaging } = buildService({
+      matrix: { roomId: "!room:matrix.test" },
+    });
 
     const events: DomainEvent[] = [];
     bus.subscribe("system.*", (event) => events.push(event));
@@ -204,7 +208,11 @@ describe("StartupService", () => {
   });
 
   test("reports failures in the announcement", async () => {
-    const { service, messaging } = buildService({ llm: failingLlm(), tts: failingTts() });
+    const { service, messaging } = buildService({
+      llm: failingLlm(),
+      tts: failingTts(),
+      matrix: { roomId: "!room:matrix.test" },
+    });
 
     const result = await service.run();
 
@@ -236,7 +244,8 @@ describe("StartupService", () => {
   test("does not announce by default even when Matrix is configured", async () => {
     okMockFetch();
     const { service, messaging } = buildService({
-      config: testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true" }),
+      config: testConfig({ STARTUP_CHECK: "true" }),
+      matrix: { roomId: "!room:matrix.test" },
     });
 
     const result = await service.run();
@@ -257,7 +266,10 @@ describe("StartupService", () => {
       },
     };
 
-    const { service, bus } = buildService({ messaging: failingMessaging });
+    const { service, bus } = buildService({
+      messaging: failingMessaging,
+      matrix: { roomId: "!room:matrix.test" },
+    });
     const events: DomainEvent[] = [];
     bus.subscribe("system.*", (event) => events.push(event));
 
@@ -276,7 +288,13 @@ describe("kernel startup validation", () => {
     const messaging = new StubMessaging();
 
     const kernel = await createKernel({
-      config: testConfig({ ...configuredMatrixConfig(), STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
+      config: configuredConfig({ STARTUP_CHECK: "true", STARTUP_ANNOUNCE: "true" }),
+      // Legacy Matrix env config → migrated into a delivery channel on boot.
+      env: {
+        MATRIX_HOMESERVER_URL: "https://matrix.test",
+        MATRIX_ACCESS_TOKEN: "token",
+        MATRIX_ROOM_ID: "!room:matrix.test",
+      },
       logger: log,
       webSearch: stubSearch("perplexity", "web"),
       socialSearch: stubSearch("bluesky", "social"),

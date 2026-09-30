@@ -18,6 +18,13 @@ import type {
   SentMessage,
 } from "../src/capabilities/messaging/MessagingProvider.ts";
 import type { TextToSpeechProvider } from "../src/capabilities/tts/TtsProvider.ts";
+import type {
+  DeliveryChannelSender,
+  DeliverySentMessage,
+  DeliveryTextInput,
+  DeliveryVoiceInput,
+} from "../src/capabilities/delivery/DeliveryChannel.ts";
+import type { DeliveryAttempt, DeliverInput } from "../src/delivery/DeliveryService.ts";
 
 export function testConfig(overrides: Record<string, string | undefined> = {}): AppConfig {
   return loadConfig({
@@ -120,6 +127,58 @@ export class StubTts implements TextToSpeechProvider {
       extension: this.options.extension ?? "ogg",
       durationMs: this.options.durationMs ?? 1000,
     };
+  }
+}
+
+/** Records the messages a delivery channel sender receives. */
+export class StubChannelSender implements DeliveryChannelSender {
+  readonly name = "stub-channel";
+  readonly sent: Array<{
+    kind: "text" | "voice";
+    text: string;
+    html?: string;
+    audio?: Uint8Array;
+    mimeType?: string;
+    filename?: string;
+    caption?: string;
+  }> = [];
+  /** When set, sends of that kind reject with this message. */
+  failText?: string;
+  failVoice?: string;
+
+  async verify(): Promise<string> {
+    return "verified";
+  }
+
+  async sendText(input: DeliveryTextInput): Promise<DeliverySentMessage> {
+    if (this.failText) throw new Error(this.failText);
+    this.sent.push({ kind: "text", text: input.text, ...(input.html ? { html: input.html } : {}) });
+    return { eventId: `evt-${this.sent.length}` };
+  }
+
+  async sendVoice(input: DeliveryVoiceInput): Promise<DeliverySentMessage> {
+    if (this.failVoice) throw new Error(this.failVoice);
+    this.sent.push({
+      kind: "voice",
+      text: input.text,
+      audio: input.audio,
+      mimeType: input.mimeType,
+      filename: input.filename,
+      caption: input.caption,
+    });
+    return { eventId: `evt-${this.sent.length}` };
+  }
+}
+
+/** Stands in for the DeliveryService in kernel-level tests. */
+export class StubDeliveryService {
+  readonly delivered: DeliverInput[] = [];
+  /** Returned by deliver(); defaults to one successful channel. */
+  results?: DeliveryAttempt[];
+
+  async deliver(input: DeliverInput): Promise<DeliveryAttempt[]> {
+    this.delivered.push(input);
+    return this.results ?? [{ channelId: "chan-1", status: "sent", eventId: "event-1" }];
   }
 }
 

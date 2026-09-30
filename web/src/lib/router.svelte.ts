@@ -3,6 +3,7 @@ export const TABS = [
   "topics",
   "jobs",
   "workflows",
+  "delivery",
   "artifacts",
   "events",
   "settings",
@@ -106,12 +107,13 @@ export const paths = {
   workflows: (
     workflowId?: string | null,
     runId?: string | null,
-    query?: { context?: string; artifact?: string },
+    query?: { context?: string },
   ) => {
     let path = "/workflows";
     if (workflowId) path += `/${encodeURIComponent(workflowId)}`;
     if (workflowId && runId) path += `/${encodeURIComponent(runId)}`;
     return withQuery(path, query);
   },
+  delivery: () => "/delivery",
   settings: () => "/settings",
 };
