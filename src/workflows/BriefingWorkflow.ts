@@ -168,6 +168,9 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   ): Promise<BriefingWorkflowOutput> {
     const { bus, logger, correlationId } = context;
     const contextId = context.contextId ?? DEFAULT_CONTEXT_ID;
+    // A user workflow delegates its run here with its own id: briefs, their
+    // audio and the delivery belong to the workflow that was actually run.
+    const workflowId = context.run?.workflow ?? this.id;
     const record = (event: string, fields: Record<string, unknown>) =>
       logger.info(event, { correlationId, ...fields });
 
@@ -356,7 +359,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     if (!brief) {
       brief = this.deps.briefs.create({
         correlationId,
-        workflow: this.id,
+        workflow: workflowId,
         contextId,
         topics: topicNames,
         markdown: compiled.markdown,
@@ -371,7 +374,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           artifactId: brief.artifactId,
           kind: "brief",
-          workflow: this.id,
+          workflow: workflowId,
           correlationId,
         },
         { source: `workflow:${this.id}`, correlationId },
@@ -471,7 +474,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           {
             artifactId: audioArtifactId,
             kind: "audio",
-            workflow: this.id,
+            workflow: workflowId,
             parentId: brief.artifactId,
             correlationId,
           },

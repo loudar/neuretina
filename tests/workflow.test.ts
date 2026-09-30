@@ -837,7 +837,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("delivers through the channels of the workflow being run", async () => {
-    const { workflow, topics, bus, statuses, deliveryStore } = setup();
+    const { workflow, topics, briefs, bus, statuses, deliveryStore } = setup();
     topics.add({ name: "Rust" });
 
     const briefingChannel = deliveryStore.attachments().find(
@@ -866,6 +866,10 @@ describe("BriefingWorkflow", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.channelId).toBe(userChannel);
     expect(rows[0]?.channelId).not.toBe(briefingChannel);
+
+    // The brief is attributed to the workflow that was run, so consumers
+    // (e.g. the re-send dialog) resolve that workflow's channels.
+    expect(briefs.get(output.briefId!)?.workflow).toBe("user-1");
   });
 });
 

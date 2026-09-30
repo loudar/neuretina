@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
-import { runMigrations } from "../src/infra/db/migrations.ts";
+import { migrations, runMigrations } from "../src/infra/db/migrations.ts";
 
 function repo(): ArtifactRepository {
   return new ArtifactRepository(new SqliteDatabase(":memory:"));
@@ -151,5 +151,35 @@ describe("artifact schema", () => {
     `);
 
     expect(() => runMigrations(raw)).toThrow(/predates the artifacts schema/);
+  });
+
+  test("repairs legacy brief attribution to the run's workflow", () => {
+    const raw = new Database(":memory:");
+    runMigrations(raw);
+    raw.exec(`
+      INSERT INTO workflow_runs (id, workflow, context_id, trigger, status, started_at)
+      VALUES ('run-1', 'user-1', 'morning-briefing', 'manual', 'succeeded', 0);
+      INSERT INTO artifacts (id, kind, content_type, workflow, correlation_id, context_id, created_at)
+      VALUES
+        ('brief-1', 'brief', 'text/markdown', 'briefing', 'run-1', 'morning-briefing', 0),
+        ('audio-1', 'audio', 'audio/ogg', 'briefing', 'run-1', 'morning-briefing', 0),
+        ('brief-2', 'brief', 'text/markdown', 'briefing', 'run-missing', 'morning-briefing', 0),
+        ('brief-3', 'brief', 'text/markdown', 'briefing', NULL, 'morning-briefing', 0);
+    `);
+
+    const repair = migrations.find((migration) => migration.id === 13)!;
+    raw.exec(repair.sql);
+
+    const rows = raw
+      .query<{ id: string; workflow: string }, []>(
+        "SELECT id, workflow FROM artifacts ORDER BY id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { id: "audio-1", workflow: "user-1" },
+      { id: "brief-1", workflow: "user-1" },
+      { id: "brief-2", workflow: "briefing" },
+      { id: "brief-3", workflow: "briefing" },
+    ]);
   });
 });

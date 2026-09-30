@@ -214,6 +214,28 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    // Briefs produced through a user workflow used to be stored with the
+    // pipeline's id ("briefing") instead of the workflow that was run; the
+    // run is the source of truth (delivery already resolved through it).
+    id: 13,
+    name: "repair_brief_workflow_attribution",
+    sql: `
+      UPDATE artifacts
+      SET workflow = (
+        SELECT workflow_runs.workflow
+        FROM workflow_runs
+        WHERE workflow_runs.id = artifacts.correlation_id
+      )
+      WHERE kind IN ('brief', 'audio')
+        AND correlation_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM workflow_runs
+          WHERE workflow_runs.id = artifacts.correlation_id
+            AND workflow_runs.workflow IS NOT artifacts.workflow
+        );
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {
