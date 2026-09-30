@@ -19,7 +19,9 @@ describe("renderCitations", () => {
     expect(html).toContain('<span class="cite-ref">2</span>');
     expect(html).toContain('href="https://b.com/x?a=1&amp;b=2"');
     expect(html).toContain('Second "quoted" &lt;source&gt;');
-    expect(html).toContain('<span class="cite-popover-meta">b.com · Bluesky</span>');
+    expect(html).toContain('<span class="cite-popover-domain">b.com</span>');
+    expect(html).toContain('<span class="provider-tag" data-provider="bluesky">Bluesky</span>');
+    expect(html).toContain('class="cite-favicon"');
     expect(html).not.toContain("[2]");
     expect(html).not.toContain('class="cite"');
   });

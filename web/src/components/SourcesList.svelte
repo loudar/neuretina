@@ -7,7 +7,7 @@
   import iconSearch from "@ktibow/iconset-material-symbols/search";
   import type { BriefSource } from "../lib/api";
   import {
-    domainInitial,
+    faviconUrl,
     filterSources,
     groupSourcesByDomain,
     providerLabel,
@@ -61,7 +61,15 @@
         {#each groups as group (group.domain)}
           <details class="source-group" open={filtering}>
             <summary>
-              <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
+              <span class="monogram" aria-hidden="true">
+                <img
+                  class="favicon"
+                  src={faviconUrl(group.domain)}
+                  alt=""
+                  loading="lazy"
+                  onerror={(event) => event.currentTarget.remove()}
+                />
+              </span>
               <span class="domain">{group.domain}</span>
               <span class="count">{group.sources.length}</span>
               <span class="provider-tags">
@@ -180,15 +188,24 @@
   }
 
   .monogram {
-    display: grid;
-    place-items: center;
+    position: relative;
+    flex: none;
     width: 1.6rem;
     height: 1.6rem;
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-    font-size: 0.8rem;
-    font-weight: 600;
+    overflow: hidden;
+  }
+
+  .favicon {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0.25rem;
+    box-sizing: border-box;
+    border-radius: inherit;
+    object-fit: contain;
   }
 
   .domain {
@@ -208,28 +225,6 @@
     display: inline-flex;
     gap: 0.3rem;
     margin-left: auto;
-  }
-
-  .provider-tag {
-    padding: 0.05rem 0.45rem;
-    border-radius: var(--m3-shape-full);
-    border: 1px solid var(--m3c-outline-variant);
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.68rem;
-    line-height: 1.5;
-    white-space: nowrap;
-  }
-
-  .provider-tag[data-provider="perplexity"] {
-    border-color: transparent;
-    background-color: var(--m3c-primary-container);
-    color: var(--m3c-on-primary-container);
-  }
-
-  .provider-tag[data-provider="bluesky"] {
-    border-color: transparent;
-    background-color: var(--m3c-tertiary-container);
-    color: var(--m3c-on-tertiary-container);
   }
 
   .chevron {

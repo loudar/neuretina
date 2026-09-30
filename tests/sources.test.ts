@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   domainInitial,
+  faviconUrl,
   filterSources,
   groupSourcesByDomain,
   providerLabel,
@@ -50,6 +51,13 @@ describe("source grouping", () => {
     expect(domainInitial("cbc.ca")).toBe("C");
     expect(domainInitial("123.net")).toBe("1");
     expect(domainInitial("")).toBe("?");
+  });
+
+  test("favicon urls use the favicon service", () => {
+    expect(faviconUrl("example.com")).toBe(
+      "https://www.google.com/s2/favicons?domain=example.com&sz=64",
+    );
+    expect(faviconUrl("weird domain")).toContain("domain=weird%20domain");
   });
 
   test("filters across title, url, snippet and media alt text", () => {

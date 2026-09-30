@@ -72,3 +72,8 @@ export function providerLabel(provider: string): string {
 export function domainInitial(domain: string): string {
   return (domain.match(/[a-z0-9]/i)?.[0] ?? "?").toUpperCase();
 }
+
+/** Favicon service URL for a domain. */
+export function faviconUrl(domain: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+}

@@ -1,5 +1,5 @@
 import type { BriefSource } from "./api";
-import { providerLabel, sourceDomain } from "./sources";
+import { faviconUrl, providerLabel, sourceDomain } from "./sources";
 
 /**
  * Removes [n] citation markers from rendered brief HTML and wraps the text
@@ -86,9 +86,13 @@ function wrapSegment(segment: string, indices: number[], sources: BriefSource[])
     items +=
       `<a class="cite-popover-item" href="${escapeAttribute(source.url)}" target="_blank" rel="noreferrer">` +
       `<span class="cite-ref">${index}</span>` +
+      `<img class="cite-favicon" src="${escapeAttribute(faviconUrl(sourceDomain(source.url)))}" alt="" onerror="this.remove()" />` +
       `<span class="cite-popover-body">` +
       `<span class="cite-popover-title">${escapeText(source.title)}</span>` +
-      `<span class="cite-popover-meta">${escapeText(sourceDomain(source.url))} · ${escapeText(providerLabel(source.provider))}</span>` +
+      `<span class="cite-popover-meta">` +
+      `<span class="cite-popover-domain">${escapeText(sourceDomain(source.url))}</span>` +
+      `<span class="provider-tag" data-provider="${escapeAttribute(source.provider)}">${escapeText(providerLabel(source.provider))}</span>` +
+      `</span>` +
       `</span>` +
       `</a>`;
   }
