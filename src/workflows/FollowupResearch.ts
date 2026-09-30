@@ -4,6 +4,7 @@ import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { WorkflowContext } from "../core/workflow/Workflow.ts";
@@ -127,6 +128,7 @@ export class FollowupResearch {
       });
 
       const tasks = parseFollowupTasks(completion.text);
+      context.cost?.addLlm("Follow-up planning", completion.usage);
       status?.done(
         tasks.length > 0
           ? `Digging into ${tasks.length} follow-up question(s)`
@@ -161,6 +163,7 @@ export class FollowupResearch {
           bus: context.bus,
           logger: context.logger,
         });
+        addAgentCost(context.cost, "Follow-up research", result);
         const outcome = parseFollowupOutcome(result.text);
 
         if (outcome.found && outcome.notes) {
@@ -216,6 +219,7 @@ export class FollowupResearch {
       });
 
       const parsed = extractJson<{ markdown?: unknown }>(completion.text);
+      context.cost?.addLlm("Implications", completion.usage);
       const markdown = typeof parsed?.markdown === "string" ? parsed.markdown.trim() : "";
       if (markdown) {
         status?.done("Implications section ready");

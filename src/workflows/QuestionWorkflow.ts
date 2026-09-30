@@ -3,6 +3,7 @@ import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import { addAgentCost } from "../core/cost/agentCosts.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { Workflow, WorkflowRunContext } from "../core/workflow/Workflow.ts";
 import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
@@ -89,6 +90,7 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
         bus: context.bus,
         logger: context.logger,
       });
+      addAgentCost(context.cost, "Answering", result);
       const answer =
         sanitizeNarration(stripMarkdown(result.text)).trim() ||
         "I couldn't find a good answer for that.";

@@ -6,9 +6,14 @@ import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
+import { CostTracker } from "../src/core/cost/CostTracker.ts";
 import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { createLogger } from "../src/core/logger.ts";
 import type { DomainEvent } from "../src/core/events/types.ts";
+import type {
+  LlmCompletionRequest,
+  LlmCompletionResult,
+} from "../src/capabilities/llm/LlmProvider.ts";
 import {
   StubMessaging,
   StubTts,
@@ -44,6 +49,8 @@ interface SetupOptions {
     markdown?: string;
     upgrades: Array<{ for: number; title: string; url: string }>;
   };
+  /** Every stub completion reports this usage (for cost tracking tests). */
+  llmUsage?: { inputTokens?: number; outputTokens?: number };
 }
 
 function setup(options: SetupOptions = {}) {
@@ -55,7 +62,7 @@ function setup(options: SetupOptions = {}) {
   const dispatcherInputs: string[] = [];
   let compilerCalls = 0;
 
-  const llm = stubLlm((request) => {
+  const respond = (request: LlmCompletionRequest): LlmCompletionResult => {
     const system = request.messages[0]?.content ?? "";
 
     if (system.includes("source upgrades")) {
@@ -150,6 +157,12 @@ function setup(options: SetupOptions = {}) {
           : "Notes: something happened https://example.com/article",
       }),
     );
+  };
+
+  const llm = stubLlm((request) => {
+    const result = respond(request);
+    if (!options.llmUsage) return result;
+    return { ...result, usage: { ...result.usage, ...options.llmUsage } };
   });
 
   const statuses = new StatusHub();
@@ -588,6 +601,43 @@ describe("BriefingWorkflow", () => {
     expect(stored.sources[0]?.url).toBe("https://origin.example.com/a");
     expect(stored.markdown).toContain("All quiet");
     expect(stored.markdown).not.toContain("Completely different");
+  });
+
+  test("meters LLM and Perplexity usage per workflow step", async () => {
+    const { workflow, topics, bus, statuses } = setup({
+      llmUsage: { inputTokens: 1000, outputTokens: 500 },
+    });
+    topics.add({ name: "Rust" });
+
+    const cost = new CostTracker({
+      llmInputPerMillion: 3,
+      llmOutputPerMillion: 15,
+      perplexitySearchPerRequest: 0.005,
+    });
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c21", bus, logger: log, statuses, cost },
+    );
+
+    expect(output.skipped).toBe(false);
+    const report = cost.report();
+
+    const search = report.lines.find(
+      (line) => line.step === "Research" && line.provider === "perplexity",
+    );
+    expect(search?.detail).toBe("1 search");
+    expect(search?.usd).toBeCloseTo(0.005, 6);
+
+    const researchLlm = report.lines.find(
+      (line) => line.step === "Research" && line.provider === "llm",
+    );
+    expect(researchLlm?.detail).toBe("2 calls · 2,000 in / 1,000 out tokens");
+
+    const compilation = report.lines.find((line) => line.step === "Compilation");
+    expect(compilation?.usd).toBeCloseTo(0.0105, 6);
+
+    expect(report.complete).toBe(true);
+    expect(report.totalUsd).toBeCloseTo(0.0365, 6);
   });
 
   test("collects finance lookup sources alongside search results", async () => {

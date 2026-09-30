@@ -53,6 +53,12 @@ export interface AppConfig {
     followups: boolean;
     briefLanguage: string;
   };
+  /** Price table for metered providers; 0 means unknown (usage is still recorded). */
+  costs: {
+    llmInputPerMillion: number;
+    llmOutputPerMillion: number;
+    perplexitySearchPerRequest: number;
+  };
   llm: {
     apiKey?: string;
     baseUrl: string;
@@ -172,6 +178,11 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       searchDomains: parseSearchDomains(env),
       followups: bool(env, "DEFAULT_FOLLOWUP_RESEARCH", true),
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
+    },
+    costs: {
+      llmInputPerMillion: num(env, "LLM_PRICE_INPUT_PER_M", 0),
+      llmOutputPerMillion: num(env, "LLM_PRICE_OUTPUT_PER_M", 0),
+      perplexitySearchPerRequest: num(env, "PERPLEXITY_PRICE_PER_SEARCH", 0.005),
     },
     llm: {
       apiKey: str(env, "OPENCODE_API_KEY"),

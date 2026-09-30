@@ -196,4 +196,25 @@ describe("WorkflowRunRepository", () => {
     expect(() => repo.get(run.id)).toThrow(/not found/);
     expect(() => repo.remove(run.id)).toThrow(/not found/);
   });
+
+  test("stores and returns the cost report", () => {
+    const repo = new WorkflowRunRepository(db());
+    const run = repo.create({
+      workflow: "briefing",
+      contextId: "morning-briefing",
+      trigger: "manual",
+    });
+
+    const cost = {
+      totalUsd: 0.015,
+      complete: false,
+      lines: [
+        { step: "Research", provider: "llm", detail: "2 calls · 1,200 in / 500 out tokens" },
+        { step: "Research", provider: "perplexity", detail: "3 searches", usd: 0.015 },
+      ],
+    };
+    const finished = repo.finish(run.id, { status: "succeeded", cost });
+    expect(finished.cost).toEqual(cost);
+    expect(repo.get(run.id).cost).toEqual(cost);
+  });
 });

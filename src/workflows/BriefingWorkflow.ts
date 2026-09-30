@@ -5,11 +5,12 @@ import { BriefGetTool } from "../agents/tools/BriefGetTool.ts";
 import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
-import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
+import type { LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
 import type { MessagingProvider } from "../capabilities/messaging/MessagingProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
+import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
@@ -195,6 +196,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       throw error;
     }
 
+    addAgentCost(context.cost, "Research", result);
+
     const outcome = parseResearchOutcome(result.text);
     // The agent can "succeed" with nothing usable (empty notes, step limit):
     // never compile or store a brief out of that.
@@ -240,7 +243,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const compile = this.deps.statuses?.begin(`${correlationId}:compile`, "Compiling brief", {
       correlationId,
     });
-    let compiled: { markdown: string; narration: string };
+    let compiled: { markdown: string; narration: string; usage?: LlmUsage };
     try {
       compile?.update("Waiting for the compiler model");
       compiled = await this.compile(
@@ -252,6 +255,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       compile?.failed("Compilation failed");
       throw error;
     }
+    if (compiled.usage) context.cost?.addLlm("Compilation", compiled.usage);
 
     // The first draft exists: dispatch subagents to dig into implications and
     // context it may be missing, then append what they found as an
@@ -669,7 +673,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private async compile(
     research: { topics: string[]; notes: string; sources: BriefSource[] },
     context: WorkflowContext,
-  ): Promise<{ markdown: string; narration: string }> {
+  ): Promise<{ markdown: string; narration: string; usage: LlmUsage }> {
     const draft = await this.requestCompilation(research, context);
     const draftWords = wordCount(draft.markdown);
 
@@ -683,7 +687,9 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         draft: draft.markdown,
         words: draftWords,
       });
-      if (wordCount(compressed.markdown) < draftWords) return compressed;
+      if (wordCount(compressed.markdown) < draftWords) {
+        return { ...compressed, usage: addUsage(draft.usage, compressed.usage) };
+      }
     } catch (error) {
       context.logger.warn("compression pass failed; keeping the draft", {
         error: errorMessage(error),
@@ -696,7 +702,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     research: { topics: string[]; notes: string; sources: BriefSource[] },
     context: WorkflowContext,
     compress?: { draft: string; words: number },
-  ): Promise<{ markdown: string; narration: string }> {
+  ): Promise<{ markdown: string; narration: string; usage: LlmUsage }> {
     const userContent = compress
       ? JSON.stringify({
           language: this.deps.defaults.language,
@@ -732,7 +738,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       // The spoken version is derived from the summary itself, so the audio
       // always matches the written brief (models tend to drop details when
       // asked to rewrite it).
-      return { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
+      return {
+        markdown,
+        narration: sanitizeNarration(stripMarkdown(markdown)),
+        usage: completion.usage,
+      };
     }
 
     // JSON without usable markdown means the compiler gave up: never store an
@@ -742,8 +752,26 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     context.logger.warn("compiler returned non-JSON output, falling back to raw text");
     const raw = completion.text.trim();
     if (!raw) throw new Error("Compiler returned an empty brief");
-    return { markdown: raw, narration: sanitizeNarration(stripMarkdown(raw)) };
+    return {
+      markdown: raw,
+      narration: sanitizeNarration(stripMarkdown(raw)),
+      usage: completion.usage,
+    };
   }
+}
+
+function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
+  return {
+    ...(a.inputTokens !== undefined || b.inputTokens !== undefined
+      ? { inputTokens: (a.inputTokens ?? 0) + (b.inputTokens ?? 0) }
+      : {}),
+    ...(a.outputTokens !== undefined || b.outputTokens !== undefined
+      ? { outputTokens: (a.outputTokens ?? 0) + (b.outputTokens ?? 0) }
+      : {}),
+    ...(a.costUsd !== undefined || b.costUsd !== undefined
+      ? { costUsd: (a.costUsd ?? 0) + (b.costUsd ?? 0) }
+      : {}),
+  };
 }
 
 /** Target length for the compiled brief (title aside). */

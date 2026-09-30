@@ -32,8 +32,9 @@ export function testConfig(overrides: Record<string, string | undefined> = {}): 
 export function completion(
   text: string,
   toolCalls: LlmCompletionResult["toolCalls"] = [],
+  usage: LlmCompletionResult["usage"] = {},
 ): LlmCompletionResult {
-  return { text, toolCalls, finishReason: "stop", model: "stub", usage: {} };
+  return { text, toolCalls, finishReason: "stop", model: "stub", usage };
 }
 
 export function stubLlm(

@@ -1,6 +1,7 @@
 import type { Logger } from "../logger.ts";
 import type { EventBus } from "../events/EventBus.ts";
 import type { StatusHub } from "../status/StatusHub.ts";
+import type { CostTracker } from "../cost/CostTracker.ts";
 import type { TriggerKind, WorkflowRun } from "../../domain/runs/WorkflowRunRepository.ts";
 import { NotFoundError } from "../errors.ts";
 
@@ -9,6 +10,8 @@ export interface WorkflowContext {
   bus: EventBus;
   logger: Logger;
   statuses: StatusHub;
+  /** Per-run cost accumulator; absent for direct (non-runner) invocations. */
+  cost?: CostTracker;
 }
 
 /** What started a run; `detail` carries the trigger-specific origin. */

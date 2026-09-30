@@ -16,6 +16,8 @@ export interface WorkflowRun {
   input: Record<string, unknown>;
   output?: unknown;
   error?: string;
+  /** Provider cost report for the run (JSON), when anything metered was used. */
+  cost?: unknown;
   startedAt: number;
   finishedAt?: number;
 }
@@ -57,6 +59,7 @@ interface RunRow {
   input: string;
   output: string | null;
   error: string | null;
+  cost: string | null;
   started_at: number;
   finished_at: number | null;
 }
@@ -135,18 +138,19 @@ export class WorkflowRunRepository implements WorkflowRunStore {
 
   finish(
     id: string,
-    patch: { status: WorkflowRunStatus; output?: unknown; error?: string },
+    patch: { status: WorkflowRunStatus; output?: unknown; error?: string; cost?: unknown },
   ): WorkflowRun {
     const result = this.db.raw
       .query(
         `UPDATE workflow_runs
-         SET status = ?, output = ?, error = ?, finished_at = ?
+         SET status = ?, output = ?, error = ?, cost = ?, finished_at = ?
          WHERE id = ?`,
       )
       .run(
         patch.status,
         patch.output === undefined ? null : JSON.stringify(patch.output ?? null),
         patch.error ?? null,
+        patch.cost === undefined ? null : JSON.stringify(patch.cost ?? null),
         Date.now(),
         id,
       );
@@ -173,6 +177,7 @@ function toRun(row: RunRow): WorkflowRun {
     input: parseJson(row.input, {}),
     output: row.output === null ? undefined : parseJson(row.output, null),
     error: row.error ?? undefined,
+    cost: row.cost === null ? undefined : parseJson(row.cost, null),
     startedAt: row.started_at,
     finishedAt: row.finished_at ?? undefined,
   };

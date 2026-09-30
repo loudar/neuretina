@@ -103,6 +103,24 @@ export interface AppContextInfo {
 
 export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped";
 
+export interface CostLine {
+  /** Workflow step the cost belongs to, e.g. "Research". */
+  step: string;
+  /** Provider that billed it, e.g. "llm" or "perplexity". */
+  provider: string;
+  /** Human-readable usage, e.g. "2 calls · 12,340 in / 567 out tokens". */
+  detail: string;
+  /** USD when a price is known; absent when the usage could not be priced. */
+  usd?: number;
+}
+
+export interface CostReport {
+  totalUsd: number;
+  /** False when at least one line has no known price. */
+  complete: boolean;
+  lines: CostLine[];
+}
+
 export interface WorkflowRunInfo {
   id: string;
   workflow: string;
@@ -115,6 +133,7 @@ export interface WorkflowRunInfo {
   error?: string;
   startedAt: number;
   finishedAt?: number;
+  cost?: CostReport;
 }
 
 export type WorkflowRunDetail = WorkflowRunInfo & { artifacts: ArtifactInfo[] };

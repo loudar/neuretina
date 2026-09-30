@@ -32,6 +32,8 @@ export interface LlmCompletionRequest {
 export interface LlmUsage {
   inputTokens?: number;
   outputTokens?: number;
+  /** Exact cost in USD when the gateway reports one. */
+  costUsd?: number;
 }
 
 export interface LlmCompletionResult {

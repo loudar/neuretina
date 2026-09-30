@@ -132,6 +132,13 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_runs_workflow ON workflow_runs (workflow);
     `,
   },
+  {
+    id: 8,
+    name: "workflow_run_cost",
+    sql: `
+      ALTER TABLE workflow_runs ADD COLUMN cost TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

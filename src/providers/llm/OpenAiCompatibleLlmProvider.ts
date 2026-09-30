@@ -114,6 +114,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 
       const choice = completion.choices[0];
       const message = choice?.message;
+      const costUsd = costOf(completion.usage);
 
       return {
         text: message?.content ?? "",
@@ -125,6 +126,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
         usage: {
           inputTokens: completion.usage?.prompt_tokens,
           outputTokens: completion.usage?.completion_tokens,
+          ...(costUsd !== undefined ? { costUsd } : {}),
         },
       };
     } catch (error) {
@@ -139,6 +141,19 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
       });
     }
   }
+}
+
+function costOf(usage: unknown): number | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const nested =
+    record.cost && typeof record.cost === "object"
+      ? (record.cost as Record<string, unknown>).total_cost
+      : undefined;
+  for (const value of [record.cost, record.total_cost, nested]) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
 }
 
 function parseToolCall(call: { id: string; function: { name: string; arguments: string } }): LlmToolCall {

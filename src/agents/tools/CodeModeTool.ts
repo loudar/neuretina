@@ -30,6 +30,10 @@ export interface CodeModeResult {
   result: unknown;
   logs: string[];
   toolCalls: number;
+  /** Tool invocations inside the program, by tool name. */
+  toolCallsByTool: Record<string, number>;
+  /** Billing usage reported by tools inside the program (e.g. finance lookups). */
+  toolUsages: Array<{ tool: string; usage: unknown }>;
   /** Every query/question the program passed to a tool. */
   queries: string[];
   /** Search sources gathered inside the sandbox, for the brief's source list. */
@@ -145,7 +149,13 @@ export class CodeModeTool implements Tool<CodeModeResult> {
 
     const queries: string[] = [];
     const results: CodeModeSource[] = [];
+    const toolCallsByTool: Record<string, number> = {};
+    const toolUsages: Array<{ tool: string; usage: unknown }> = [];
     for (const call of outcome.toolCalls) {
+      toolCallsByTool[call.tool] = (toolCallsByTool[call.tool] ?? 0) + 1;
+      const usage = (call.result as { usage?: unknown } | undefined)?.usage;
+      if (usage && typeof usage === "object") toolUsages.push({ tool: call.tool, usage });
+
       const query = call.args.query ?? call.args.question;
       if (typeof query === "string" && query.trim()) queries.push(query.trim());
 
@@ -173,6 +183,8 @@ export class CodeModeTool implements Tool<CodeModeResult> {
       result: clipResult(outcome.result, this.maxResultChars),
       logs: clipLogs(outcome.logs, this.maxLogChars),
       toolCalls: outcome.toolCalls.length,
+      toolCallsByTool,
+      toolUsages,
       queries,
       results: dedupeSources(results),
       durationMs: Date.now() - started,

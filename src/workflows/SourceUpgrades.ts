@@ -3,6 +3,7 @@ import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { WorkflowContext } from "../core/workflow/Workflow.ts";
@@ -114,6 +115,7 @@ export class SourceUpgrades {
         bus: context.bus,
         logger: context.logger,
       });
+      addAgentCost(context.cost, "Primary sources", result);
 
       const parsed = parseSourceUpgrades(result.text, input.sources.length);
       if (!parsed) {

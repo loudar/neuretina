@@ -2,6 +2,7 @@
   import { Button, Chip, Dialog, Icon, ListItem, Select } from "m3-svelte";
   import iconChevronRight from "@ktibow/iconset-material-symbols/chevron-right";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
+  import iconPayments from "@ktibow/iconset-material-symbols/payments";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import {
@@ -213,6 +214,14 @@
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   }
 
+  function formatUsd(value: number): string {
+    return value >= 0.01 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`;
+  }
+
+  function costLabel(cost: { totalUsd: number; complete: boolean }): string {
+    return `${cost.complete ? "" : "≥ "}${formatUsd(cost.totalUsd)}`;
+  }
+
   function outputPreview(run: WorkflowRunDetail): string {
     if (run.error) return run.error;
     if (run.output === undefined || run.output === null) return "–";
@@ -272,7 +281,7 @@
             onclick={() => openRun(run.id)}
             overline={triggerLabel(run)}
             headline={`${run.workflow} · ${run.contextId}`}
-            supporting={`${formatDateTime(run.startedAt)} · ${durationLabel(run)}`}
+            supporting={`${formatDateTime(run.startedAt)} · ${durationLabel(run)}${run.cost ? ` · ${costLabel(run.cost)}` : ""}`}
           >
             {#snippet leading()}
               <RunStatusIcon status={run.status} />
@@ -299,6 +308,9 @@
       <Chip variant="assist" icon={iconSchedule}>
         {formatRelativeTime(selected.startedAt)}
       </Chip>
+      {#if selected.cost}
+        <Chip variant="assist" icon={iconPayments}>{costLabel(selected.cost)}</Chip>
+      {/if}
       <span class="danger">
         <Button
           variant="text"
@@ -315,6 +327,21 @@
 
   {#if selected}
     <p class="preview">{outputPreview(selected)}</p>
+
+    {#if selected.cost}
+      <div class="cost">
+        <h3>Cost</h3>
+        <ul>
+          {#each selected.cost.lines as line (`${line.step}:${line.provider}`)}
+            <li>
+              <span class="cost-step">{line.step}</span>
+              <span class="cost-detail muted">{line.detail}</span>
+              <span class="cost-usd">{line.usd === undefined ? "unpriced" : formatUsd(line.usd)}</span>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
 
     <StatusFeedPanel
       runId={selected.id}
@@ -401,5 +428,51 @@
   .preview {
     margin: 0 0 1rem;
     overflow-wrap: anywhere;
+  }
+
+  .cost {
+    margin: 0 0 1rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--m3c-outline-variant);
+    border-radius: var(--m3-shape-medium);
+    background-color: var(--m3c-surface-container-low);
+  }
+
+  .cost h3 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 0.4rem;
+  }
+
+  .cost ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .cost li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    font-size: 0.82rem;
+  }
+
+  .cost-step {
+    flex: none;
+    min-width: 9rem;
+    font-weight: 500;
+  }
+
+  .cost-detail {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .cost-usd {
+    flex: none;
+    font-variant-numeric: tabular-nums;
   }
 </style>

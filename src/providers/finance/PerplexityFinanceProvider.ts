@@ -5,6 +5,7 @@ import type {
   FinanceProvider,
   FinanceQuery,
   FinanceResponse,
+  FinanceUsage,
 } from "../../capabilities/finance/FinanceProvider.ts";
 import type { SearchResult } from "../../capabilities/search/SearchProvider.ts";
 
@@ -12,6 +13,11 @@ interface PerplexityAgentResponse {
   output?: PerplexityAgentItem[];
   error?: { message?: string } | null;
   status?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cost?: number | { total_cost?: number } | null;
+  };
 }
 
 interface PerplexityAgentItem {
@@ -95,6 +101,7 @@ export class PerplexityFinanceProvider implements FinanceProvider {
       answer,
       data,
       results: collectSources(data),
+      usage: parseUsage(response.usage),
     };
   }
 }
@@ -108,6 +115,18 @@ const DEFAULT_MAX_ANSWER_TOKENS = 2048;
 const MAX_ANSWER_CHARS = 2800;
 const MAX_CONTENT_CHARS = 2000;
 const MAX_DATA_CHARS = 4000;
+
+function parseUsage(usage: PerplexityAgentResponse["usage"]): FinanceUsage | undefined {
+  if (!usage) return undefined;
+  const cost =
+    typeof usage.cost === "number" ? usage.cost : usage.cost?.total_cost;
+  const result: FinanceUsage = {
+    ...(typeof usage.input_tokens === "number" ? { inputTokens: usage.input_tokens } : {}),
+    ...(typeof usage.output_tokens === "number" ? { outputTokens: usage.output_tokens } : {}),
+    ...(typeof cost === "number" ? { costUsd: cost } : {}),
+  };
+  return Object.keys(result).length > 0 ? result : undefined;
+}
 
 function collectFinanceData(output: PerplexityAgentItem[]): FinanceDataItem[] {
   const items: FinanceDataItem[] = [];

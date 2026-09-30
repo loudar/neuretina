@@ -443,6 +443,11 @@ the Workflows tab.
   finds one it replaces the matching entry in the source list (citation numbers stay stable) and may
   adjust the claim's wording to match the primary source more precisely. Source counts and the word
   budget are capped, and a failed or fruitless pass always keeps the draft as it is.
+- **Cost tracking:** every workflow step reports what it spent. LLM completions contribute their
+  token usage (priced with `LLM_PRICE_INPUT_PER_M` / `LLM_PRICE_OUTPUT_PER_M` when set), every
+  Perplexity search request is counted at `PERPLEXITY_PRICE_PER_SEARCH` (default 0.005), and finance
+  lookups use the exact cost Perplexity's Agent API reports. The per-step breakdown is stored on the
+  run and shown in the run details; a `≥` total means some usage has no configured price.
 - Disable both post-draft passes with `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as

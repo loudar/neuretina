@@ -1,6 +1,6 @@
 import type { Logger } from "../core/logger.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
-import type { LlmMessage, LlmProvider } from "../capabilities/llm/LlmProvider.ts";
+import type { LlmMessage, LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { Tool } from "./Tool.ts";
 
@@ -43,6 +43,8 @@ export interface AgentRunResult {
   text: string;
   steps: AgentStep[];
   durationMs: number;
+  /** Token/cost usage summed across every LLM completion of the run. */
+  usage: LlmUsage;
 }
 
 const MAX_TOOL_RESULT_CHARS = 8000;
@@ -101,6 +103,9 @@ export class Agent {
 
     try {
       let finalText = "";
+      let inputTokens: number | undefined;
+      let outputTokens: number | undefined;
+      let costUsd: number | undefined;
 
       for (let index = 0; index < this.maxSteps; index++) {
         const completion = await this.llm.complete({
@@ -114,6 +119,10 @@ export class Agent {
           temperature: this.temperature,
           sessionId: correlationId,
         });
+
+        inputTokens = accumulate(inputTokens, completion.usage.inputTokens);
+        outputTokens = accumulate(outputTokens, completion.usage.outputTokens);
+        costUsd = accumulate(costUsd, completion.usage.costUsd);
 
         if (completion.toolCalls.length === 0) {
           finalText = completion.text;
@@ -172,11 +181,18 @@ export class Agent {
         finalText = steps.at(-1)?.text || AGENT_STEP_LIMIT_MESSAGE;
       }
 
+      const usage: LlmUsage = {
+        ...(inputTokens !== undefined ? { inputTokens } : {}),
+        ...(outputTokens !== undefined ? { outputTokens } : {}),
+        ...(costUsd !== undefined ? { costUsd } : {}),
+      };
+
       const result: AgentRunResult = {
         agent: this.name,
         text: finalText,
         steps,
         durationMs: Date.now() - started,
+        usage,
       };
 
       bus.publish(
@@ -187,6 +203,7 @@ export class Agent {
           steps: steps.length,
           durationMs: result.durationMs,
           output: finalText.slice(0, 500),
+          usage,
         },
         { source, correlationId },
       );
@@ -257,6 +274,11 @@ export class Agent {
       return { tool: name, args, error: message, durationMs };
     }
   }
+}
+
+function accumulate(current: number | undefined, next: number | undefined): number | undefined {
+  if (next === undefined) return current;
+  return (current ?? 0) + next;
 }
 
 function serializeToolResult(invocation: AgentToolInvocation): string {

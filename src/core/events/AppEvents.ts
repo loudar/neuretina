@@ -41,6 +41,8 @@ export interface AppEvents {
     trigger?: "schedule" | "matrix" | "manual";
     durationMs: number;
     output: unknown;
+    /** Provider cost report for the run, when anything metered was used. */
+    cost?: unknown;
   };
   "workflow.failed": {
     workflow: string;
@@ -48,6 +50,8 @@ export interface AppEvents {
     contextId?: string;
     trigger?: "schedule" | "matrix" | "manual";
     error: string;
+    /** Provider cost report for the run, when anything metered was used. */
+    cost?: unknown;
   };
   "workflow.deleted": {
     workflow: string;
@@ -77,6 +81,8 @@ export interface AppEvents {
     steps: number;
     durationMs: number;
     output: string;
+    /** Token/cost usage summed across the agent's LLM completions. */
+    usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number };
   };
   "agent.failed": { agent: string; correlationId: string; error: string };
 

@@ -240,6 +240,18 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     },
   };
 
+  const costPricing = {
+    get llmInputPerMillion() {
+      return config.costs.llmInputPerMillion;
+    },
+    get llmOutputPerMillion() {
+      return config.costs.llmOutputPerMillion;
+    },
+    get perplexitySearchPerRequest() {
+      return config.costs.perplexitySearchPerRequest;
+    },
+  };
+
   workflows.register(
     new BriefingWorkflow({
       topics,
@@ -290,6 +302,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     bus,
     logger: logger.child("runs"),
     statuses,
+    pricing: costPricing,
   });
   const triggers = new TriggerDispatcher({
     workflows,

@@ -14,6 +14,13 @@ export interface FinanceDataItem {
   sources: string[];
 }
 
+export interface FinanceUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Exact cost in USD as reported by the provider. */
+  costUsd?: number;
+}
+
 export interface FinanceResponse {
   question: string;
   provider: string;
@@ -23,6 +30,8 @@ export interface FinanceResponse {
   data: FinanceDataItem[];
   /** Attribution-friendly source pages derived from `data`. */
   results: SearchResult[];
+  /** Billing usage for the lookup, when the provider reports it. */
+  usage?: FinanceUsage;
 }
 
 export interface FinanceProvider {

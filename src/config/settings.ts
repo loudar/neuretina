@@ -425,6 +425,39 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       config.defaults.searchDomains = toSearchDomains(value);
     },
   },
+  {
+    key: "LLM_PRICE_INPUT_PER_M",
+    group: "Costs",
+    label: "LLM input price (USD / 1M tokens)",
+    description: "Leave 0 when unknown; token usage is still recorded per run.",
+    kind: "number",
+    default: "0",
+    apply: (config, value) => {
+      config.costs.llmInputPerMillion = Math.max(0, toNumber(value, 0));
+    },
+  },
+  {
+    key: "LLM_PRICE_OUTPUT_PER_M",
+    group: "Costs",
+    label: "LLM output price (USD / 1M tokens)",
+    description: "Leave 0 when unknown; token usage is still recorded per run.",
+    kind: "number",
+    default: "0",
+    apply: (config, value) => {
+      config.costs.llmOutputPerMillion = Math.max(0, toNumber(value, 0));
+    },
+  },
+  {
+    key: "PERPLEXITY_PRICE_PER_SEARCH",
+    group: "Costs",
+    label: "Perplexity search price (USD / request)",
+    description: "List price of one successful Search API request.",
+    kind: "number",
+    default: "0.005",
+    apply: (config, value) => {
+      config.costs.perplexitySearchPerRequest = Math.max(0, toNumber(value, 0.005));
+    },
+  },
 ];
 
 /**

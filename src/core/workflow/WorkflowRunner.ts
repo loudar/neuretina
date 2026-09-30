@@ -1,6 +1,8 @@
 import type { EventBus } from "../events/EventBus.ts";
 import type { Logger } from "../logger.ts";
 import type { StatusHub } from "../status/StatusHub.ts";
+import type { CostPricing } from "../cost/CostTracker.ts";
+import { CostTracker } from "../cost/CostTracker.ts";
 import { DEFAULT_CONTEXT_ID } from "../../domain/contexts/ContextRepository.ts";
 import type {
   TriggerKind,
@@ -16,6 +18,8 @@ export interface WorkflowRunnerDeps {
   bus: EventBus;
   logger: Logger;
   statuses: StatusHub;
+  /** Live price table for metered providers (settings can change at runtime). */
+  pricing: CostPricing;
 }
 
 export interface StartRunOptions {
@@ -54,6 +58,7 @@ export class WorkflowRunner {
 
     const logger = this.deps.logger.child(`workflow:${workflow.id}`);
     const started = Date.now();
+    const cost = new CostTracker(this.deps.pricing);
 
     this.deps.bus.publish(
       "workflow.started",
@@ -73,6 +78,7 @@ export class WorkflowRunner {
         bus: this.deps.bus,
         logger,
         statuses: this.deps.statuses,
+        cost,
         contextId,
         trigger,
         run,
@@ -82,9 +88,11 @@ export class WorkflowRunner {
         Boolean(output) &&
         typeof output === "object" &&
         (output as { skipped?: unknown }).skipped === true;
+      const report = costReport(cost);
       const finished = this.deps.runs.finish(run.id, {
         status: skipped ? "skipped" : "succeeded",
         output,
+        ...(report ? { cost: report } : {}),
       });
 
       this.deps.bus.publish(
@@ -96,6 +104,7 @@ export class WorkflowRunner {
           trigger: options.trigger,
           durationMs: Date.now() - started,
           output,
+          ...(report ? { cost: report } : {}),
         },
         { source: "workflow-runner", correlationId: run.id },
       );
@@ -103,7 +112,12 @@ export class WorkflowRunner {
       return finished;
     } catch (error) {
       const message = errorMessage(error);
-      this.deps.runs.finish(run.id, { status: "failed", error: message });
+      const report = costReport(cost);
+      this.deps.runs.finish(run.id, {
+        status: "failed",
+        error: message,
+        ...(report ? { cost: report } : {}),
+      });
       this.deps.bus.publish(
         "workflow.failed",
         {
@@ -112,6 +126,7 @@ export class WorkflowRunner {
           contextId,
           trigger: options.trigger,
           error: message,
+          ...(report ? { cost: report } : {}),
         },
         { source: "workflow-runner", correlationId: run.id },
       );
@@ -119,4 +134,9 @@ export class WorkflowRunner {
       throw error;
     }
   }
+}
+
+function costReport(tracker: CostTracker): ReturnType<CostTracker["report"]> | undefined {
+  const report = tracker.report();
+  return report.lines.length > 0 ? report : undefined;
 }
