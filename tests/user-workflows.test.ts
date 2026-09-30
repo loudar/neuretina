@@ -20,27 +20,29 @@ describe("UserWorkflowRepository", () => {
   test("round-trips user workflow rows", () => {
     const repo = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
 
-    const first = repo.add({ name: "AI desk", topicIds: ["t1"] });
-    const second = repo.add({ name: "Markets", topicIds: ["t2", "t2", "t3"] });
+    const first = repo.add({ name: "AI desk", inputs: { topics: ["t1"] } });
+    const second = repo.add({ name: "Markets", inputs: { topics: ["t2", "t3"] } });
 
     expect(repo.count()).toBe(2);
     expect(first.id).toBeTruthy();
     expect(repo.get(first.id)).toEqual(first);
-    // Duplicate topic ids are folded.
-    expect(second.topicIds).toEqual(["t2", "t3"]);
+    expect(second.inputs).toEqual({ topics: ["t2", "t3"] });
     expect(repo.list().map((workflow) => workflow.name)).toEqual(["AI desk", "Markets"]);
     expect(repo.get("missing")).toBeNull();
 
-    const updated = repo.update(first.id, { name: "AI focus", topicIds: ["t1", "t9"] });
+    const updated = repo.update(first.id, {
+      name: "AI focus",
+      inputs: { topics: ["t1", "t9"] },
+    });
     expect(updated.name).toBe("AI focus");
-    expect(updated.topicIds).toEqual(["t1", "t9"]);
+    expect(updated.inputs).toEqual({ topics: ["t1", "t9"] });
     expect(updated.createdAt).toBe(first.createdAt);
 
     const removed = repo.remove(second.id);
     expect(removed.id).toBe(second.id);
     expect(repo.count()).toBe(1);
 
-    expect(() => repo.add({ name: "  ", topicIds: ["t1"] })).toThrow(/name/);
+    expect(() => repo.add({ name: "  ", inputs: {} })).toThrow(/name/);
     expect(() => repo.update("missing", { name: "x" })).toThrow(/not found/);
     expect(() => repo.remove("missing")).toThrow(/not found/);
   });
@@ -48,19 +50,25 @@ describe("UserWorkflowRepository", () => {
   test("upserts rows under an explicit id", () => {
     const repo = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
 
-    const created = repo.upsert("briefing", { name: "Custom briefing", topicIds: ["t2", "t2", "t1"] });
+    const created = repo.upsert("briefing", {
+      name: "Custom briefing",
+      inputs: { topics: ["t2", "t1"] },
+    });
     expect(created.id).toBe("briefing");
     expect(created.name).toBe("Custom briefing");
-    expect(created.topicIds).toEqual(["t2", "t1"]);
+    expect(created.inputs).toEqual({ topics: ["t2", "t1"] });
     expect(repo.count()).toBe(1);
 
-    const updated = repo.upsert("briefing", { name: "Custom briefing v2", topicIds: ["t1"] });
+    const updated = repo.upsert("briefing", {
+      name: "Custom briefing v2",
+      inputs: { topics: ["t1"] },
+    });
     expect(updated.name).toBe("Custom briefing v2");
-    expect(updated.topicIds).toEqual(["t1"]);
+    expect(updated.inputs).toEqual({ topics: ["t1"] });
     expect(updated.createdAt).toBe(created.createdAt);
     expect(repo.count()).toBe(1);
 
-    expect(() => repo.upsert("briefing", { name: "  ", topicIds: ["t1"] })).toThrow(/name/);
+    expect(() => repo.upsert("briefing", { name: "  ", inputs: {} })).toThrow(/name/);
   });
 });
 
@@ -125,7 +133,7 @@ async function call<T>(type: string, payload?: unknown): Promise<T> {
 interface UserWorkflowInfo {
   id: string;
   name: string;
-  topicIds: string[];
+  inputs: Record<string, unknown>;
 }
 
 describe("user workflows through the gateway", () => {
@@ -142,25 +150,48 @@ describe("user workflows through the gateway", () => {
 
       const created = await call<UserWorkflowInfo>("workflow.user.create", {
         name: "AI desk",
-        topicIds: [beta.id, gamma.id],
+        inputs: { topics: [beta.id, gamma.id] },
       });
       expect(created.name).toBe("AI desk");
-      expect(created.topicIds).toEqual([beta.id, gamma.id]);
+      expect(created.inputs).toEqual({ topics: [beta.id, gamma.id] });
 
-      // workflow.list marks the instance and carries its topic selection.
+      // workflow.list marks the instance and carries its configured inputs.
       const listed = await call<
-        Array<{ id: string; user?: boolean; topicIds?: string[]; triggers: string[]; description: string }>
+        Array<{
+          id: string;
+          user?: boolean;
+          inputValues?: Record<string, unknown>;
+          triggers: string[];
+          description: string;
+          steps: Array<{ id: string; outputs: Array<{ kind: string; deliverable: boolean }> }>;
+        }>
       >("workflow.list");
       const entry = listed.find((workflow) => workflow.id === created.id);
       expect(entry?.user).toBe(true);
-      expect(entry?.topicIds).toEqual([beta.id, gamma.id]);
+      expect(entry?.inputValues).toEqual({ topics: [beta.id, gamma.id] });
       expect(entry?.triggers).toEqual(["schedule", "manual"]);
       expect(entry?.description).toBe("User briefing workflow: AI desk");
+      // The definition's steps and deliverable outputs are exposed.
+      expect(entry?.steps.map((step) => step.id)).toEqual([
+        "research",
+        "compile",
+        "followups",
+        "sources",
+        "brief",
+        "audio",
+      ]);
+      expect(
+        entry?.steps
+          .find((step) => step.id === "brief")
+          ?.outputs.some((output) => output.kind === "brief" && output.deliverable),
+      ).toBe(true);
       // Built-in workflows are untouched by the enrichment.
       expect(listed.find((workflow) => workflow.id === "briefing")?.user).toBeUndefined();
 
       const userList = await call<UserWorkflowInfo[]>("workflow.user.list");
-      expect(userList).toEqual([{ id: created.id, name: "AI desk", topicIds: [beta.id, gamma.id] }]);
+      expect(userList).toEqual([
+        { id: created.id, name: "AI desk", inputs: { topics: [beta.id, gamma.id] } },
+      ]);
 
       // The instance runs the briefing over exactly its topics.
       const finished = waitForEvent(
@@ -179,18 +210,18 @@ describe("user workflows through the gateway", () => {
       expect(output.skipped).toBe(false);
       expect(output.topics).toEqual(["Beta", "Gamma"]);
 
-      // Delivery resolved through the user workflow's own id and run.
+      // Delivery routed through the user workflow's step outputs and run.
       const delivered = delivery.delivered.at(-1)!;
-      expect(delivered.workflow).toBe(created.id);
       expect(delivered.runId).toBe(started.runId);
+      expect(delivered.channels).toEqual(["chan-1"]);
 
       const updated = await call<UserWorkflowInfo>("workflow.user.update", {
         id: created.id,
         name: "AI desk v2",
-        topicIds: [alpha.id],
+        inputs: { topics: [alpha.id] },
       });
       expect(updated.name).toBe("AI desk v2");
-      expect(updated.topicIds).toEqual([alpha.id]);
+      expect(updated.inputs).toEqual({ topics: [alpha.id] });
       expect(
         kernel.workflows.list().find((workflow) => workflow.id === created.id)?.description,
       ).toBe("User briefing workflow: AI desk v2");
@@ -211,7 +242,12 @@ describe("user workflows through the gateway", () => {
         name: "User matrix",
         config: {},
       });
-      await call("delivery.attach", { workflow: created.id, channelId: channel.id });
+      await call("delivery.attach", {
+        workflow: created.id,
+        step: "brief",
+        output: "brief",
+        channelId: channel.id,
+      });
       expect(kernel.deliveries.attachments().some((a) => a.workflow === created.id)).toBe(true);
 
       await call("job.delete", { id: job.id });
@@ -236,7 +272,7 @@ describe("user workflows through the gateway", () => {
 
   test("registers stored user workflows at boot and on changes", async () => {
     const store = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
-    const row = store.add({ name: "Bootstrapped", topicIds: ["t1"] });
+    const row = store.add({ name: "Bootstrapped", inputs: { topics: ["t1"] } });
 
     const bootKernel = await createKernel({
       config: testConfig(),
@@ -244,7 +280,7 @@ describe("user workflows through the gateway", () => {
     });
 
     try {
-      expect(bootKernel.workflows.get(row.id).description).toBe(
+      expect(bootKernel.workflows.get(row.id).definition.description).toBe(
         "User briefing workflow: Bootstrapped",
       );
 
@@ -263,7 +299,7 @@ describe("user workflows through the gateway", () => {
 
   test("restores the built-in briefing when its customization row disappears", async () => {
     const store = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
-    store.upsert("briefing", { name: "Pinned brief", topicIds: ["t1", "t2"] });
+    store.upsert("briefing", { name: "Pinned brief", inputs: { topics: ["t1", "t2"] } });
 
     const bootKernel = await createKernel({
       config: testConfig(),
@@ -274,7 +310,7 @@ describe("user workflows through the gateway", () => {
       // The customization row replaced the core registration with a wrapper.
       const customized = bootKernel.workflows.get("briefing");
       expect(customized).toBeInstanceOf(UserBriefingWorkflow);
-      expect(customized.description).toBe("User briefing workflow: Pinned brief");
+      expect(customized.definition.description).toBe("User briefing workflow: Pinned brief");
 
       // Removing the row restores the core implementation under the same id.
       store.remove("briefing");
@@ -286,7 +322,7 @@ describe("user workflows through the gateway", () => {
 
       const restored = bootKernel.workflows.get("briefing");
       expect(restored).toBeInstanceOf(BriefingWorkflow);
-      expect(restored.description).toContain("Researches all configured topics");
+      expect(restored.definition.description).toContain("Researches all configured topics");
     } finally {
       await bootKernel.shutdown();
     }
@@ -297,20 +333,20 @@ describe("user workflows through the gateway", () => {
 
     const emptyName = await post({
       type: "workflow.user.create",
-      payload: { name: "  ", topicIds: [topic.id] },
+      payload: { name: "  ", inputs: { topics: [topic.id] } },
     });
     expect(emptyName.status).toBe(400);
 
     const noTopics = await post({
       type: "workflow.user.create",
-      payload: { name: "No topics", topicIds: [] },
+      payload: { name: "No topics", inputs: { topics: [] } },
     });
     expect(noTopics.status).toBe(400);
-    expect(noTopics.body.error).toContain("topicIds");
+    expect(noTopics.body.error).toContain("topics");
 
     const unknownTopic = await post({
       type: "workflow.user.create",
-      payload: { name: "Unknown", topicIds: ["missing"] },
+      payload: { name: "Unknown", inputs: { topics: ["missing"] } },
     });
     expect(unknownTopic.status).toBe(400);
     expect(unknownTopic.body.error).toContain("not found");
@@ -337,7 +373,7 @@ describe("user workflows through the gateway", () => {
     const created = await call<UserWorkflowInfo>("workflow.user.create", {
       id: "briefing",
       name: "Sneaky briefing",
-      topicIds: [topic.id],
+      inputs: { topics: [topic.id] },
     });
     expect(created.id).not.toBe("briefing");
     expect(kernel.userWorkflows.get("briefing")).toBeNull();
@@ -362,22 +398,36 @@ describe("user workflows through the gateway", () => {
     try {
       // The seeded scheduled job already references the built-in id.
       expect(kernel.jobs.list().some((job) => job.workflow === "briefing")).toBe(true);
-      await call("delivery.attach", { workflow: "briefing", channelId: channel.id });
+      await call("delivery.attach", {
+        workflow: "briefing",
+        step: "brief",
+        output: "brief",
+        channelId: channel.id,
+      });
 
       // No row yet: updating the built-in starts the customization.
       const customized = await call<UserWorkflowInfo>("workflow.user.update", {
         id: "briefing",
         name: "Focus brief",
-        topicIds: [alpha.id],
+        inputs: { topics: [alpha.id] },
       });
-      expect(customized).toEqual({ id: "briefing", name: "Focus brief", topicIds: [alpha.id] });
+      expect(customized).toEqual({
+        id: "briefing",
+        name: "Focus brief",
+        inputs: { topics: [alpha.id] },
+      });
 
       const listed = await call<
-        Array<{ id: string; user?: boolean; topicIds?: string[]; description: string }>
+        Array<{
+          id: string;
+          user?: boolean;
+          inputValues?: Record<string, unknown>;
+          description: string;
+        }>
       >("workflow.list");
       const entry = listed.find((workflow) => workflow.id === "briefing");
       expect(entry?.user).toBe(true);
-      expect(entry?.topicIds).toEqual([alpha.id]);
+      expect(entry?.inputValues).toEqual({ topics: [alpha.id] });
       expect(entry?.description).toBe("User briefing workflow: Focus brief");
 
       // The customized briefing only covers its pinned topics.
@@ -429,7 +479,12 @@ describe("user workflows through the gateway", () => {
         if (kernel.userWorkflows.get("briefing")) {
           await call("workflow.user.remove", { id: "briefing" });
         }
-        await call("delivery.detach", { workflow: "briefing", channelId: channel.id });
+        await call("delivery.detach", {
+          workflow: "briefing",
+          step: "brief",
+          output: "brief",
+          channelId: channel.id,
+        });
         await call("delivery.channel.delete", { id: channel.id });
         await call("topic.delete", { id: alpha.id });
         await call("topic.delete", { id: beta.id });

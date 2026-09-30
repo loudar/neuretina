@@ -2,13 +2,15 @@ import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
 
 /**
- * A user-created briefing instance: the pipeline runs over the selected
- * topics and delivers through the channels attached to its id.
+ * A user-created workflow instance: the pipeline runs over the configured
+ * input values ({ topics: [...] } today) and delivers through the channels
+ * assigned to its step outputs.
  */
 export interface UserWorkflow {
   id: string;
   name: string;
-  topicIds: string[];
+  /** Configured input values keyed by input id, e.g. `{ topics: ["t1"] }`. */
+  inputs: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
 }
@@ -18,13 +20,16 @@ export interface UserWorkflowStore {
   list(): UserWorkflow[];
   /** Null (instead of throwing) so callers can enrich optional lookups. */
   get(id: string): UserWorkflow | null;
-  add(input: { name: string; topicIds: string[] }): UserWorkflow;
+  add(input: { name: string; inputs: Record<string, unknown> }): UserWorkflow;
   /**
    * Inserts or updates the row under an explicit id; customizations of a
    * built-in workflow are keyed by the built-in's own id.
    */
-  upsert(id: string, input: { name: string; topicIds: string[] }): UserWorkflow;
-  update(id: string, patch: { name?: string; topicIds?: string[] }): UserWorkflow;
+  upsert(id: string, input: { name: string; inputs: Record<string, unknown> }): UserWorkflow;
+  update(
+    id: string,
+    patch: { name?: string; inputs?: Record<string, unknown> },
+  ): UserWorkflow;
   remove(id: string): UserWorkflow;
   count(): number;
 }
@@ -32,7 +37,7 @@ export interface UserWorkflowStore {
 interface UserWorkflowRow {
   id: string;
   name: string;
-  topics: string;
+  inputs: string;
   created_at: number;
   updated_at: number;
 }
@@ -54,7 +59,7 @@ export class UserWorkflowRepository implements UserWorkflowStore {
     return row ? toUserWorkflow(row) : null;
   }
 
-  add(input: { name: string; topicIds: string[] }): UserWorkflow {
+  add(input: { name: string; inputs: Record<string, unknown> }): UserWorkflow {
     const name = input.name.trim();
     if (!name) throw new ValidationError("User workflow name is required");
 
@@ -62,20 +67,20 @@ export class UserWorkflowRepository implements UserWorkflowStore {
     const workflow: UserWorkflow = {
       id: crypto.randomUUID(),
       name,
-      topicIds: normalizeTopicIds(input.topicIds),
+      inputs: normalizeInputs(input.inputs),
       createdAt: now,
       updatedAt: now,
     };
 
     this.db.raw
       .query(
-        `INSERT INTO user_workflows (id, name, topics, created_at, updated_at)
+        `INSERT INTO user_workflows (id, name, inputs, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(
         workflow.id,
         workflow.name,
-        JSON.stringify(workflow.topicIds),
+        JSON.stringify(workflow.inputs),
         workflow.createdAt,
         workflow.updatedAt,
       );
@@ -83,7 +88,7 @@ export class UserWorkflowRepository implements UserWorkflowStore {
     return workflow;
   }
 
-  upsert(id: string, input: { name: string; topicIds: string[] }): UserWorkflow {
+  upsert(id: string, input: { name: string; inputs: Record<string, unknown> }): UserWorkflow {
     const name = input.name.trim();
     if (!name) throw new ValidationError("User workflow name is required");
 
@@ -91,17 +96,17 @@ export class UserWorkflowRepository implements UserWorkflowStore {
     const existing = this.get(id);
     this.db.raw
       .query(
-        `INSERT INTO user_workflows (id, name, topics, created_at, updated_at)
+        `INSERT INTO user_workflows (id, name, inputs, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name = excluded.name,
-           topics = excluded.topics,
+           inputs = excluded.inputs,
            updated_at = excluded.updated_at`,
       )
       .run(
         id,
         name,
-        JSON.stringify(normalizeTopicIds(input.topicIds)),
+        JSON.stringify(normalizeInputs(input.inputs)),
         existing?.createdAt ?? now,
         now,
       );
@@ -109,18 +114,20 @@ export class UserWorkflowRepository implements UserWorkflowStore {
     return this.get(id)!;
   }
 
-  update(id: string, patch: { name?: string; topicIds?: string[] }): UserWorkflow {
+  update(
+    id: string,
+    patch: { name?: string; inputs?: Record<string, unknown> },
+  ): UserWorkflow {
     const existing = this.get(id);
     if (!existing) throw new NotFoundError(`User workflow ${id} not found`);
 
     const name = patch.name !== undefined ? patch.name.trim() : existing.name;
     if (!name) throw new ValidationError("User workflow name is required");
-    const topicIds =
-      patch.topicIds !== undefined ? normalizeTopicIds(patch.topicIds) : existing.topicIds;
+    const inputs = patch.inputs !== undefined ? normalizeInputs(patch.inputs) : existing.inputs;
 
     this.db.raw
-      .query("UPDATE user_workflows SET name = ?, topics = ?, updated_at = ? WHERE id = ?")
-      .run(name, JSON.stringify(topicIds), Date.now(), id);
+      .query("UPDATE user_workflows SET name = ?, inputs = ?, updated_at = ? WHERE id = ?")
+      .run(name, JSON.stringify(inputs), Date.now(), id);
 
     return this.get(id)!;
   }
@@ -140,25 +147,25 @@ export class UserWorkflowRepository implements UserWorkflowStore {
   }
 }
 
-function normalizeTopicIds(topicIds: string[]): string[] {
-  return [...new Set(topicIds.map((id) => id.trim()).filter(Boolean))];
+function normalizeInputs(inputs: Record<string, unknown>): Record<string, unknown> {
+  return { ...inputs };
 }
 
 function toUserWorkflow(row: UserWorkflowRow): UserWorkflow {
-  let topicIds: string[] = [];
+  let inputs: Record<string, unknown> = {};
   try {
-    const parsed = JSON.parse(row.topics) as unknown;
-    if (Array.isArray(parsed)) {
-      topicIds = parsed.filter((entry): entry is string => typeof entry === "string");
+    const parsed = JSON.parse(row.inputs) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      inputs = parsed as Record<string, unknown>;
     }
   } catch {
-    topicIds = [];
+    inputs = {};
   }
 
   return {
     id: row.id,
     name: row.name,
-    topicIds,
+    inputs,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

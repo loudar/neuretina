@@ -10,6 +10,7 @@ import { StatusRepository } from "../domain/status/StatusRepository.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry, type Workflow } from "../core/workflow/Workflow.ts";
+import { deliveryTargets } from "../core/workflow/definition.ts";
 import { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
@@ -348,8 +349,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   // own id (the sync below replaces the registration); this map restores the
   // built-in implementation when the customization is removed.
   const coreWorkflows = new Map<string, Workflow>([
-    [briefing.id, briefing],
-    [question.id, question],
+    [briefing.definition.id, briefing],
+    [question.definition.id, question],
   ]);
 
   // User workflow instances are runnable workflows too: register them before
@@ -363,6 +364,10 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       logger.error("syncing user workflows failed", { error: errorMessage(error) });
     }
   });
+
+  // Delivery moved from whole workflows onto step outputs; expand attachments
+  // from before the upgrade onto every deliverable output of their workflow.
+  normalizeLegacyAttachments(deliveries, workflows, logger.child("delivery"));
 
   const runner = new WorkflowRunner({
     workflows,
@@ -591,6 +596,44 @@ function seedDefaultJobIfEmpty(jobs: JobStore, config: AppConfig, logger: Logger
   });
 
   logger.info("seeded default scheduled job", { id: job.id, cron: job.cron });
+}
+
+/**
+ * Boot migration helper for the workflow-level → step-output delivery move:
+ * attachments with an empty step/output apply to every deliverable output of
+ * the workflow's definition. Rows of workflows that no longer exist (or have
+ * no deliverable outputs) are dropped.
+ */
+function normalizeLegacyAttachments(
+  deliveries: DeliveryStore,
+  workflows: WorkflowRegistry,
+  logger: Logger,
+): void {
+  const legacy = deliveries
+    .attachments()
+    .filter((attachment) => attachment.step === "" && attachment.output === "");
+  if (legacy.length === 0) return;
+
+  for (const row of legacy) {
+    deliveries.detach({ workflow: row.workflow, step: "", output: "" }, row.channelId);
+
+    let targets: ReturnType<typeof deliveryTargets> = [];
+    try {
+      targets = deliveryTargets(workflows.get(row.workflow).definition);
+    } catch {
+      targets = [];
+    }
+    for (const target of targets) {
+      deliveries.attach(
+        { workflow: row.workflow, step: target.step, output: target.output },
+        row.channelId,
+      );
+    }
+  }
+
+  logger.info("expanded workflow delivery attachments onto step outputs", {
+    attachments: legacy.length,
+  });
 }
 
 /**

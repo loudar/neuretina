@@ -4,25 +4,51 @@ import type { Logger } from "../core/logger.ts";
 import type { DeliveryChannelSender } from "../capabilities/delivery/DeliveryChannel.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 import type {
+  DeliveryAttachment,
   DeliveryChannel,
   DeliveryKind,
   DeliveryRecord,
   DeliveryStatus,
   DeliveryStore,
+  DeliveryTarget,
 } from "../domain/delivery/DeliveryRepository.ts";
 
+/**
+ * A rendered step output, ready to be sent through delivery channels. The
+ * renderer decides which passes the output uses (a brief is text, an audio
+ * artifact is voice, …).
+ */
+export interface DeliveryMessage {
+  /** Id of the content being delivered (brief id for now). */
+  reference?: string;
+  /** Passes to run; defaults to text, plus voice when audio is present. */
+  kinds?: DeliveryKind[];
+  /** Plain-text summary (the compiled brief with source links). */
+  summary: string;
+  /** Pre-rendered HTML for channels that support it (Matrix, email). */
+  html?: string;
+  /** Spoken version; used as the voice message's text body. */
+  narration?: string;
+  audio?: Uint8Array;
+  audioMime?: string;
+}
+
 export interface DeliverInput {
+  /** Id of the content being delivered (brief id for now). */
   briefId: string;
   runId?: string;
   /**
-   * Workflow whose attached channels receive the message; defaults to the
-   * briefing workflow. User workflow runs pass their own id.
+   * Step output whose assigned channels receive the message. Explicit
+   * `channels` win over it; without either, every channel assigned to the
+   * workflow (default: the briefing workflow) receives the message.
+   */
+  target?: DeliveryTarget;
+  /**
+   * Workflow fallback for callers that have no step target (re-sends);
+   * defaults to the briefing workflow.
    */
   workflow?: string;
-  /**
-   * Explicit channel ids; when absent, every enabled channel attached to the
-   * workflow receives the brief.
-   */
+  /** Explicit channel ids; overrides target/workflow resolution. */
   channels?: string[];
   /** Which passes to run; defaults to text + voice. */
   kinds?: DeliveryKind[];
@@ -52,9 +78,13 @@ export interface DeliveryServiceDeps {
   createSender?: (channel: DeliveryChannel) => DeliveryChannelSender;
 }
 
-/** What consumers need from delivery: route a brief through channels. */
+/** What consumers need from delivery: route outputs through channels. */
 export interface DeliveryRouter {
   deliver(input: DeliverInput): Promise<DeliveryAttempt[]>;
+  /** Enabled channel ids assigned to a step output, in stable order. */
+  channelsFor(target: DeliveryTarget): string[];
+  /** Enabled channel ids assigned anywhere in a workflow. */
+  workflowChannels(workflow: string): string[];
 }
 
 const BRIEFING_WORKFLOW = "briefing";
@@ -90,6 +120,35 @@ export class DeliveryService implements DeliveryRouter {
     return results;
   }
 
+  /** Enabled channel ids assigned to a step output. */
+  channelsFor(target: DeliveryTarget): string[] {
+    return this.assignedChannels(
+      (attachment) =>
+        attachment.workflow === target.workflow &&
+        attachment.step === target.step &&
+        attachment.output === target.output,
+    );
+  }
+
+  /** Enabled channel ids assigned anywhere in a workflow. */
+  workflowChannels(workflow: string): string[] {
+    return this.assignedChannels((attachment) => attachment.workflow === workflow);
+  }
+
+  private assignedChannels(match: (attachment: DeliveryAttachment) => boolean): string[] {
+    const ids = this.deps.store
+      .attachments()
+      .filter(match)
+      .map((attachment) => attachment.channelId);
+    const enabled = new Set(
+      this.deps.store
+        .channels()
+        .filter((channel) => channel.enabled)
+        .map((channel) => channel.id),
+    );
+    return [...new Set(ids)].filter((id) => enabled.has(id));
+  }
+
   /** Resolves the target channels or throws when an explicit id is unusable. */
   private resolveChannels(input: DeliverInput): DeliveryChannel[] {
     if (input.channels) {
@@ -105,13 +164,13 @@ export class DeliveryService implements DeliveryRouter {
       });
     }
 
-    const attached = new Set(
-      this.deps.store
-        .attachments()
-        .filter((attachment) => attachment.workflow === (input.workflow ?? BRIEFING_WORKFLOW))
-        .map((attachment) => attachment.channelId),
-    );
-    return this.deps.store.channels().filter((channel) => channel.enabled && attached.has(channel.id));
+    const ids = input.target
+      ? this.channelsFor(input.target)
+      : this.workflowChannels(input.workflow ?? BRIEFING_WORKFLOW);
+    const byId = new Map(this.deps.store.channels().map((channel) => [channel.id, channel]));
+    return ids
+      .map((id) => byId.get(id))
+      .filter((channel): channel is DeliveryChannel => channel !== undefined);
   }
 
   /** Text first, then voice; one channel's failure never stops the others. */

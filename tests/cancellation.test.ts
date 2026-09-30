@@ -11,7 +11,7 @@ import type { DomainEvent } from "../src/core/events/types.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { createKernel } from "../src/kernel/Kernel.ts";
-import { testConfig } from "./support.ts";
+import { stubWorkflow, testConfig } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
 
@@ -41,7 +41,7 @@ function setup() {
 }
 
 function blockingWorkflow(ready: () => void) {
-  return {
+  return stubWorkflow({
     id: "slow",
     description: "test workflow",
     run: async (_input: unknown, context: WorkflowRunContext): Promise<{ ok: boolean }> => {
@@ -56,7 +56,7 @@ function blockingWorkflow(ready: () => void) {
       context.signal?.throwIfAborted();
       return { ok: true };
     },
-  };
+  });
 }
 
 describe("run cancellation", () => {
@@ -85,11 +85,7 @@ describe("run cancellation", () => {
 
   test("cancelling an unknown or finished run is a no-op", async () => {
     const { workflows, runner } = setup();
-    workflows.register({
-      id: "fast",
-      description: "test workflow",
-      run: async () => ({ ok: true }),
-    });
+    workflows.register(stubWorkflow({ id: "fast", run: async () => ({ ok: true }) }));
 
     expect(await runner.cancel("nope")).toBe(false);
     await runner.start({ workflow: "fast", trigger: "manual", runId: "run-done-1" });
@@ -104,15 +100,16 @@ describe("run resume", () => {
     bus.subscribe("*", (event) => events.push(event));
 
     const resumes: unknown[] = [];
-    workflows.register({
-      id: "checkpointed",
-      description: "test workflow",
-      run: async (_input, context) => {
-        resumes.push(context.resume);
-        context.checkpoint?.({ step: 2 });
-        return { ok: true, step: 2 };
-      },
-    });
+    workflows.register(
+      stubWorkflow({
+        id: "checkpointed",
+        run: async (_input, context) => {
+          resumes.push(context.resume);
+          context.checkpoint?.({ step: 2 });
+          return { ok: true, step: 2 };
+        },
+      }),
+    );
 
     const run = runs.create({
       id: "run-resume-1",
@@ -165,14 +162,15 @@ describe("run resume", () => {
     const { workflows, runs, runner } = setup();
     const resumed: string[] = [];
 
-    workflows.register({
-      id: "known",
-      description: "test workflow",
-      run: async (_input, context) => {
-        resumed.push(context.correlationId);
-        return { ok: true };
-      },
-    });
+    workflows.register(
+      stubWorkflow({
+        id: "known",
+        run: async (_input, context) => {
+          resumed.push(context.correlationId);
+          return { ok: true };
+        },
+      }),
+    );
 
     const known = runs.create({
       id: "run-known-1",

@@ -11,6 +11,7 @@ import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
+import { stubWorkflow } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
 let activeScheduler: Scheduler | null = null;
@@ -53,14 +54,14 @@ describe("cron validation", () => {
 describe("Scheduler", () => {
   test("runs a job's workflow manually and records the result", async () => {
     const calls: unknown[] = [];
-    const workflow: Workflow = {
+    const workflow: Workflow = stubWorkflow({
       id: "recording",
       description: "records input",
       run: async (input) => {
         calls.push(input);
         return { ok: true };
       },
-    };
+    });
 
     const { scheduler, jobs, bus } = setup(workflow);
     const job = jobs.create({ name: "test job", cron: "0 7 * * *", workflow: "recording", input: { a: 1 } });
@@ -76,13 +77,13 @@ describe("Scheduler", () => {
   });
 
   test("records failures without throwing", async () => {
-    const workflow: Workflow = {
+    const workflow: Workflow = stubWorkflow({
       id: "failing",
       description: "always fails",
       run: async () => {
         throw new Error("nope");
       },
-    };
+    });
 
     const { scheduler, jobs } = setup(workflow);
     const job = jobs.create({ name: "failing job", cron: "0 7 * * *", workflow: "failing" });
@@ -92,11 +93,11 @@ describe("Scheduler", () => {
   });
 
   test("registers enabled jobs and skips disabled ones", () => {
-    const workflow: Workflow = {
+    const workflow: Workflow = stubWorkflow({
       id: "noop",
       description: "does nothing",
       run: async () => undefined,
-    };
+    });
 
     const { scheduler, jobs } = setup(workflow);
     jobs.create({ name: "enabled", cron: "0 7 * * *", workflow: "noop", enabled: true });

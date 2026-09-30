@@ -16,7 +16,6 @@
     type DeliveryRecord,
     type DeliveryWorkflowInfo,
     type Topic,
-    type UserWorkflowInfo,
     type WorkflowInfo,
     type WorkflowRunDetail,
     type WorkflowRunInfo,
@@ -30,10 +29,10 @@
   import RunStatusIcon from "./RunStatusIcon.svelte";
   import StatusFeedPanel from "./StatusFeed.svelte";
   import WorkflowForm from "./WorkflowForm.svelte";
+  import WorkflowSteps from "./WorkflowSteps.svelte";
 
   let contexts = $state<AppContextInfo[]>([]);
   let workflows = $state<WorkflowInfo[]>([]);
-  let userWorkflows = $state<UserWorkflowInfo[]>([]);
   let deliveryWorkflows = $state<DeliveryWorkflowInfo[]>([]);
   let runs = $state<WorkflowRunInfo[]>([]);
   let selected = $state<WorkflowRunDetail | null>(null);
@@ -49,22 +48,23 @@
   let tab = $state(router.current.segments[1] ? "runs" : "details");
 
   // Details tab editor. `editorId` records which workflow the fields hold;
-  // the *Base* shadows are the saved values the dirty check compares against.
+  // the *Base* snapshots are the saved values the dirty check compares against.
   let editorId = $state<string | null>(null);
   let editorName = $state("");
-  let editorTopicIds = $state<string[]>([]);
-  let editorChannelIds = $state<string[]>([]);
+  /** Configured input values keyed by input id, e.g. `{ topics: ["…"] }`. */
+  let editorInputs = $state<Record<string, string[]>>({});
+  /** Assigned channel ids keyed by "step/output". */
+  let editorAssignments = $state<Record<string, string[]>>({});
   let editorBaseName = $state("");
-  let editorBaseTopicIds = $state<string[]>([]);
-  let editorBaseChannelIds = $state<string[]>([]);
+  let editorBaseInputs = $state("");
+  let editorBaseAssignments = $state("");
   let editorLoading = $state(false);
   let savingWorkflow = $state(false);
 
   // New-workflow dialog state; kept apart so it cannot clobber the editor.
   let createOpen = $state(false);
   let newName = $state("");
-  let newTopicIds = $state<string[]>([]);
-  let newChannelIds = $state<string[]>([]);
+  let newInputs = $state<Record<string, string[]>>({});
 
   let confirmingDeleteWorkflow = $state(false);
   let deleteWorkflowTarget = $state<WorkflowInfo | null>(null);
@@ -107,12 +107,6 @@
 
   const selectedUser = $derived(selectedWorkflow !== null && selectedWorkflow.user === true);
 
-  const userWorkflowInfo = $derived.by(() => {
-    const map = new Map<string, UserWorkflowInfo>();
-    for (const entry of userWorkflows) map.set(entry.id, entry);
-    return map;
-  });
-
   const attachments = $derived.by(() => {
     const map = new Map<string, string[]>();
     for (const entry of deliveryWorkflows) map.set(entry.workflow, entry.channelIds);
@@ -123,25 +117,35 @@
     selectedWorkflow !== null && editorId === selectedWorkflow.id && !editorLoading,
   );
 
-  const editorDirty = $derived.by(() => {
-    if (!editorReady) return false;
-    return (
-      editorName.trim() !== editorBaseName ||
-      !sameIds(editorTopicIds, editorBaseTopicIds) ||
-      !sameIds(editorChannelIds, editorBaseChannelIds)
-    );
-  });
+  const editorDirty = $derived(
+    editorReady &&
+      (editorName.trim() !== editorBaseName ||
+        serializeInputs(editorInputs) !== editorBaseInputs ||
+        serializeAssignments(editorAssignments) !== editorBaseAssignments),
+  );
+
+  /** Every required input holds a value (e.g. at least one topic). */
+  const editorInputsValid = $derived(
+    (selectedWorkflow?.inputs ?? []).every(
+      (spec) => !spec.required || (editorInputs[spec.id]?.length ?? 0) > 0,
+    ),
+  );
 
   const canSaveWorkflow = $derived(
-    editorReady &&
-      editorDirty &&
-      !savingWorkflow &&
-      editorName.trim() !== "" &&
-      editorTopicIds.length > 0,
+    editorReady && editorDirty && !savingWorkflow && editorName.trim() !== "" && editorInputsValid,
+  );
+
+  /** The briefing definition new workflows are created from. */
+  const createTemplate = $derived(
+    workflows.find((workflow) => workflow.id === "briefing") ?? workflows[0],
   );
 
   const canCreateWorkflow = $derived(
-    !savingWorkflow && newName.trim() !== "" && newTopicIds.length > 0,
+    !savingWorkflow &&
+      newName.trim() !== "" &&
+      (createTemplate?.inputs ?? []).every(
+        (spec) => !spec.required || (newInputs[spec.id]?.length ?? 0) > 0,
+      ),
   );
 
   const resettingBriefing = $derived(
@@ -183,36 +187,51 @@
     }
   }
 
+  /** Channel ids assigned to a workflow's step outputs, keyed "step/output". */
+  async function loadAssignments(id: string): Promise<Record<string, string[]>> {
+    const attachments = await commands.delivery.attachments();
+    const assignments: Record<string, string[]> = {};
+    for (const attachment of attachments) {
+      if (attachment.workflow !== id) continue;
+      const key = assignmentKey(attachment.step, attachment.output);
+      (assignments[key] ??= []).push(attachment.channelId);
+    }
+    return assignments;
+  }
+
   // Seeds the details editor with the workflow's saved settings.
   async function loadEditor(workflow: WorkflowInfo): Promise<void> {
     const id = workflow.id;
-    const info = userWorkflowInfo.get(id);
     editorId = id;
     editorLoading = true;
     try {
-      const [loadedTopics, loadedChannels, attached] = await Promise.all([
+      const [loadedTopics, loadedChannels, assignments] = await Promise.all([
         commands.topics.list(),
         commands.delivery.channels(),
-        commands.delivery.workflows(),
+        loadAssignments(id),
       ]);
       if (workflowId !== id) return;
       topics = loadedTopics;
       channels = loadedChannels;
-      const presetTopicIds = info?.topicIds ?? workflow.topicIds;
-      // The un-customized briefing covers all topics until a customization pins them.
-      let topicIds = presetTopicIds ? [...presetTopicIds] : [];
-      if (!presetTopicIds && id === "briefing") {
-        topicIds = loadedTopics.map((topic) => topic.id);
+
+      const inputs: Record<string, string[]> = {};
+      for (const spec of workflow.inputs) {
+        if (spec.kind !== "topics") continue;
+        const stored = workflow.inputValues?.[spec.id];
+        if (Array.isArray(stored)) {
+          inputs[spec.id] = stored.filter((value): value is string => typeof value === "string");
+        } else {
+          // The un-customized briefing covers all topics until pinned.
+          inputs[spec.id] = id === "briefing" ? loadedTopics.map((topic) => topic.id) : [];
+        }
       }
-      const channelIds = [
-        ...(attached.find((entry) => entry.workflow === id)?.channelIds ?? []),
-      ];
-      editorName = info?.name ?? id;
-      editorTopicIds = topicIds;
-      editorChannelIds = channelIds;
+
+      editorName = workflow.user ? workflow.title : id;
+      editorInputs = inputs;
+      editorAssignments = assignments;
       editorBaseName = editorName;
-      editorBaseTopicIds = [...topicIds];
-      editorBaseChannelIds = [...channelIds];
+      editorBaseInputs = serializeInputs(inputs);
+      editorBaseAssignments = serializeAssignments(assignments);
     } catch (error) {
       reportError(error);
     } finally {
@@ -264,10 +283,9 @@
 
   async function refresh(): Promise<void> {
     try {
-      [contexts, workflows, userWorkflows] = await Promise.all([
+      [contexts, workflows] = await Promise.all([
         commands.contexts.list(),
         commands.workflows.list(),
-        commands.userWorkflows.list(),
       ]);
     } catch (error) {
       reportError(error);
@@ -331,13 +349,9 @@
 
   async function openCreate(): Promise<void> {
     newName = "";
-    newTopicIds = [];
-    newChannelIds = [];
+    newInputs = {};
     try {
-      [topics, channels] = await Promise.all([
-        commands.topics.list(),
-        commands.delivery.channels(),
-      ]);
+      topics = await commands.topics.list();
       createOpen = true;
     } catch (error) {
       reportError(error);
@@ -348,19 +362,35 @@
     return workflow.user === true || workflow.id === "briefing";
   }
 
-  function sameIds(a: string[], b: string[]): boolean {
-    return a.length === b.length && a.every((id) => b.includes(id));
+  function toggleAssignment(step: string, output: string, channelId: string): void {
+    const key = assignmentKey(step, output);
+    const current = editorAssignments[key] ?? [];
+    editorAssignments = {
+      ...editorAssignments,
+      [key]: current.includes(channelId)
+        ? current.filter((entry) => entry !== channelId)
+        : [...current, channelId],
+    };
   }
 
-  // Attaches/detaches delivery channels so the set matches `channelIds`.
-  async function reconcileChannels(id: string, channelIds: string[]): Promise<void> {
-    const attached = await commands.delivery.workflows();
-    const current = attached.find((entry) => entry.workflow === id)?.channelIds ?? [];
-    for (const channelId of channelIds) {
-      if (!current.includes(channelId)) await commands.delivery.attach(id, channelId);
-    }
-    for (const channelId of current) {
-      if (!channelIds.includes(channelId)) await commands.delivery.detach(id, channelId);
+  // Attaches/detaches channels so each step output matches `assignments`.
+  async function reconcileAssignments(
+    id: string,
+    assignments: Record<string, string[]>,
+  ): Promise<void> {
+    const current = await loadAssignments(id);
+    const keys = new Set([...Object.keys(current), ...Object.keys(assignments)]);
+    for (const key of keys) {
+      const [step, output] = splitAssignmentKey(key);
+      const target = { workflow: id, step, output };
+      const wanted = assignments[key] ?? [];
+      const existing = current[key] ?? [];
+      for (const channelId of wanted) {
+        if (!existing.includes(channelId)) await commands.delivery.attach(target, channelId);
+      }
+      for (const channelId of existing) {
+        if (!wanted.includes(channelId)) await commands.delivery.detach(target, channelId);
+      }
     }
   }
 
@@ -370,12 +400,13 @@
     try {
       const created = await commands.userWorkflows.create({
         name: newName.trim(),
-        topicIds: [...newTopicIds],
+        inputs: { ...newInputs },
       });
-      await reconcileChannels(created.id, newChannelIds);
       reportSuccess("Workflow saved");
       createOpen = false;
       await refresh();
+      // Land on the new workflow so its step outputs can be assigned channels.
+      router.navigate(paths.workflows(created.id, undefined, workflowQuery()));
     } catch (error) {
       reportError(error);
     } finally {
@@ -383,23 +414,25 @@
     }
   }
 
-  // Saves the details editor: the name/topics row first (an upsert also
-  // customizes a built-in workflow), then the channel attachments.
+  // Saves the details editor: the name/inputs row first (an upsert also
+  // customizes a built-in workflow), then the step-output channel assignments.
   async function saveWorkflow(): Promise<void> {
     const id = editorId;
-    if (!id || !canSaveWorkflow) return;
+    const workflow = selectedWorkflow;
+    if (!id || !workflow || !canSaveWorkflow) return;
     savingWorkflow = true;
     try {
       const name = editorName.trim();
-      const topicIds = [...editorTopicIds];
-      const info = userWorkflowInfo.get(id);
-      if (!info || info.name !== name || !sameIds(info.topicIds, topicIds)) {
-        await commands.userWorkflows.update(id, { name, topicIds });
+      const inputs = { ...editorInputs };
+      const nameChanged = name !== editorBaseName;
+      const inputsChanged = serializeInputs(inputs) !== editorBaseInputs;
+      if (workflow.user || nameChanged || inputsChanged) {
+        await commands.userWorkflows.update(id, { name, inputs });
       }
-      await reconcileChannels(id, editorChannelIds);
+      await reconcileAssignments(id, editorAssignments);
       editorBaseName = name;
-      editorBaseTopicIds = [...topicIds];
-      editorBaseChannelIds = [...editorChannelIds];
+      editorBaseInputs = serializeInputs(inputs);
+      editorBaseAssignments = serializeAssignments(editorAssignments);
       reportSuccess("Workflow saved");
       await refresh();
     } catch (error) {
@@ -494,15 +527,15 @@
   }
 
   function workflowHeadline(workflow: WorkflowInfo): string {
-    return workflow.user ? userWorkflowInfo.get(workflow.id)?.name ?? workflow.id : workflow.id;
+    return workflow.user ? workflow.title : workflow.id;
   }
 
   function workflowSupporting(workflow: WorkflowInfo): string {
     if (!workflow.user) {
       return `${workflow.description} · triggers ${workflow.triggers.join(", ") || "none"}`;
     }
-    const topicCount =
-      userWorkflowInfo.get(workflow.id)?.topicIds.length ?? workflow.topicIds?.length ?? 0;
+    const topicIds = workflow.inputValues?.topics;
+    const topicCount = Array.isArray(topicIds) ? topicIds.length : 0;
     const channelCount = attachments.get(workflow.id)?.length ?? 0;
     return `${topicCount} topic(s) · ${channelCount} channel(s)`;
   }
@@ -539,6 +572,32 @@
     if (typeof output.briefId === "string") return `brief ${output.briefId}`;
     if (typeof output.markdown === "string") return `${output.markdown.slice(0, 200)}…`;
     return JSON.stringify(run.output).slice(0, 300);
+  }
+
+  function assignmentKey(step: string, output: string): string {
+    return `${step}/${output}`;
+  }
+
+  function splitAssignmentKey(key: string): [string, string] {
+    const [step = "", output = ""] = key.split("/");
+    return [step, output];
+  }
+
+  /** Order-insensitive snapshot of the input editor's values. */
+  function serializeInputs(inputs: Record<string, string[]>): string {
+    const entries = Object.entries(inputs)
+      .map(([key, values]) => [key, [...values].sort()] as const)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify(Object.fromEntries(entries));
+  }
+
+  /** Order-insensitive snapshot of the channel assignments (empty keys dropped). */
+  function serializeAssignments(assignments: Record<string, string[]>): string {
+    const entries = Object.entries(assignments)
+      .filter(([, channelIds]) => channelIds.length > 0)
+      .map(([key, channelIds]) => [key, [...channelIds].sort()] as const)
+      .sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify(Object.fromEntries(entries));
   }
 </script>
 
@@ -732,37 +791,50 @@
 
         {#if !selectedWorkflow}
           <p class="muted">Select a workflow to see and edit its settings.</p>
-        {:else if !selectedEditable}
-          <div class="facts">
-            <div class="fact">
-              <span class="label">Description</span>
-              <span>{selectedWorkflow.description}</span>
-            </div>
-            <div class="fact">
-              <span class="label">Triggers</span>
-              <span>{selectedWorkflow.triggers.join(", ") || "none"}</span>
-            </div>
-            <div class="fact">
-              <span class="label">Context</span>
-              <span>{selectedWorkflow.contextId ?? "default context"}</span>
-            </div>
-          </div>
-          <p class="muted hint">This workflow is built in and has no editable settings.</p>
         {:else if !editorReady}
           <p class="muted">Loading…</p>
         {:else}
-          <div class="detail-form">
-            <WorkflowForm
-              bind:name={editorName}
-              bind:topicIds={editorTopicIds}
-              bind:channelIds={editorChannelIds}
-              {topics}
-              {channels}
-              disabled={savingWorkflow}
-              capped={false}
-              onenter={() => void saveWorkflow()}
-            />
-            <div class="actions">
+          {#if selectedEditable}
+            <div class="detail-form">
+              <WorkflowForm
+                bind:name={editorName}
+                bind:inputs={editorInputs}
+                specs={selectedWorkflow.inputs}
+                {topics}
+                disabled={savingWorkflow}
+                capped={false}
+                onenter={() => void saveWorkflow()}
+              />
+            </div>
+          {:else}
+            <div class="facts">
+              <div class="fact">
+                <span class="label">Description</span>
+                <span>{selectedWorkflow.description}</span>
+              </div>
+              <div class="fact">
+                <span class="label">Triggers</span>
+                <span>{selectedWorkflow.triggers.join(", ") || "none"}</span>
+              </div>
+              <div class="fact">
+                <span class="label">Context</span>
+                <span>{selectedWorkflow.contextId ?? "default context"}</span>
+              </div>
+            </div>
+            <p class="muted hint">This workflow is built in and has no editable settings.</p>
+          {/if}
+
+          <h3 class="subhead">Steps</h3>
+          <WorkflowSteps
+            steps={selectedWorkflow.steps}
+            {channels}
+            assignments={editorAssignments}
+            editable={selectedEditable}
+            ontoggle={toggleAssignment}
+          />
+
+          {#if selectedEditable}
+            <div class="actions save-row">
               <Button
                 variant="filled"
                 onclick={() => void saveWorkflow()}
@@ -771,7 +843,7 @@
                 Save changes
               </Button>
             </div>
-          </div>
+          {/if}
         {/if}
       </Pane>
     </div>
@@ -809,10 +881,9 @@
   <div class="workflow-form">
     <WorkflowForm
       bind:name={newName}
-      bind:topicIds={newTopicIds}
-      bind:channelIds={newChannelIds}
+      bind:inputs={newInputs}
+      specs={createTemplate?.inputs ?? []}
       {topics}
-      {channels}
       disabled={savingWorkflow}
       onenter={() => void createWorkflow()}
     />
@@ -926,6 +997,10 @@
     flex-direction: column;
     gap: 0.9rem;
     max-width: 36rem;
+  }
+
+  .save-row {
+    margin-top: 1rem;
   }
 
   .facts {

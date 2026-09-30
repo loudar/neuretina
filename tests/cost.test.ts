@@ -12,7 +12,7 @@ import { WorkflowRunner } from "../src/core/workflow/WorkflowRunner.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
-import { completion, stubLlm } from "./support.ts";
+import { completion, stubLlm, stubWorkflow } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
 
@@ -174,14 +174,16 @@ describe("agent cost collection", () => {
     const bus = new EventBus(new EventStore(db), log);
     const statuses = new StatusHub();
     const workflows = new WorkflowRegistry({ bus, logger: log, statuses });
-    workflows.register({
-      id: "metered",
-      description: "test workflow",
-      run: async (_input, context) => {
-        context.cost?.addLlm("Step one", { inputTokens: 100, outputTokens: 50 });
-        return { ok: true };
-      },
-    });
+    workflows.register(
+      stubWorkflow({
+        id: "metered",
+        description: "test workflow",
+        run: async (_input, context) => {
+          context.cost?.addLlm("Step one", { inputTokens: 100, outputTokens: 50 });
+          return { ok: true };
+        },
+      }),
+    );
 
     const runs = new WorkflowRunRepository(db);
     const runner = new WorkflowRunner({

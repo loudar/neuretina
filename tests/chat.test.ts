@@ -12,7 +12,7 @@ import { StatusHub } from "../src/core/status/StatusHub.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
-import { StubMessaging, testConfig } from "./support.ts";
+import { StubMessaging, stubWorkflow, testConfig } from "./support.ts";
 import type { ChatCommand } from "../src/capabilities/chat/ChatChannel.ts";
 
 const log = createLogger("test", { level: "error" });
@@ -45,11 +45,11 @@ function setup() {
   });
   const scheduler = new Scheduler({ jobs, runner, bus, logger: log });
 
-  const workflow: Workflow = {
+  const workflow: Workflow = stubWorkflow({
     id: "briefing",
     description: "test workflow",
     run: async () => ({ ok: true }),
-  };
+  });
   workflows.register(workflow);
 
   const handler = createChatCommandHandler({

@@ -32,11 +32,11 @@ export class TriggerDispatcher {
     return this.deps.workflows
       .definitions()
       .filter(({ workflow }) =>
-        workflow.triggers?.some(
+        workflow.definition.triggers.some(
           (binding) => binding.kind === kind && (!binding.when || binding.when(detail)),
         ),
       )
-      .map(({ workflow }) => workflow.id);
+      .map(({ workflow }) => workflow.definition.id);
   }
 
   /**

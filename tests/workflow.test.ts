@@ -180,10 +180,19 @@ function setup(options: SetupOptions = {}) {
     logger: log,
     createSender: () => sender,
   });
-  // One enabled matrix channel attached to the briefing workflow.
+  // One enabled matrix channel assigned to the briefing's deliverable outputs.
+  const briefingChannel = deliveryStore.createChannel({
+    type: "matrix",
+    name: "Matrix",
+    config: {},
+  });
   deliveryStore.attach(
-    "briefing",
-    deliveryStore.createChannel({ type: "matrix", name: "Matrix", config: {} }).id,
+    { workflow: "briefing", step: "brief", output: "brief" },
+    briefingChannel.id,
+  );
+  deliveryStore.attach(
+    { workflow: "briefing", step: "audio", output: "audio" },
+    briefingChannel.id,
   );
 
   const workflow = new BriefingWorkflow({
@@ -755,7 +764,10 @@ describe("BriefingWorkflow", () => {
     expect(sender.sent).toHaveLength(2);
     expect(sender.sent[1]?.kind).toBe("voice");
 
-    expect(checkpoints.at(-1)).toMatchObject({ briefId: output.briefId, delivered: true });
+    expect(checkpoints.at(-1)).toMatchObject({
+      steps: { brief: { brief: { briefId: output.briefId } } },
+      delivered: { "brief:brief": true, "audio:audio": true },
+    });
   });
 
   test("reuses stored audio when resuming a run whose brief already has it", async () => {
@@ -844,7 +856,14 @@ describe("BriefingWorkflow", () => {
       (attachment) => attachment.workflow === "briefing",
     )!.channelId;
     const userChannel = deliveryStore.createChannel({ type: "matrix", name: "User" }).id;
-    deliveryStore.attach("user-1", userChannel);
+    deliveryStore.attach(
+      { workflow: "user-1", step: "brief", output: "brief" },
+      userChannel,
+    );
+    deliveryStore.attach(
+      { workflow: "user-1", step: "audio", output: "audio" },
+      userChannel,
+    );
 
     const run: WorkflowRun = {
       id: "run-user-1",

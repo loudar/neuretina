@@ -25,6 +25,8 @@ import type {
   DeliveryVoiceInput,
 } from "../src/capabilities/delivery/DeliveryChannel.ts";
 import type { DeliveryAttempt, DeliverInput } from "../src/delivery/DeliveryService.ts";
+import type { WorkflowDefinition } from "../src/core/workflow/definition.ts";
+import type { Workflow, WorkflowRunContext } from "../src/core/workflow/Workflow.ts";
 
 export function testConfig(overrides: Record<string, string | undefined> = {}): AppConfig {
   return loadConfig({
@@ -170,15 +172,48 @@ export class StubChannelSender implements DeliveryChannelSender {
   }
 }
 
+/** Minimal workflow with a code-shaped definition, for runner-level tests. */
+export function stubWorkflow<TInput = unknown, TOutput = unknown>(options: {
+  id: string;
+  title?: string;
+  description?: string;
+  triggers?: WorkflowDefinition["triggers"];
+  inputs?: WorkflowDefinition["inputs"];
+  steps?: WorkflowDefinition["steps"];
+  run: (input: TInput, context: WorkflowRunContext) => Promise<TOutput>;
+}): Workflow<TInput, TOutput> {
+  return {
+    definition: {
+      id: options.id,
+      title: options.title ?? options.id,
+      description: options.description ?? options.id,
+      triggers: options.triggers ?? [],
+      inputs: options.inputs ?? [],
+      steps: options.steps ?? [],
+    },
+    run: options.run,
+  };
+}
+
 /** Stands in for the DeliveryService in kernel-level tests. */
 export class StubDeliveryService {
   readonly delivered: DeliverInput[] = [];
+  /** Channel ids returned for every step-output target (default: one channel). */
+  channels: string[] = ["chan-1"];
   /** Returned by deliver(); defaults to one successful channel. */
   results?: DeliveryAttempt[];
 
   async deliver(input: DeliverInput): Promise<DeliveryAttempt[]> {
     this.delivered.push(input);
     return this.results ?? [{ channelId: "chan-1", status: "sent", eventId: "event-1" }];
+  }
+
+  channelsFor(): string[] {
+    return this.channels;
+  }
+
+  workflowChannels(): string[] {
+    return this.channels;
   }
 }
 

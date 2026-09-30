@@ -59,12 +59,12 @@ export class WorkflowRunner {
 
   async start(options: StartRunOptions): Promise<WorkflowRun> {
     const workflow = this.deps.workflows.get(options.workflow);
-    const contextId = options.contextId ?? workflow.contextId ?? DEFAULT_CONTEXT_ID;
+    const contextId = options.contextId ?? workflow.definition.contextId ?? DEFAULT_CONTEXT_ID;
     const trigger: TriggerInfo = { kind: options.trigger, detail: options.detail ?? {} };
 
     const run = this.deps.runs.create({
       id: options.runId,
-      workflow: workflow.id,
+      workflow: workflow.definition.id,
       contextId,
       trigger: options.trigger,
       triggerDetail: options.detail,
@@ -122,7 +122,8 @@ export class WorkflowRunner {
     workflow: Workflow,
     options: { contextId: string; trigger: TriggerInfo; input?: Record<string, unknown> },
   ): Promise<WorkflowRun> {
-    const logger = this.deps.logger.child(`workflow:${workflow.id}`);
+    const workflowId = workflow.definition.id;
+    const logger = this.deps.logger.child(`workflow:${workflowId}`);
     const started = Date.now();
     const cost = new CostTracker(this.deps.pricing);
     const controller = new AbortController();
@@ -135,7 +136,7 @@ export class WorkflowRunner {
     this.deps.bus.publish(
       "workflow.started",
       {
-        workflow: workflow.id,
+        workflow: workflowId,
         correlationId: run.id,
         contextId: options.contextId,
         trigger: options.trigger.kind,
@@ -173,7 +174,7 @@ export class WorkflowRunner {
       this.deps.bus.publish(
         "workflow.finished",
         {
-          workflow: workflow.id,
+          workflow: workflowId,
           correlationId: run.id,
           contextId: options.contextId,
           trigger: options.trigger.kind,
@@ -198,7 +199,7 @@ export class WorkflowRunner {
         this.deps.bus.publish(
           "workflow.cancelled",
           {
-            workflow: workflow.id,
+            workflow: workflowId,
             correlationId: run.id,
             contextId: options.contextId,
             trigger: options.trigger.kind,
@@ -217,7 +218,7 @@ export class WorkflowRunner {
       this.deps.bus.publish(
         "workflow.failed",
         {
-          workflow: workflow.id,
+          workflow: workflowId,
           correlationId: run.id,
           contextId: options.contextId,
           trigger: options.trigger.kind,

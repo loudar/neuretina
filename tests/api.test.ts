@@ -8,6 +8,7 @@ import {
   completion,
   stubLlm,
   stubSearch,
+  stubWorkflow,
   testConfig,
   waitForEvent,
 } from "./support.ts";
@@ -314,22 +315,24 @@ describe("webhook gateway", () => {
 
   test("cancels a running workflow and deletes it with its artifacts", async () => {
     let workflowReady = false;
-    kernel.workflows.register({
-      id: "slow-test",
-      description: "test workflow",
-      run: async (_input, context) => {
-        workflowReady = true;
-        await new Promise<void>((resolve) => {
-          if (context.signal?.aborted) {
-            resolve();
-            return;
-          }
-          context.signal?.addEventListener("abort", () => resolve(), { once: true });
-        });
-        context.signal?.throwIfAborted();
-        return { ok: true };
-      },
-    });
+    kernel.workflows.register(
+      stubWorkflow({
+        id: "slow-test",
+        description: "test workflow",
+        run: async (_input, context) => {
+          workflowReady = true;
+          await new Promise<void>((resolve) => {
+            if (context.signal?.aborted) {
+              resolve();
+              return;
+            }
+            context.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          context.signal?.throwIfAborted();
+          return { ok: true };
+        },
+      }),
+    );
 
     const started = await call<{ runId: string }>("workflow.run", { id: "slow-test", input: {} });
     await waitUntil(() => workflowReady);
@@ -396,13 +399,15 @@ describe("webhook gateway", () => {
   });
 
   test("a failing workflow does not raise unhandled rejections", async () => {
-    kernel.workflows.register({
-      id: "boom",
-      description: "always fails",
-      run: async () => {
-        throw new Error("boom");
-      },
-    });
+    kernel.workflows.register(
+      stubWorkflow({
+        id: "boom",
+        description: "always fails",
+        run: async () => {
+          throw new Error("boom");
+        },
+      }),
+    );
 
     const rejections: unknown[] = [];
     const onRejection = (reason: unknown) => rejections.push(reason);
@@ -490,18 +495,37 @@ describe("webhook gateway", () => {
     expect(updated.name).toBe("War room v2");
     expect(updated.enabled).toBe(false);
 
-    await call("delivery.attach", { workflow: "briefing", channelId: created.id });
+    await call("delivery.attach", {
+      workflow: "briefing",
+      step: "brief",
+      output: "brief",
+      channelId: created.id,
+    });
     const workflows = await call<Array<{ workflow: string; channelIds: string[] }>>(
       "delivery.workflows",
     );
     expect(workflows.find((entry) => entry.workflow === "briefing")?.channelIds).toContain(
       created.id,
     );
+    const attachments = await call<
+      Array<{ workflow: string; step: string; output: string; channelId: string }>
+    >("delivery.attachments");
+    expect(attachments).toContainEqual({
+      workflow: "briefing",
+      step: "brief",
+      output: "brief",
+      channelId: created.id,
+    });
 
     const rows = await call<Array<{ channelId: string }>>("delivery.list", {});
     expect(rows).toEqual([]);
 
-    await call("delivery.detach", { workflow: "briefing", channelId: created.id });
+    await call("delivery.detach", {
+      workflow: "briefing",
+      step: "brief",
+      output: "brief",
+      channelId: created.id,
+    });
     const afterDetach =
       (await call<Array<{ workflow: string; channelIds: string[] }>>("delivery.workflows")).find(
         (entry) => entry.workflow === "briefing",
@@ -510,9 +534,21 @@ describe("webhook gateway", () => {
 
     const missingChannel = await post({
       type: "delivery.attach",
-      payload: { workflow: "briefing", channelId: "missing" },
+      payload: { workflow: "briefing", step: "brief", output: "brief", channelId: "missing" },
     });
     expect(missingChannel.status).toBe(404);
+
+    // Outputs without a renderer cannot be assigned channels.
+    const notDeliverable = await post({
+      type: "delivery.attach",
+      payload: {
+        workflow: "briefing",
+        step: "research",
+        output: "research",
+        channelId: created.id,
+      },
+    });
+    expect(notDeliverable.status).toBe(400);
 
     const deleted = await call<{ ok: boolean }>("delivery.channel.delete", { id: created.id });
     expect(deleted.ok).toBe(true);

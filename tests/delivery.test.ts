@@ -63,27 +63,30 @@ describe("DeliveryRepository", () => {
     expect(repo.countChannels()).toBe(1);
   });
 
-  test("round-trips workflow attachments and cascades channel deletes", () => {
+  test("round-trips step-output attachments and cascades channel deletes", () => {
     const repo = new DeliveryRepository(new SqliteDatabase(":memory:"));
     const first = repo.createChannel({ type: "matrix", name: "Matrix" });
     const second = repo.createChannel({ type: "email", name: "Mail" });
+    const briefText = { workflow: "briefing", step: "brief", output: "brief" };
+    const voice = { workflow: "briefing", step: "audio", output: "audio" };
+    const answer = { workflow: "qa", step: "answer", output: "answer" };
 
-    repo.attach("briefing", first.id);
-    repo.attach("briefing", second.id);
-    repo.attach("qa", second.id);
-    repo.attach("briefing", first.id); // idempotent
+    repo.attach(briefText, first.id);
+    repo.attach(voice, second.id);
+    repo.attach(answer, second.id);
+    repo.attach(briefText, first.id); // idempotent
 
     expect(repo.attachments()).toEqual([
-      { workflow: "briefing", channelId: first.id },
-      { workflow: "briefing", channelId: second.id },
-      { workflow: "qa", channelId: second.id },
+      { ...briefText, channelId: first.id },
+      { ...voice, channelId: second.id },
+      { ...answer, channelId: second.id },
     ]);
     expect(repo.workflows()).toEqual([
       { workflow: "briefing", channelIds: [first.id, second.id] },
       { workflow: "qa", channelIds: [second.id] },
     ]);
 
-    repo.detach("briefing", first.id);
+    repo.detach(briefText, first.id);
     expect(repo.workflows()[0]?.channelIds).toEqual([second.id]);
 
     // Removing a channel cascades to every attachment referencing it.
@@ -97,12 +100,14 @@ describe("DeliveryRepository", () => {
     const first = repo.createChannel({ type: "matrix", name: "Matrix" });
     const second = repo.createChannel({ type: "email", name: "Mail" });
 
-    repo.attach("briefing", first.id);
-    repo.attach("user-1", first.id);
-    repo.attach("user-1", second.id);
+    repo.attach({ workflow: "briefing", step: "brief", output: "brief" }, first.id);
+    repo.attach({ workflow: "user-1", step: "brief", output: "brief" }, first.id);
+    repo.attach({ workflow: "user-1", step: "audio", output: "audio" }, second.id);
 
     repo.detachWorkflow("user-1");
-    expect(repo.attachments()).toEqual([{ workflow: "briefing", channelId: first.id }]);
+    expect(repo.attachments()).toEqual([
+      { workflow: "briefing", step: "brief", output: "brief", channelId: first.id },
+    ]);
   });
 
   test("round-trips deliveries: pending rows, completion and filters", () => {
@@ -383,10 +388,14 @@ describe("DeliveryService", () => {
     return { service, store, bus, sender };
   }
 
-  test("delivers text and voice to the channels attached to the workflow", async () => {
+  test("delivers text and voice to the channels attached to the step output", async () => {
     const { service, store, bus } = setupDelivery();
     const channel = store.createChannel({ type: "matrix", name: "Matrix", config: {} });
-    store.attach("briefing", channel.id);
+    const target = { workflow: "briefing", step: "brief", output: "brief" };
+    store.attach(target, channel.id);
+
+    expect(service.channelsFor(target)).toEqual([channel.id]);
+    expect(service.channelsFor({ ...target, step: "audio", output: "audio" })).toEqual([]);
 
     const events: DomainEvent[] = [];
     bus.subscribe("delivery.*", (event) => events.push(event));
@@ -394,6 +403,7 @@ describe("DeliveryService", () => {
     const results = await service.deliver({
       briefId: "brief-1",
       runId: "run-1",
+      target,
       summary: "Summary text",
       html: "<b>Summary text</b>",
       narration: "spoken text",
@@ -426,7 +436,8 @@ describe("DeliveryService", () => {
     const { service, store } = setupDelivery();
     const enabled = store.createChannel({ type: "matrix", name: "Enabled" });
     const disabled = store.createChannel({ type: "discord", name: "Disabled", enabled: false });
-    store.attach("qa", enabled.id); // not the briefing workflow
+    // Assigned to qa, not to the briefing workflow.
+    store.attach({ workflow: "qa", step: "answer", output: "answer" }, enabled.id);
 
     const results = await service.deliver({
       briefId: "b",
@@ -462,8 +473,9 @@ describe("DeliveryService", () => {
 
     const first = store.createChannel({ type: "matrix", name: "Matrix" });
     const second = store.createChannel({ type: "discord", name: "Hook" });
-    store.attach("briefing", first.id);
-    store.attach("briefing", second.id);
+    const target = { workflow: "briefing", step: "brief", output: "brief" };
+    store.attach(target, first.id);
+    store.attach(target, second.id);
 
     const results = await service.deliver({
       briefId: "b1",
@@ -497,7 +509,7 @@ describe("DeliveryService", () => {
       },
     });
     const channel = store.createChannel({ type: "matrix", name: "Broken" });
-    store.attach("briefing", channel.id);
+    store.attach({ workflow: "briefing", step: "brief", output: "brief" }, channel.id);
 
     const results = await service.deliver({ briefId: "b", summary: "s" });
 
@@ -510,7 +522,7 @@ describe("DeliveryService", () => {
   test("honors the kinds filter (voice only)", async () => {
     const { service, store, sender } = setupDelivery();
     const channel = store.createChannel({ type: "matrix", name: "Matrix" });
-    store.attach("briefing", channel.id);
+    store.attach({ workflow: "briefing", step: "audio", output: "audio" }, channel.id);
 
     const results = await service.deliver({
       briefId: "b",
@@ -529,8 +541,8 @@ describe("DeliveryService", () => {
     const { service, store, sender } = setupDelivery();
     const briefing = store.createChannel({ type: "matrix", name: "Briefing" });
     const user = store.createChannel({ type: "discord", name: "User" });
-    store.attach("briefing", briefing.id);
-    store.attach("user-1", user.id);
+    store.attach({ workflow: "briefing", step: "brief", output: "brief" }, briefing.id);
+    store.attach({ workflow: "user-1", step: "brief", output: "brief" }, user.id);
 
     const results = await service.deliver({ briefId: "b", workflow: "user-1", summary: "s" });
 

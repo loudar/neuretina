@@ -13,8 +13,6 @@
     commands,
     type DeliveryChannelInfo,
     type DeliveryChannelType,
-    type DeliveryWorkflowInfo,
-    type WorkflowInfo,
   } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -22,8 +20,6 @@
   import Pane from "./Pane.svelte";
 
   let channels = $state<DeliveryChannelInfo[]>([]);
-  let workflows = $state<WorkflowInfo[]>([]);
-  let deliveryWorkflows = $state<DeliveryWorkflowInfo[]>([]);
 
   let toggling = $state<string | null>(null);
   let testing = $state<string | null>(null);
@@ -114,29 +110,9 @@
     { icon: TYPE_ICONS.email, text: "Email", value: "email" },
   ];
 
-  const attachments = $derived.by(() => {
-    const map = new Map<string, string[]>();
-    for (const entry of deliveryWorkflows) map.set(entry.workflow, entry.channelIds);
-    return map;
-  });
-
-  function isAttached(workflowId: string, channelId: string): boolean {
-    return attachments.get(workflowId)?.includes(channelId) ?? false;
-  }
-
   async function refresh(): Promise<void> {
     try {
       channels = await commands.delivery.channels();
-    } catch (error) {
-      reportError(error);
-    }
-    try {
-      workflows = await commands.workflows.list();
-    } catch (error) {
-      reportError(error);
-    }
-    try {
-      deliveryWorkflows = await commands.delivery.workflows();
     } catch (error) {
       reportError(error);
     }
@@ -302,20 +278,6 @@
     }
   }
 
-  async function toggleAttachment(workflowId: string, channelId: string): Promise<void> {
-    const attached = isAttached(workflowId, channelId);
-    toggling = `${workflowId}:${channelId}`;
-    try {
-      if (attached) await commands.delivery.detach(workflowId, channelId);
-      else await commands.delivery.attach(workflowId, channelId);
-      deliveryWorkflows = await commands.delivery.workflows();
-    } catch (error) {
-      reportError(error);
-    } finally {
-      toggling = null;
-    }
-  }
-
   function configSummary(channel: DeliveryChannelInfo): string {
     const secrets = new Set(["accessToken", "password", "webhookUrl"]);
     const parts: string[] = [];
@@ -340,8 +302,8 @@
   {/snippet}
 
   <p class="muted intro">
-    Channels receive the briefs that workflow runs produce. A channel is only used while it is
-    enabled and attached to the workflow below.
+    Channels receive the outputs workflow steps produce. A channel is only used while it is
+    enabled and assigned to a step output in a workflow's Details tab.
   </p>
 
   <section class="group">
@@ -398,46 +360,6 @@
                 <Icon icon={iconDelete} />
               </Button>
             </span>
-          </div>
-        </article>
-      {/snippet}
-    </DataList>
-  </section>
-
-  <section class="group">
-    <h3>Workflows</h3>
-    <p class="muted desc">
-      When a workflow runs and produces a brief, it is delivered to every channel attached here.
-    </p>
-    <DataList items={workflows} empty="No workflows registered.">
-      {#snippet children(workflow)}
-        <article class="row">
-          <div class="info">
-            <div class="name">
-              <span>{workflow.id}</span>
-            </div>
-            <p class="desc muted">{workflow.description}</p>
-          </div>
-          <div class="control">
-            {#if channels.length === 0}
-              <span class="muted">No delivery channels yet.</span>
-            {:else}
-              {#each channels as channel (channel.id)}
-                <label
-                  class="attach"
-                  title={channel.enabled
-                    ? `Attach or detach "${channel.name}" for this workflow`
-                    : `"${channel.name}" is disabled`}
-                >
-                  <Switch
-                    checked={isAttached(workflow.id, channel.id)}
-                    disabled={toggling === `${workflow.id}:${channel.id}`}
-                    onchange={() => void toggleAttachment(workflow.id, channel.id)}
-                  />
-                  <span>{channel.name}{channel.enabled ? "" : " (disabled)"}</span>
-                </label>
-              {/each}
-            {/if}
           </div>
         </article>
       {/snippet}
@@ -647,16 +569,6 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     flex: 0 0 auto;
-  }
-
-  .attach {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
   }
 
   .secure-toggle {

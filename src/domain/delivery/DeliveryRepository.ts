@@ -28,13 +28,22 @@ export interface UpdateChannelInput {
   enabled?: boolean;
 }
 
-/** A workflow ↔ channel attachment (one row of workflow_delivery_channels). */
-export interface DeliveryAttachment {
+/**
+ * A step output a message can be routed to. Channels are assigned to these
+ * targets, never to the workflow as a whole.
+ */
+export interface DeliveryTarget {
   workflow: string;
+  step: string;
+  output: string;
+}
+
+/** A channel assignment (one row of workflow_delivery_channels). */
+export interface DeliveryAttachment extends DeliveryTarget {
   channelId: string;
 }
 
-/** Workflows that have at least one attachment, with their channel ids. */
+/** Workflows that have at least one assignment, with their channel ids. */
 export interface DeliveryWorkflow {
   workflow: string;
   channelIds: string[];
@@ -86,9 +95,11 @@ export interface DeliveryStore {
 
   workflows(): DeliveryWorkflow[];
   attachments(): DeliveryAttachment[];
-  attach(workflow: string, channelId: string): void;
-  detach(workflow: string, channelId: string): void;
-  /** Removes every channel attachment of one workflow (e.g. when it is deleted). */
+  /** Assigns a channel to a step output (idempotent). */
+  attach(target: DeliveryTarget, channelId: string): void;
+  /** Removes one channel from a step output. */
+  detach(target: DeliveryTarget, channelId: string): void;
+  /** Removes every assignment of one workflow (e.g. when it is deleted). */
   detachWorkflow(workflow: string): void;
 
   deliveries(filter?: DeliveryListFilter): DeliveryRecord[];
@@ -121,6 +132,8 @@ interface DeliveryRow {
 
 interface AttachmentRow {
   workflow: string;
+  step: string;
+  output: string;
   channel_id: string;
 }
 
@@ -217,20 +230,16 @@ export class DeliveryRepository implements DeliveryStore {
   }
 
   workflows(): DeliveryWorkflow[] {
-    const rows = this.db.raw
-      .query<AttachmentRow, []>(
-        "SELECT workflow, channel_id FROM workflow_delivery_channels ORDER BY rowid ASC",
-      )
-      .all();
-
     const byWorkflow = new Map<string, DeliveryWorkflow>();
-    for (const row of rows) {
-      let entry = byWorkflow.get(row.workflow);
+    for (const attachment of this.attachments()) {
+      let entry = byWorkflow.get(attachment.workflow);
       if (!entry) {
-        entry = { workflow: row.workflow, channelIds: [] };
-        byWorkflow.set(row.workflow, entry);
+        entry = { workflow: attachment.workflow, channelIds: [] };
+        byWorkflow.set(attachment.workflow, entry);
       }
-      entry.channelIds.push(row.channel_id);
+      if (!entry.channelIds.includes(attachment.channelId)) {
+        entry.channelIds.push(attachment.channelId);
+      }
     }
     return [...byWorkflow.values()];
   }
@@ -238,25 +247,34 @@ export class DeliveryRepository implements DeliveryStore {
   attachments(): DeliveryAttachment[] {
     return this.db.raw
       .query<AttachmentRow, []>(
-        "SELECT workflow, channel_id FROM workflow_delivery_channels ORDER BY rowid ASC",
+        "SELECT workflow, step, output, channel_id FROM workflow_delivery_channels ORDER BY rowid ASC",
       )
       .all()
-      .map((row) => ({ workflow: row.workflow, channelId: row.channel_id }));
+      .map((row) => ({
+        workflow: row.workflow,
+        step: row.step,
+        output: row.output,
+        channelId: row.channel_id,
+      }));
   }
 
-  attach(workflow: string, channelId: string): void {
+  attach(target: DeliveryTarget, channelId: string): void {
     this.channel(channelId); // NotFoundError when unknown
     this.db.raw
       .query(
-        `INSERT OR IGNORE INTO workflow_delivery_channels (workflow, channel_id) VALUES (?, ?)`,
+        `INSERT OR IGNORE INTO workflow_delivery_channels (workflow, step, output, channel_id)
+         VALUES (?, ?, ?, ?)`,
       )
-      .run(workflow, channelId);
+      .run(target.workflow, target.step, target.output, channelId);
   }
 
-  detach(workflow: string, channelId: string): void {
+  detach(target: DeliveryTarget, channelId: string): void {
     this.db.raw
-      .query("DELETE FROM workflow_delivery_channels WHERE workflow = ? AND channel_id = ?")
-      .run(workflow, channelId);
+      .query(
+        `DELETE FROM workflow_delivery_channels
+         WHERE workflow = ? AND step = ? AND output = ? AND channel_id = ?`,
+      )
+      .run(target.workflow, target.step, target.output, channelId);
   }
 
   detachWorkflow(workflow: string): void {

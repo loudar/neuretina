@@ -4,6 +4,7 @@ import type { StatusHub } from "../status/StatusHub.ts";
 import type { CostTracker } from "../cost/CostTracker.ts";
 import type { TriggerKind, WorkflowRun } from "../../domain/runs/WorkflowRunRepository.ts";
 import { NotFoundError } from "../errors.ts";
+import { describeWorkflow, type WorkflowDefinition, type WorkflowInfo } from "./definition.ts";
 
 export interface WorkflowContext {
   correlationId: string;
@@ -35,27 +36,10 @@ export interface WorkflowRunContext extends WorkflowContext {
   trigger?: TriggerInfo;
 }
 
-export interface WorkflowTriggerBinding {
-  kind: TriggerKind;
-  /** Only dispatch when this returns true (e.g. only Matrix replies to the bot). */
-  when?: (detail: Record<string, unknown>) => boolean;
-}
-
 export interface Workflow<TInput = unknown, TOutput = unknown> {
-  readonly id: string;
-  readonly description: string;
-  /** Context this workflow belongs to; defaults to the engine's default context. */
-  readonly contextId?: string;
-  /** Extra triggers this workflow accepts (schedule jobs and manual runs are implicit). */
-  readonly triggers?: WorkflowTriggerBinding[];
+  /** Public shape (inputs, steps, ports) used by the UI and delivery routing. */
+  readonly definition: WorkflowDefinition;
   run(input: TInput, context: WorkflowRunContext): Promise<TOutput>;
-}
-
-export interface WorkflowInfo {
-  id: string;
-  description: string;
-  contextId?: string;
-  triggers: TriggerKind[];
 }
 
 /**
@@ -70,7 +54,7 @@ export class WorkflowRegistry {
   ) {}
 
   register<TInput, TOutput>(workflow: Workflow<TInput, TOutput>): void {
-    this.workflows.set(workflow.id, workflow as Workflow);
+    this.workflows.set(workflow.definition.id, workflow as Workflow);
   }
 
   /** Removes a workflow definition; nothing happens when it is unknown. */
@@ -84,20 +68,16 @@ export class WorkflowRegistry {
     return workflow;
   }
 
-  /** Definitions with their trigger kinds, for the UI and trigger dispatch. */
+  /** Registered workflows with their trigger kinds, for dispatch and the UI. */
   definitions(): Array<{ workflow: Workflow; triggers: TriggerKind[] }> {
     return [...this.workflows.values()].map((workflow) => ({
       workflow,
-      triggers: workflow.triggers?.map((binding) => binding.kind) ?? [],
+      triggers: workflow.definition.triggers.map((binding) => binding.kind),
     }));
   }
 
+  /** Serializable definitions (drops handlers), for commands and the UI. */
   list(): WorkflowInfo[] {
-    return [...this.workflows.values()].map(({ id, description, contextId, triggers }) => ({
-      id,
-      description,
-      contextId,
-      triggers: triggers?.map((binding) => binding.kind) ?? [],
-    }));
+    return [...this.workflows.values()].map((workflow) => describeWorkflow(workflow.definition));
   }
 }

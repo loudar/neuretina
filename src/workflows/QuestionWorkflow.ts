@@ -3,8 +3,14 @@ import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
-import { addAgentCost } from "../core/cost/agentCosts.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
+import { addAgentCost } from "../core/cost/agentCosts.ts";
+import type {
+  StepContext,
+  StepResult,
+  WorkflowDefinition,
+} from "../core/workflow/definition.ts";
+import { StepPipeline } from "../core/workflow/StepPipeline.ts";
 import type { Workflow, WorkflowRunContext } from "../core/workflow/Workflow.ts";
 import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
 import { DEFAULT_CONTEXT_ID } from "../domain/contexts/ContextRepository.ts";
@@ -57,46 +63,95 @@ Rules:
  * as context, so "what about that?" still has a referent.
  */
 export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, QuestionWorkflowOutput> {
-  readonly id = "qa";
-  readonly description = "Answers a follow-up question in a Matrix thread";
-  readonly contextId = DEFAULT_CONTEXT_ID;
-  readonly triggers = [
-    {
-      kind: "matrix" as const,
-      when: (detail: Record<string, unknown>) => detail.replyToBot === true,
-    },
-  ];
+  readonly definition: WorkflowDefinition;
 
-  constructor(private readonly deps: QuestionWorkflowDeps) {}
+  constructor(private readonly deps: QuestionWorkflowDeps) {
+    this.definition = {
+      id: "qa",
+      title: "Follow-up answer",
+      description: "Answers a follow-up question in a Matrix thread",
+      contextId: DEFAULT_CONTEXT_ID,
+      triggers: [
+        {
+          kind: "matrix" as const,
+          when: (detail: Record<string, unknown>) => detail.replyToBot === true,
+        },
+      ],
+      inputs: [],
+      steps: [
+        {
+          id: "answer",
+          type: "answer",
+          title: "Answer",
+          description:
+            "Answers the question, consulting the web and earlier briefs when needed.",
+          inputs: [{ kind: "question", title: "Question", required: true }],
+          outputs: [
+            {
+              kind: "answer",
+              title: "Answer",
+              description: "The short answer returned to the thread.",
+              guaranteed: true,
+            },
+          ],
+          run: this.answerStep.bind(this),
+        },
+      ],
+    };
+  }
 
   async run(
     input: QuestionWorkflowInput,
     context: WorkflowRunContext,
   ): Promise<QuestionWorkflowOutput> {
-    const contextId = context.contextId ?? DEFAULT_CONTEXT_ID;
     const question = input.question.trim();
     if (!question) return { answer: "I couldn't find a good answer for that." };
 
+    const pipeline = new StepPipeline(this.definition);
+    const outcome = await pipeline.run({
+      inputs: { question, chain: input.chain ?? [] },
+      options: {} as Record<string, unknown>,
+      context,
+    });
+    if (outcome.halted !== undefined) return outcome.halted as QuestionWorkflowOutput;
+
+    const answer = outcome.outputs.get("answer")?.answer;
+    return {
+      answer:
+        typeof answer === "string" && answer
+          ? answer
+          : "I couldn't find a good answer for that.",
+    };
+  }
+
+  private async answerStep(ctx: StepContext): Promise<StepResult> {
+    const contextId = ctx.run.contextId ?? DEFAULT_CONTEXT_ID;
+    const question = String(ctx.inputs.question ?? "").trim();
+    if (!question) return { outputs: { answer: "I couldn't find a good answer for that." } };
+
     const agent = this.createAgent(contextId);
-    const status = context.statuses?.begin(
-      `${context.correlationId}:qa`,
+    const status = ctx.run.statuses?.begin(
+      `${ctx.run.correlationId}:qa`,
       "Answering follow-up question",
-      { correlationId: context.correlationId, detail: question.slice(0, 120) },
+      { correlationId: ctx.run.correlationId, detail: question.slice(0, 120) },
     );
 
     try {
-      const result = await agent.run(buildQuestionPrompt(input), {
-        correlationId: context.correlationId,
-        bus: context.bus,
-        logger: context.logger,
-        signal: context.signal,
-      });
-      status?.addCost(addAgentCost(context.cost, "Answering", result));
+      const result = await agent.run(
+        buildQuestionPrompt({ question, chain: ctx.inputs.chain as QuestionChainEntry[] | undefined }),
+        {
+          correlationId: ctx.run.correlationId,
+          bus: ctx.run.bus,
+          logger: ctx.run.logger,
+          signal: ctx.run.signal,
+        },
+      );
+      status?.addCost(addAgentCost(ctx.run.cost, "Answering", result));
       const answer =
         sanitizeNarration(stripMarkdown(result.text)).trim() ||
         "I couldn't find a good answer for that.";
       status?.done("Answered");
-      return { answer };
+      return { outputs: { answer } };
     } catch (error) {
       status?.failed("Answering failed");
       throw error;

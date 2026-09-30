@@ -8,6 +8,11 @@ import type { Logger } from "../core/logger.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
+import {
+  deliveryTargetForKind,
+  isDeliveryTarget,
+  type WorkflowDefinition,
+} from "../core/workflow/definition.ts";
 import type { WorkflowRegistry, Workflow } from "../core/workflow/Workflow.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
@@ -28,6 +33,7 @@ import type { DeliveryAttempt } from "../delivery/DeliveryService.ts";
 import type {
   DeliveryChannel,
   DeliveryStore,
+  DeliveryTarget,
   UpdateChannelInput,
 } from "../domain/delivery/DeliveryRepository.ts";
 import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
@@ -241,7 +247,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const userById = new Map(userWorkflows.list().map((workflow) => [workflow.id, workflow]));
     return workflows.list().map((info) => {
       const user = userById.get(info.id);
-      return user ? { ...info, user: true, topicIds: user.topicIds } : info;
+      return user ? { ...info, user: true, inputValues: user.inputs } : info;
     });
   });
 
@@ -346,14 +352,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("workflow.run", (payload, context) => {
     const record = asRecord(payload);
-    const workflow = workflows.get(requireString(record, "id"));
+    const workflowId = workflows.get(requireString(record, "id")).definition.id;
     const input = asOptionalRecord(record, "input") ?? {};
     // The run id is known before the (async) run starts, so the UI can open
     // the run immediately; failures are recorded as workflow.failed events.
     const runId = crypto.randomUUID();
     void runner
       .start({
-        workflow: workflow.id,
+        workflow: workflowId,
         contextId: optionalString(record, "contextId"),
         trigger: "manual",
         input,
@@ -361,7 +367,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         runId,
       })
       .catch(() => undefined);
-    return { started: true, workflow: workflow.id, runId };
+    return { started: true, workflow: workflowId, runId };
   });
 
   // ── User workflows ───────────────────────────────────────────────────────
@@ -374,7 +380,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const record = asRecord(payload);
     const workflow = userWorkflows.add({
       name: requireString(record, "name"),
-      topicIds: requireTopicIds(record, topics),
+      inputs: validateWorkflowInputs(userWorkflowTemplate(coreWorkflows), record.inputs, topics),
     });
     publishUserWorkflowChanged(bus, "create", workflow.id, context.correlationId);
     return toUserWorkflowInfo(workflow);
@@ -387,22 +393,24 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     // No row yet: updating a registered (built-in) workflow under its own id
     // starts customizing it, so the UI needs no separate create call. The id
     // stays the workflow's id, keeping scheduled jobs and delivery channel
-    // attachments pointing at it.
+    // assignments pointing at it.
     if (userWorkflows.get(id) === null) {
       if (!workflows.list().some((workflow) => workflow.id === id)) {
         throw new NotFoundError(`User workflow ${id} not found`);
       }
       const workflow = userWorkflows.upsert(id, {
         name: record.name !== undefined ? requireString(record, "name") : id,
-        topicIds: requireTopicIds(record, topics),
+        inputs: validateWorkflowInputs(workflows.get(id).definition, record.inputs, topics),
       });
       publishUserWorkflowChanged(bus, "update", workflow.id, context.correlationId);
       return toUserWorkflowInfo(workflow);
     }
 
-    const patch: { name?: string; topicIds?: string[] } = {};
+    const patch: { name?: string; inputs?: Record<string, unknown> } = {};
     if (record.name !== undefined) patch.name = requireString(record, "name");
-    if (record.topicIds !== undefined) patch.topicIds = requireTopicIds(record, topics);
+    if (record.inputs !== undefined) {
+      patch.inputs = validateWorkflowInputs(workflows.get(id).definition, record.inputs, topics);
+    }
 
     const workflow = userWorkflows.update(id, patch);
     publishUserWorkflowChanged(bus, "update", workflow.id, context.correlationId);
@@ -542,9 +550,24 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       });
       try {
         const summary = buildBriefMessage(brief.markdown, brief.sources);
+        // The brief's workflow owns the routing: voice goes to the channels
+        // assigned to the audio output of that workflow.
+        const voiceTarget = deliveryTargetForKind(
+          definitionOf(workflows, brief.workflow),
+          "audio",
+        );
         results = await deps.delivery.deliver({
           briefId: id,
           runId: context.correlationId,
+          ...(brief.workflow && voiceTarget
+            ? {
+                target: {
+                  workflow: brief.workflow,
+                  step: voiceTarget.step,
+                  output: voiceTarget.output,
+                },
+              }
+            : {}),
           kinds: ["voice"],
           summary,
           html: markdownToHtml(summary),
@@ -660,18 +683,21 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("delivery.workflows", () => deliveries.workflows());
 
+  // Every channel assignment with its step-output target, for the workflow
+  // editor and for overviews of what is routed where.
+  router.register("delivery.attachments", () => deliveries.attachments());
+
   router.register("delivery.attach", (payload, context) => {
-    const record = asRecord(payload);
-    const workflow = requireString(record, "workflow");
-    workflows.get(workflow);
-    deliveries.attach(workflow, requireString(record, "channelId"));
+    const target = requireDeliveryTarget(workflows, asRecord(payload));
+    deliveries.attach(target, requireString(asRecord(payload), "channelId"));
     publishDeliveryUpdated(bus, "attach", context.correlationId);
     return { ok: true };
   });
 
   router.register("delivery.detach", (payload, context) => {
     const record = asRecord(payload);
-    deliveries.detach(requireString(record, "workflow"), requireString(record, "channelId"));
+    const target = requireDeliveryTarget(workflows, record);
+    deliveries.detach(target, requireString(record, "channelId"));
     publishDeliveryUpdated(bus, "detach", context.correlationId);
     return { ok: true };
   });
@@ -872,29 +898,98 @@ function publishUserWorkflowChanged(
 function toUserWorkflowInfo(workflow: UserWorkflow): {
   id: string;
   name: string;
-  topicIds: string[];
+  inputs: Record<string, unknown>;
 } {
-  return { id: workflow.id, name: workflow.name, topicIds: workflow.topicIds };
+  return { id: workflow.id, name: workflow.name, inputs: workflow.inputs };
 }
 
-/** Non-empty array of ids that all exist in the topic store. */
-function requireTopicIds(record: Record<string, unknown>, topics: TopicStore): string[] {
-  const value = record.topicIds;
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new ValidationError(`"topicIds" must be a non-empty array of topic ids`);
+/** The definition user workflow instances are built from (the briefing pipeline). */
+function userWorkflowTemplate(coreWorkflows: ReadonlyMap<string, Workflow>): WorkflowDefinition {
+  const template = coreWorkflows.get("briefing");
+  if (!template) throw new NotFoundError("The briefing workflow is not registered");
+  return template.definition;
+}
+
+/**
+ * Validates configured input values against a workflow definition. Every
+ * required input must hold a value and each known kind gets its own check
+ * (topics must reference existing topic ids); unknown kinds pass through.
+ */
+function validateWorkflowInputs(
+  definition: WorkflowDefinition,
+  value: unknown,
+  topics: TopicStore,
+): Record<string, unknown> {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const result: Record<string, unknown> = {};
+
+  for (const spec of definition.inputs) {
+    const raw = record[spec.id];
+
+    if (spec.kind === "topics") {
+      const ids = raw === undefined ? [] : requireStringArray(raw, spec.id);
+      const known = new Set(topics.list().map((topic) => topic.id));
+      for (const id of ids) {
+        if (!known.has(id)) throw new ValidationError(`Topic ${id} not found`);
+      }
+      const unique = [...new Set(ids)];
+      if (spec.required && unique.length === 0) {
+        throw new ValidationError(`"${spec.id}" must be a non-empty array of topic ids`);
+      }
+      result[spec.id] = unique;
+      continue;
+    }
+
+    if (raw !== undefined) result[spec.id] = raw;
   }
 
-  const known = new Set(topics.list().map((topic) => topic.id));
-  const ids = value.map((entry, index) => {
-    if (typeof entry !== "string" || !entry.trim()) {
-      throw new ValidationError(`"topicIds[${index}]" must be a non-empty string`);
-    }
-    const id = entry.trim();
-    if (!known.has(id)) throw new ValidationError(`Topic ${id} not found`);
-    return id;
-  });
+  return result;
+}
 
-  return [...new Set(ids)];
+/** Array of non-empty strings, used by the kind-specific input checks. */
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new ValidationError(`"${field}" must be an array`);
+  }
+  return value.map((entry, index) => {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new ValidationError(`"${field}[${index}]" must be a non-empty string`);
+    }
+    return entry.trim();
+  });
+}
+
+/** Validates a (workflow, step, output) channel-assignment target. */
+function requireDeliveryTarget(
+  workflows: WorkflowRegistry,
+  record: Record<string, unknown>,
+): DeliveryTarget {
+  const workflow = requireString(record, "workflow");
+  const step = requireString(record, "step");
+  const output = requireString(record, "output");
+  const definition = workflows.get(workflow).definition;
+  if (!isDeliveryTarget(definition, step, output)) {
+    throw new ValidationError(
+      `Workflow "${workflow}" has no deliverable output "${step}.${output}"`,
+    );
+  }
+  return { workflow, step, output };
+}
+
+/** Definition of a registered workflow, or undefined when it no longer exists. */
+function definitionOf(
+  workflows: WorkflowRegistry,
+  id: string | undefined,
+): WorkflowDefinition | undefined {
+  if (!id) return undefined;
+  try {
+    return workflows.get(id).definition;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Optional array of channel ids (`brief.send`), validated element-wise. */

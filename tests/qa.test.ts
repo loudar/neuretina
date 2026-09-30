@@ -81,7 +81,7 @@ describe("QuestionWorkflow", () => {
       socialSearch: { name: "social", kind: "social", search: async (q) => ({ query: q.query, provider: "social", kind: "social", results: [] }) },
       briefs: new BriefRepository(new ArtifactRepository(new SqliteDatabase(":memory:"))),
       defaults: { recency: "week", resultsPerProvider: 3, language: "en", searchDomains: [] },
-    }).triggers!;
+    }).definition.triggers;
 
     expect(binding?.kind).toBe("matrix");
     expect(binding?.when?.({ replyToBot: true })).toBe(true);

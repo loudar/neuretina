@@ -82,21 +82,66 @@ export interface ScheduledJob {
   lastStatus?: "success" | "failed";
 }
 
+/** A configurable workflow input (topics today; more kinds later). */
+export interface WorkflowInputInfo {
+  /** Key the configured value is stored under, e.g. "topics". */
+  id: string;
+  /** Value kind; drives the editor control. */
+  kind: string;
+  title: string;
+  description?: string;
+  required: boolean;
+  multiple: boolean;
+}
+
+/** A value a workflow step consumes. */
+export interface WorkflowStepInputInfo {
+  kind: string;
+  title: string;
+  description?: string;
+  /** Optional inputs may be missing for a run. */
+  required: boolean;
+}
+
+/** A value a workflow step produces. */
+export interface WorkflowStepOutputInfo {
+  kind: string;
+  title: string;
+  description?: string;
+  /** Guaranteed outputs always exist after the step; optional ones may not. */
+  guaranteed: boolean;
+  /** Deliverable outputs can be assigned delivery channels. */
+  deliverable: boolean;
+}
+
+/** One action the workflow takes. */
+export interface WorkflowStepInfo {
+  id: string;
+  type: string;
+  title: string;
+  description?: string;
+  inputs: WorkflowStepInputInfo[];
+  outputs: WorkflowStepOutputInfo[];
+}
+
 export interface WorkflowInfo {
   id: string;
+  title: string;
   description: string;
   contextId?: string;
   triggers: string[];
+  inputs: WorkflowInputInfo[];
+  steps: WorkflowStepInfo[];
   /** Set for user-created workflow instances. */
   user?: boolean;
-  /** Topic ids selected for user workflows (undefined = all topics). */
-  topicIds?: string[];
+  /** Configured input values (undefined = the workflow's defaults). */
+  inputValues?: Record<string, unknown>;
 }
 
 export interface UserWorkflowInfo {
   id: string;
   name: string;
-  topicIds: string[];
+  inputs: Record<string, unknown>;
 }
 
 export interface AppContextInfo {
@@ -216,6 +261,21 @@ export interface DeliveryWorkflowInfo {
   channelIds: string[];
 }
 
+/** A channel assignment: which step output a channel receives. */
+export interface DeliveryAttachmentInfo {
+  workflow: string;
+  step: string;
+  output: string;
+  channelId: string;
+}
+
+/** Identifies one deliverable step output. */
+export interface DeliveryTargetInfo {
+  workflow: string;
+  step: string;
+  output: string;
+}
+
 export interface DeliveryRecord {
   id: string;
   briefId: string;
@@ -322,9 +382,9 @@ export const commands = {
 
   userWorkflows: {
     list: () => send<UserWorkflowInfo[]>("workflow.user.list"),
-    create: (input: { name: string; topicIds: string[] }) =>
+    create: (input: { name: string; inputs: Record<string, unknown> }) =>
       send<UserWorkflowInfo>("workflow.user.create", input),
-    update: (id: string, patch: { name?: string; topicIds?: string[] }) =>
+    update: (id: string, patch: { name?: string; inputs?: Record<string, unknown> }) =>
       send<UserWorkflowInfo>("workflow.user.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("workflow.user.remove", { id }),
   },
@@ -341,10 +401,11 @@ export const commands = {
     verifyChannel: (id: string) =>
       send<{ ok: boolean; detail: string }>("delivery.channel.verify", { id }),
     workflows: () => send<DeliveryWorkflowInfo[]>("delivery.workflows"),
-    attach: (workflow: string, channelId: string) =>
-      send<{ ok: boolean }>("delivery.attach", { workflow, channelId }),
-    detach: (workflow: string, channelId: string) =>
-      send<{ ok: boolean }>("delivery.detach", { workflow, channelId }),
+    attachments: () => send<DeliveryAttachmentInfo[]>("delivery.attachments"),
+    attach: (target: DeliveryTargetInfo, channelId: string) =>
+      send<{ ok: boolean }>("delivery.attach", { ...target, channelId }),
+    detach: (target: DeliveryTargetInfo, channelId: string) =>
+      send<{ ok: boolean }>("delivery.detach", { ...target, channelId }),
     list: (filter: { briefId?: string; runId?: string } = {}) =>
       send<DeliveryRecord[]>("delivery.list", filter),
   },

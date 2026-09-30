@@ -236,6 +236,43 @@ export const migrations: Migration[] = [
         );
     `,
   },
+  {
+    // Delivery channels attach to a workflow step *output* (e.g. the brief's
+    // text, the voice message), not to the workflow itself. Legacy rows keep
+    // empty step/output until the kernel expands them onto the definition's
+    // deliverable outputs at boot.
+    id: 14,
+    name: "delivery_step_targets",
+    sql: `
+      CREATE TABLE workflow_delivery_targets (
+        workflow   TEXT NOT NULL,
+        step       TEXT NOT NULL DEFAULT '',
+        output     TEXT NOT NULL DEFAULT '',
+        channel_id TEXT NOT NULL REFERENCES delivery_channels(id) ON DELETE CASCADE,
+        PRIMARY KEY (workflow, step, output, channel_id)
+      );
+      INSERT OR IGNORE INTO workflow_delivery_targets (workflow, step, output, channel_id)
+        SELECT workflow, '', '', channel_id FROM workflow_delivery_channels;
+      DROP TABLE workflow_delivery_channels;
+      ALTER TABLE workflow_delivery_targets RENAME TO workflow_delivery_channels;
+    `,
+  },
+  {
+    // Workflow configuration moves from the fixed topic list to generic input
+    // values keyed by input id (`{"topics": ["…"]}` for the topics input).
+    id: 15,
+    name: "user_workflow_inputs",
+    sql: `
+      ALTER TABLE user_workflows ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}';
+      UPDATE user_workflows
+      SET inputs = CASE
+        WHEN topics IS NOT NULL AND json_valid(topics) AND json_type(topics) = 'array'
+          THEN json_object('topics', json(topics))
+        ELSE '{}'
+      END;
+      ALTER TABLE user_workflows DROP COLUMN topics;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

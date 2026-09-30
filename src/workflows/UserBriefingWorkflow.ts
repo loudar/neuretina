@@ -1,3 +1,4 @@
+import type { WorkflowDefinition } from "../core/workflow/definition.ts";
 import type { Workflow, WorkflowRegistry, WorkflowRunContext } from "../core/workflow/Workflow.ts";
 import type { UserWorkflow, UserWorkflowStore } from "../domain/workflows/UserWorkflowRepository.ts";
 import type {
@@ -8,33 +9,34 @@ import type {
 
 /**
  * A runnable instance of the briefing pipeline: it delegates to the shared
- * `BriefingWorkflow` but pins the topics selected by its user workflow row.
- * Delivery resolves through the channels attached to this workflow's id.
+ * `BriefingWorkflow` but pins the input values configured on its user
+ * workflow row. Delivery resolves through the channels assigned to this
+ * workflow's step outputs.
  */
 export class UserBriefingWorkflow
   implements Workflow<BriefingWorkflowInput, BriefingWorkflowOutput>
 {
-  readonly id: string;
-  readonly description: string;
-  readonly contextId: string;
-  readonly triggers = [{ kind: "schedule" as const }, { kind: "manual" as const }];
+  readonly definition: WorkflowDefinition;
 
   constructor(
     private readonly userWorkflow: UserWorkflow,
     private readonly briefing: BriefingWorkflow,
   ) {
-    this.id = userWorkflow.id;
-    this.description = `User briefing workflow: ${userWorkflow.name}`;
-    this.contextId = briefing.contextId;
+    this.definition = {
+      ...briefing.definition,
+      id: userWorkflow.id,
+      title: userWorkflow.name,
+      description: `User briefing workflow: ${userWorkflow.name}`,
+    };
   }
 
   run(
     input: BriefingWorkflowInput,
     context: WorkflowRunContext,
   ): Promise<BriefingWorkflowOutput> {
-    // The stored topic ids always win: callers cannot widen or change them.
+    // The stored input values always win: callers cannot widen or change them.
     return this.briefing.run(
-      { ...input, topics: undefined, topicIds: this.userWorkflow.topicIds },
+      { ...input, topics: undefined, topicIds: undefined, inputs: this.userWorkflow.inputs },
       context,
     );
   }

@@ -1,15 +1,16 @@
 <script lang="ts">
   import { Switch, TextFieldOutlined } from "m3-svelte";
-  import type { DeliveryChannelInfo, DeliveryChannelType, Topic } from "../lib/api";
+  import type { Topic, WorkflowInputInfo } from "../lib/api";
 
   interface Props {
     name: string;
-    topicIds: string[];
-    channelIds: string[];
+    /** Configured values keyed by input id, e.g. `{ topics: ["…"] }`. */
+    inputs: Record<string, string[]>;
+    /** The workflow's input specs, rendered by kind. */
+    specs: WorkflowInputInfo[];
     topics: Topic[];
-    channels: DeliveryChannelInfo[];
     disabled?: boolean;
-    /** Cap the topic/channel lists with their own scrollbar (dialogs). */
+    /** Cap the topic list with its own scrollbar (dialog); the details tab grows. */
     capped?: boolean;
     /** Triggered by Enter in the name field. */
     onenter?: () => void;
@@ -17,77 +18,60 @@
 
   let {
     name = $bindable(),
-    topicIds = $bindable(),
-    channelIds = $bindable(),
+    inputs = $bindable(),
+    specs,
     topics,
-    channels,
     disabled = false,
     capped = true,
     onenter,
   }: Props = $props();
 
-  const TYPE_LABELS: Record<DeliveryChannelType, string> = {
-    matrix: "Matrix",
-    discord: "Discord",
-    email: "Email",
-  };
-
-  function toggleTopic(id: string): void {
-    topicIds = topicIds.includes(id)
-      ? topicIds.filter((entry) => entry !== id)
-      : [...topicIds, id];
+  function valuesOf(spec: WorkflowInputInfo): string[] {
+    return inputs[spec.id] ?? [];
   }
 
-  function toggleChannel(id: string): void {
-    channelIds = channelIds.includes(id)
-      ? channelIds.filter((entry) => entry !== id)
-      : [...channelIds, id];
+  function toggleTopic(spec: WorkflowInputInfo, id: string): void {
+    const current = valuesOf(spec);
+    inputs = {
+      ...inputs,
+      [spec.id]: current.includes(id)
+        ? current.filter((entry) => entry !== id)
+        : [...current, id],
+    };
   }
 </script>
 
 <div class="workflow-fields">
   <TextFieldOutlined label="Name" bind:value={name} {disabled} enter={onenter} />
 
-  <div class="field-group">
-    <h3 class="group-label">Topics</h3>
-    {#if topics.length === 0}
-      <p class="muted">No topics yet. Create topics first, then pick the ones to cover.</p>
-    {:else}
-      <div class="toggle-list" class:capped>
-        {#each topics as topic (topic.id)}
-          <label class="toggle-row" class:muted={topic.muted}>
-            <Switch
-              checked={topicIds.includes(topic.id)}
-              {disabled}
-              onchange={() => toggleTopic(topic.id)}
-            />
-            <span>{topic.name}{topic.muted ? " (muted)" : ""}</span>
-          </label>
-        {/each}
-      </div>
-    {/if}
-  </div>
-
-  <div class="field-group">
-    <h3 class="group-label">Delivery channels</h3>
-    {#if channels.length === 0}
-      <p class="muted">No delivery channels yet.</p>
-    {:else}
-      <div class="toggle-list" class:capped>
-        {#each channels as channel (channel.id)}
-          <label class="toggle-row">
-            <Switch
-              checked={channelIds.includes(channel.id)}
-              {disabled}
-              onchange={() => toggleChannel(channel.id)}
-            />
-            <span>{channel.name}</span>
-            <span class="provider-tag">{TYPE_LABELS[channel.type]}</span>
-          </label>
-        {/each}
-      </div>
-    {/if}
-  </div>
+  {#each specs as spec (spec.id)}
+    <div class="field-group">
+      <h3 class="group-label">{spec.title}</h3>
+      {#if spec.kind === "topics"}
+        {#if topics.length === 0}
+          <p class="muted">No topics yet. Create topics first, then pick the ones to cover.</p>
+        {:else}
+          <div class="toggle-list" class:capped>
+            {#each topics as topic (topic.id)}
+              <label class="toggle-row" class:muted={topic.muted}>
+                <Switch
+                  checked={valuesOf(spec).includes(topic.id)}
+                  {disabled}
+                  onchange={() => toggleTopic(spec, topic.id)}
+                />
+                <span>{topic.name}{topic.muted ? " (muted)" : ""}</span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      {:else}
+        <p class="muted">This input kind is not editable in the interface yet.</p>
+      {/if}
+      {#if spec.description}
+        <p class="muted spec-note">{spec.description}</p>
+      {/if}
+    </div>
+  {/each}
 </div>
 
 <style>
@@ -133,5 +117,9 @@
 
   .toggle-row.muted {
     opacity: 0.65;
+  }
+
+  .spec-note {
+    font-size: 0.8rem;
   }
 </style>
