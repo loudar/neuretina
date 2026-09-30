@@ -49,6 +49,12 @@ export interface AppEvents {
     trigger?: "schedule" | "matrix" | "manual";
     error: string;
   };
+  "workflow.deleted": {
+    workflow: string;
+    correlationId: string;
+    /** Number of artifacts removed along with the run, if requested. */
+    artifacts: number;
+  };
 
   "agent.started": { agent: string; correlationId: string; input: string };
   "agent.tool.invoked": {
@@ -128,6 +134,8 @@ export interface AppEvents {
     channel: string;
     eventId: string;
   };
+
+  "settings.updated": { key: string; action: "set" | "cleared" };
 
   "message.received": { type: string; correlationId: string; payload: unknown };
   "command.completed": { type: string; correlationId: string; result: unknown };

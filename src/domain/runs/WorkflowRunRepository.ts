@@ -43,6 +43,8 @@ export interface WorkflowRunStore {
   list(options?: ListWorkflowRunsOptions): WorkflowRun[];
   latest(contextId?: string): WorkflowRun | null;
   finish(id: string, patch: { status: WorkflowRunStatus; output?: unknown; error?: string }): WorkflowRun;
+  /** Removes the run record; artifacts are handled by the caller. */
+  remove(id: string): WorkflowRun;
 }
 
 interface RunRow {
@@ -150,6 +152,13 @@ export class WorkflowRunRepository implements WorkflowRunStore {
       );
     if (result.changes === 0) throw new NotFoundError(`Workflow run ${id} not found`);
     return this.get(id);
+  }
+
+  /** Removes the run record; artifacts are handled by the caller. */
+  remove(id: string): WorkflowRun {
+    const run = this.get(id);
+    this.db.raw.query("DELETE FROM workflow_runs WHERE id = ?").run(id);
+    return run;
   }
 }
 

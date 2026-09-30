@@ -15,11 +15,11 @@
   import { commands, type Topic } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
+  import { paths, router } from "../lib/router.svelte";
   import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
 
   let topics = $state<Topic[]>([]);
-  let selectedId = $state<string | null>(null);
   let name = $state("");
   let description = $state("");
   let busy = $state(false);
@@ -29,13 +29,29 @@
   let saving = $state(false);
   let togglingId = $state<string | null>(null);
 
-  const selected = $derived(topics.find((topic) => topic.id === selectedId) ?? null);
+  const route = $derived(router.current);
+  const topicId = $derived(route.segments[0] ?? null);
+  const selected = $derived(topics.find((topic) => topic.id === topicId) ?? null);
+
+  // Seed the edit fields when a different topic is opened; a background
+  // refresh of the list must not clobber unsaved edits.
+  let editedTopicId: string | null = null;
+  $effect(() => {
+    if (!selected) {
+      editedTopicId = null;
+      return;
+    }
+    if (editedTopicId === selected.id) return;
+    editedTopicId = selected.id;
+    editName = selected.name;
+    editDescription = selected.description ?? "";
+  });
 
   async function refresh(): Promise<void> {
     try {
       topics = await commands.topics.list();
-      if (selectedId && !topics.some((topic) => topic.id === selectedId)) {
-        selectedId = null;
+      if (topicId && !topics.some((topic) => topic.id === topicId)) {
+        router.navigate(paths.topics(), { replace: true });
       }
     } catch (error) {
       reportError(error);
@@ -43,12 +59,6 @@
   }
 
   useRefresh(["topic."], refresh);
-
-  function select(topic: Topic): void {
-    selectedId = topic.id;
-    editName = topic.name;
-    editDescription = topic.description ?? "";
-  }
 
   async function add(): Promise<void> {
     if (!name.trim() || busy) return;
@@ -103,8 +113,8 @@
   async function remove(): Promise<void> {
     if (!selected) return;
     const target = selected;
+    router.navigate(paths.topics());
     try {
-      selectedId = null;
       await commands.topics.remove(target.id);
     } catch (error) {
       reportError(error);
@@ -123,9 +133,9 @@
 
   <DataList items={topics} empty="No topics yet. Add the things you want to keep an eye on.">
     {#snippet children(topic)}
-      <div class="entry" class:selected={selectedId === topic.id} class:muted={topic.muted}>
+      <div class="entry" class:selected={topicId === topic.id} class:muted={topic.muted}>
         <ListItem
-          onclick={() => select(topic)}
+          onclick={() => router.navigate(paths.topics(topic.id))}
           headline={topic.name}
           supporting={`${topic.description ?? "no context"}${topic.muted ? " · muted" : ""}`}
         >

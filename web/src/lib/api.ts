@@ -151,6 +151,25 @@ export interface AppConfigInfo {
   matrix: { roomId?: string };
 }
 
+export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum";
+export type SettingSource = "env" | "db" | "default";
+
+export interface SettingInfo {
+  key: string;
+  group: string;
+  label: string;
+  description?: string;
+  kind: SettingKind;
+  options?: string[];
+  defaultValue?: string;
+  /** `env` values always win over database overrides. */
+  source: SettingSource;
+  /** Effective value; `null` for secrets, which the backend never sends. */
+  value: string | null;
+  configured: boolean;
+  stored: boolean;
+}
+
 /**
  * Sends a message through the webhook gateway and returns the handler result
  * from the same HTTP response. Every interaction with the backend uses this.
@@ -184,6 +203,12 @@ export async function send<T = unknown>(
 export const commands = {
   config: () => send<AppConfigInfo>("config.get"),
 
+  settings: {
+    list: () => send<SettingInfo[]>("settings.list"),
+    set: (key: string, value: string) => send<SettingInfo>("settings.set", { key, value }),
+    clear: (key: string) => send<SettingInfo>("settings.clear", { key }),
+  },
+
   contexts: {
     list: () => send<AppContextInfo[]>("context.list"),
   },
@@ -213,7 +238,8 @@ export const commands = {
       patch: Partial<Pick<ScheduledJob, "name" | "cron" | "enabled" | "input">>,
     ) => send<ScheduledJob>("job.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("job.delete", { id }),
-    run: (id: string) => send<{ started: boolean }>("job.run", { id }),
+    run: (id: string) =>
+      send<{ started: boolean; jobId: string; workflow: string; runId: string }>("job.run", { id }),
   },
 
   briefs: {
@@ -238,15 +264,26 @@ export const commands = {
   workflows: {
     list: () => send<WorkflowInfo[]>("workflow.list"),
     run: (id: string, input: Record<string, unknown> = {}, contextId?: string) =>
-      send<{ started: boolean }>("workflow.run", { id, input, contextId }),
+      send<{ started: boolean; workflow: string; runId: string }>("workflow.run", {
+        id,
+        input,
+        contextId,
+      }),
     runs: (options: { contextId?: string; workflow?: string; limit?: number } = {}) =>
       send<WorkflowRunInfo[]>("workflow.run.list", options),
     runGet: (id: string) => send<WorkflowRunDetail>("workflow.run.get", { id }),
+    removeRun: (id: string, artifacts: boolean) =>
+      send<{ ok: boolean; runId: string; artifacts: number }>("workflow.run.delete", {
+        id,
+        artifacts,
+      }),
   },
 
   artifacts: {
     list: (options: { kind?: string; workflow?: string; parentId?: string; limit?: number } = {}) =>
       send<ArtifactInfo[]>("artifact.list", options),
+    search: (query?: string, options: { kind?: string; limit?: number } = {}) =>
+      send<ArtifactInfo[]>("artifact.search", { query, ...options }),
     get: (id: string) => send<ArtifactInfo>("artifact.get", { id }),
     content: (id: string) =>
       send<{ id: string; kind: string; contentType: string; content: string | null }>(

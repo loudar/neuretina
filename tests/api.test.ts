@@ -176,6 +176,38 @@ describe("webhook gateway", () => {
     expect((failure.payload as { error: string }).error).toContain("Unknown message type");
   });
 
+  test("edits settings through the gateway with live effects", async () => {
+    const list = await call<
+      Array<{ key: string; source: string; value: string | null; stored: boolean }>
+    >("settings.list");
+    const model = list.find((setting) => setting.key === "LLM_MODEL");
+    expect(model?.source).toBe("default");
+
+    const updated = await call<{ source: string; value: string | null; stored: boolean }>(
+      "settings.set",
+      { key: "LLM_MODEL", value: "webhook-model" },
+    );
+    expect(updated.source).toBe("db");
+    expect(updated.value).toBe("webhook-model");
+    expect(updated.stored).toBe(true);
+
+    const live = await call<{ llm: { model: string } }>("config.get");
+    expect(live.llm.model).toBe("webhook-model");
+
+    await call("settings.clear", { key: "LLM_MODEL" });
+    const restored = await call<{ llm: { model: string } }>("config.get");
+    expect(restored.llm.model).toBe("deepseek-v4.1-flash");
+  });
+
+  test("never persists secret setting values in the event log", async () => {
+    await call("settings.set", { key: "OPENCODE_API_KEY", value: "sekrit-value" });
+    await call("settings.clear", { key: "OPENCODE_API_KEY" });
+
+    const log = JSON.stringify(kernel.bus.replayAfter(0, 5000));
+    expect(log).not.toContain("sekrit-value");
+    expect(log).toContain("settings.updated");
+  });
+
   test("manages jobs through the gateway", async () => {
     const job = await call<{ id: string; enabled: boolean; input: Record<string, unknown> }>(
       "job.create",
@@ -189,8 +221,9 @@ describe("webhook gateway", () => {
     expect(job.enabled).toBe(true);
     expect(job.input).toEqual({ generateAudio: false });
 
-    const run = await call<{ started: boolean }>("job.run", { id: job.id });
+    const run = await call<{ started: boolean; runId: string }>("job.run", { id: job.id });
     expect(run.started).toBe(true);
+    expect(run.runId).toBeTruthy();
 
     const jobs = await call<Array<{ id: string }>>("job.list");
     expect(jobs.some((entry) => entry.id === job.id)).toBe(true);
@@ -219,13 +252,82 @@ describe("webhook gateway", () => {
     // sending, because the workflow starts synchronously with the command.
     const skipped = waitForEvent(kernel.bus, "brief.skipped");
 
-    const started = await call<{ started: boolean }>("workflow.run", {
+    const started = await call<{ started: boolean; runId: string }>("workflow.run", {
       id: "briefing",
       input: {},
     });
     expect(started.started).toBe(true);
+    expect(started.runId).toBeTruthy();
+
+    // The run is persisted before the command returns, so it is linkable.
+    const run = await call<{ id: string; workflow: string }>("workflow.run.get", {
+      id: started.runId,
+    });
+    expect(run.id).toBe(started.runId);
+    expect(run.workflow).toBe("briefing");
 
     await skipped;
+  });
+
+  test("deletes a run and optionally its artifacts", async () => {
+    const started = await call<{ runId: string }>("workflow.run", { id: "briefing", input: {} });
+    const artifact = kernel.artifacts.create({
+      kind: "note",
+      contentType: "text/plain",
+      content: "scratch",
+      workflow: "briefing",
+      correlationId: started.runId,
+    });
+
+    const deleted = await call<{ ok: boolean; runId: string; artifacts: number }>(
+      "workflow.run.delete",
+      { id: started.runId, artifacts: true },
+    );
+    expect(deleted.ok).toBe(true);
+    expect(deleted.runId).toBe(started.runId);
+    expect(deleted.artifacts).toBe(1);
+
+    await expect(call("workflow.run.get", { id: started.runId })).rejects.toThrow();
+    await expect(call("artifact.get", { id: artifact.id })).rejects.toThrow();
+  });
+
+  test("keeps artifacts when a run is deleted without them", async () => {
+    const started = await call<{ runId: string }>("workflow.run", { id: "briefing", input: {} });
+    const artifact = kernel.artifacts.create({
+      kind: "note",
+      contentType: "text/plain",
+      content: "kept",
+      workflow: "briefing",
+      correlationId: started.runId,
+    });
+
+    const deleted = await call<{ artifacts: number }>("workflow.run.delete", {
+      id: started.runId,
+      artifacts: false,
+    });
+    expect(deleted.artifacts).toBe(0);
+    await call("artifact.get", { id: artifact.id });
+    await call("artifact.delete", { id: artifact.id });
+  });
+
+  test("searches and deletes artifacts through the gateway", async () => {
+    const artifact = kernel.artifacts.create({
+      kind: "note",
+      name: "search note",
+      contentType: "text/plain",
+      content: "unique-search-token",
+    });
+
+    const results = await call<Array<{ id: string }>>("artifact.search", {
+      query: "unique-search-token",
+    });
+    expect(results.some((entry) => entry.id === artifact.id)).toBe(true);
+
+    const removed = await call<{ ok: boolean; artifactId: string }>("artifact.delete", {
+      id: artifact.id,
+    });
+    expect(removed.artifactId).toBe(artifact.id);
+    await expect(call("artifact.get", { id: artifact.id })).rejects.toThrow();
   });
 
   test("streams status updates over WebSocket", async () => {

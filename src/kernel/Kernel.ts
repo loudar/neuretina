@@ -1,4 +1,5 @@
-import { loadConfig, type AppConfig } from "../config/env.ts";
+import { loadConfig, type AppConfig, type Env } from "../config/env.ts";
+import { SettingsService } from "../config/settings.ts";
 import { createLogger, type Logger } from "../core/logger.ts";
 import { errorMessage } from "../core/errors.ts";
 import { EventBus } from "../core/events/EventBus.ts";
@@ -60,6 +61,8 @@ export interface KernelStores {
 
 export interface KernelOverrides {
   config?: AppConfig;
+  /** Environment used for settings precedence; defaults to Bun.env, or {} with a config override. */
+  env?: Env;
   logger?: Logger;
   /** Storage implementation; the composition root is the only place that picks one. */
   stores?: KernelStores;
@@ -84,6 +87,7 @@ export interface Kernel {
   topics: TopicStore;
   briefs: BriefStore;
   jobs: JobStore;
+  settings: SettingsService;
   workflows: WorkflowRegistry;
   runner: WorkflowRunner;
   scheduler: Scheduler;
@@ -97,6 +101,7 @@ export interface Kernel {
 
 export async function createKernel(overrides: KernelOverrides = {}): Promise<Kernel> {
   const config = overrides.config ?? loadConfig();
+  const env = overrides.env ?? (overrides.config ? {} : Bun.env);
   const logger = overrides.logger ?? createLogger("kernel", { level: config.logLevel });
 
   const overridden = overrides.stores ?? {};
@@ -125,27 +130,35 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const topics = overridden.topics ?? new TopicRepository(sqlite());
   const briefs = overridden.briefs ?? new BriefRepository(artifacts);
   const jobs = overridden.jobs ?? new JobRepository(sqlite());
+  const kv = overridden.kv ?? new KeyValueRepository(sqlite());
 
-  const llm =
-    overrides.llm ??
+  // Settings live in the database and are shadowed by the environment; the
+  // boot-time config is the base that database overrides are layered onto.
+  const settings = new SettingsService({ kv, env, config, bus });
+  settings.applyAll();
+
+  // Provider instances are rebuilt whenever a setting changes; consumers get
+  // them through getters (the detour through `bag`), so a swap is picked up
+  // by the next request instead of only after a restart.
+  const llmSessionId = config.llm.sessionId ?? crypto.randomUUID();
+
+  const buildLlm = (): LlmProvider =>
     new OpenAiCompatibleLlmProvider({
       apiKey: config.llm.apiKey,
       baseUrl: config.llm.baseUrl,
       defaultModel: config.llm.model,
       name: "opencode-go",
-      sessionId: config.llm.sessionId,
+      sessionId: llmSessionId,
     });
 
-  const webSearch =
-    overrides.webSearch ??
+  const buildWebSearch = (): SearchProvider =>
     new PerplexitySearchProvider({
       apiKey: config.perplexity.apiKey,
       baseUrl: config.perplexity.baseUrl,
       defaultLimit: config.defaults.searchResultsPerProvider,
     });
 
-  const socialSearch =
-    overrides.socialSearch ??
+  const buildSocialSearch = (): SearchProvider =>
     new BlueskySearchProvider({
       identifier: config.bluesky.identifier,
       appPassword: config.bluesky.appPassword,
@@ -154,16 +167,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       defaultLimit: config.defaults.searchResultsPerProvider,
     });
 
-  const finance =
-    overrides.finance ??
+  const buildFinance = (): FinanceProvider =>
     new PerplexityFinanceProvider({
       apiKey: config.perplexity.apiKey,
       baseUrl: config.perplexity.baseUrl,
       model: config.perplexity.financeModel,
     });
 
-  const tts =
-    overrides.tts ??
+  const buildTts = (): TextToSpeechProvider =>
     new QwenTtsProvider({
       baseUrl: config.qwenTts.baseUrl,
       model: config.qwenTts.model,
@@ -174,15 +185,17 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       apiKey: config.qwenTts.apiKey,
     });
 
-  const matrixClient = new MatrixClient({
-    homeserverUrl: config.matrix.homeserverUrl,
-    accessToken: config.matrix.accessToken,
-    username: config.matrix.username,
-    password: config.matrix.password,
-  });
+  const buildMatrixClient = (): MatrixClient =>
+    new MatrixClient({
+      homeserverUrl: config.matrix.homeserverUrl,
+      accessToken: config.matrix.accessToken,
+      username: config.matrix.username,
+      password: config.matrix.password,
+    });
 
-  const messaging =
-    overrides.messaging ??
+  let matrixClient = buildMatrixClient();
+
+  const buildMessaging = (): MessagingProvider =>
     new MatrixMessagingProvider({
       homeserverUrl: config.matrix.homeserverUrl,
       accessToken: config.matrix.accessToken,
@@ -192,44 +205,79 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       client: matrixClient,
     });
 
+  const bag = {
+    llm: overrides.llm ?? buildLlm(),
+    webSearch: overrides.webSearch ?? buildWebSearch(),
+    socialSearch: overrides.socialSearch ?? buildSocialSearch(),
+    finance: overrides.finance ?? buildFinance(),
+    tts: overrides.tts ?? buildTts(),
+    messaging: overrides.messaging ?? buildMessaging(),
+  };
+
   const statuses = new StatusHub();
   new StatusService({ bus, logger: logger.child("status"), hub: statuses });
 
   const workflows = new WorkflowRegistry({ bus, logger: logger.child("workflows"), statuses });
 
+  // Read through to the live config so setting changes reach running workflows.
+  const researchDefaults = {
+    get recency() {
+      return config.defaults.searchRecency;
+    },
+    get resultsPerProvider() {
+      return config.defaults.searchResultsPerProvider;
+    },
+    get searchDomains() {
+      return config.defaults.searchDomains;
+    },
+    get language() {
+      return config.defaults.briefLanguage;
+    },
+    get followups() {
+      return config.defaults.followups;
+    },
+  };
+
   workflows.register(
     new BriefingWorkflow({
       topics,
       briefs,
-      llm,
-      webSearch,
-      socialSearch,
-      finance,
-      tts,
-      messaging,
       statuses,
-      defaults: {
-        recency: config.defaults.searchRecency,
-        resultsPerProvider: config.defaults.searchResultsPerProvider,
-        searchDomains: config.defaults.searchDomains,
-        language: config.defaults.briefLanguage,
-        followups: config.defaults.followups,
+      defaults: researchDefaults,
+      get llm() {
+        return bag.llm;
+      },
+      get webSearch() {
+        return bag.webSearch;
+      },
+      get socialSearch() {
+        return bag.socialSearch;
+      },
+      get finance() {
+        return bag.finance;
+      },
+      get tts() {
+        return bag.tts;
+      },
+      get messaging() {
+        return bag.messaging;
       },
     }),
   );
 
   workflows.register(
     new QuestionWorkflow({
-      llm,
-      webSearch,
-      socialSearch,
       briefs,
       statuses,
-      defaults: {
-        recency: config.defaults.searchRecency,
-        resultsPerProvider: config.defaults.searchResultsPerProvider,
-        language: config.defaults.briefLanguage,
-        searchDomains: config.defaults.searchDomains,
+      defaults: researchDefaults,
+      get llm() {
+        return bag.llm;
+      },
+      get webSearch() {
+        return bag.webSearch;
+      },
+      get socialSearch() {
+        return bag.socialSearch;
       },
     }),
   );
@@ -271,17 +319,20 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     jobs,
     workflows,
     scheduler,
-    messaging,
-    tts,
     statuses,
+    settings,
+    get tts() {
+      return bag.tts;
+    },
+    get messaging() {
+      return bag.messaging;
+    },
   });
 
-  const kv = overridden.kv ?? new KeyValueRepository(sqlite());
-
-  let chatListener: MatrixCommandListener | null = null;
-  if (config.matrix.chatCommands) {
-    chatListener = new MatrixCommandListener({
-      client: matrixClient,
+  const createChatListener = (client: MatrixClient): MatrixCommandListener | null => {
+    if (!config.matrix.chatCommands) return null;
+    return new MatrixCommandListener({
+      client,
       kv,
       bus,
       logger: logger.child("matrix-chat"),
@@ -293,8 +344,10 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
         workflows,
         runner,
         scheduler,
-        messaging,
         bus,
+        get messaging() {
+          return bag.messaging;
+        },
         logger: logger.child("chat"),
       }),
       onMessage: async (input) => {
@@ -322,7 +375,29 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
         return undefined;
       },
     });
-  }
+  };
+
+  let chatListener = createChatListener(matrixClient);
+
+  // A settings change rebuilds the providers; overridden providers stay put
+  // (tests and embedders own their instances).
+  const refreshProviders = (): void => {
+    if (!overrides.llm) bag.llm = buildLlm();
+    if (!overrides.webSearch) bag.webSearch = buildWebSearch();
+    if (!overrides.socialSearch) bag.socialSearch = buildSocialSearch();
+    if (!overrides.finance) bag.finance = buildFinance();
+    if (!overrides.tts) bag.tts = buildTts();
+    if (!overrides.messaging) {
+      matrixClient = buildMatrixClient();
+      bag.messaging = buildMessaging();
+      chatListener?.stop();
+      chatListener = createChatListener(matrixClient);
+      void chatListener?.start().catch((error) => {
+        logger.error("command listener failed to start", { error: errorMessage(error) });
+      });
+    }
+  };
+  settings.onReload = refreshProviders;
 
   const api = createApiServer({
     config,
@@ -349,11 +424,11 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       config,
       bus,
       logger: logger.child("startup"),
-      llm,
-      webSearch,
-      socialSearch,
-      tts,
-      messaging,
+      llm: bag.llm,
+      webSearch: bag.webSearch,
+      socialSearch: bag.socialSearch,
+      tts: bag.tts,
+      messaging: bag.messaging,
       jobs: scheduler.registeredCount,
       workflows: workflows.list().map((workflow) => workflow.id),
     });
@@ -386,13 +461,18 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     topics,
     briefs,
     jobs,
+    settings,
     workflows,
     runner,
     scheduler,
     commands,
     statuses,
-    messaging,
-    tts,
+    get messaging() {
+      return bag.messaging;
+    },
+    get tts() {
+      return bag.tts;
+    },
     api,
     shutdown,
   };

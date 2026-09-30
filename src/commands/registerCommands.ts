@@ -1,5 +1,6 @@
 import type { AppConfig } from "../config/env.ts";
 import { configStatus } from "../config/env.ts";
+import type { SettingsService } from "../config/settings.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
@@ -34,10 +35,11 @@ export interface CommandDeps {
   messaging: MessagingProvider;
   tts: TextToSpeechProvider;
   statuses: StatusHub;
+  settings: SettingsService;
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, messaging, tts, statuses, config } = deps;
+  const { bus, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, statuses, settings, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -54,6 +56,19 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     matrix: { roomId: config.matrix.roomId },
     bluesky: { pdsUrl: config.bluesky.pdsUrl },
   }));
+
+  router.register("settings.list", () => settings.list());
+
+  // Edits land in the SQLite key/value store; a `.env` value always wins
+  // (settings.list marks those rows as overridden).
+  router.register("settings.set", (payload) => {
+    const record = asRecord(payload);
+    return settings.set(requireString(record, "key"), record.value);
+  });
+
+  router.register("settings.clear", (payload) => {
+    return settings.clear(requireString(asRecord(payload), "key"));
+  });
 
   router.register("topic.list", (payload) => topics.list(optionalString(asRecord(payload), "contextId")));
 
@@ -178,9 +193,10 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("job.run", (payload) => {
     const job = jobs.get(requireString(asRecord(payload), "id"));
+    const runId = crypto.randomUUID();
     // Failures are recorded as job.failed events by the scheduler.
-    void scheduler.runNow(job).catch(() => undefined);
-    return { started: true, jobId: job.id, workflow: job.workflow };
+    void scheduler.runNow(job, runId).catch(() => undefined);
+    return { started: true, jobId: job.id, workflow: job.workflow, runId };
   });
 
   router.register("context.list", () => {
@@ -213,11 +229,46 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     };
   });
 
+  // Deletes a run (and, on request, every artifact it produced). Artifacts
+  // are collected by correlation id, so children (e.g. a brief's audio) are
+  // covered; removing a parent also cascades to anything referencing it.
+  router.register("workflow.run.delete", (payload, context) => {
+    const record = asRecord(payload);
+    const withArtifacts = record.artifacts === true;
+    const run = runs.remove(requireString(record, "id"));
+
+    let removedArtifacts = 0;
+    if (withArtifacts) {
+      for (let round = 0; round < 20; round++) {
+        const batch = artifacts.list({ correlationId: run.id, limit: 500 });
+        if (batch.length === 0) break;
+        for (const artifact of batch) {
+          artifacts.remove(artifact.id);
+          removedArtifacts += 1;
+          bus.publish(
+            "artifact.deleted",
+            { artifactId: artifact.id, kind: artifact.kind },
+            { source: "commands", correlationId: context.correlationId },
+          );
+        }
+      }
+    }
+
+    bus.publish(
+      "workflow.deleted",
+      { correlationId: run.id, workflow: run.workflow, artifacts: removedArtifacts },
+      { source: "commands", correlationId: context.correlationId },
+    );
+    return { ok: true, runId: run.id, artifacts: removedArtifacts };
+  });
+
   router.register("workflow.run", (payload, context) => {
     const record = asRecord(payload);
     const workflow = workflows.get(requireString(record, "id"));
     const input = asOptionalRecord(record, "input") ?? {};
-    // Failures are recorded as workflow.failed events by the runner.
+    // The run id is known before the (async) run starts, so the UI can open
+    // the run immediately; failures are recorded as workflow.failed events.
+    const runId = crypto.randomUUID();
     void runner
       .start({
         workflow: workflow.id,
@@ -225,9 +276,10 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         trigger: "manual",
         input,
         detail: { source: "webhook", correlationId: context.correlationId },
+        runId,
       })
       .catch(() => undefined);
-    return { started: true, workflow: workflow.id };
+    return { started: true, workflow: workflow.id, runId };
   });
 
   router.register("brief.list", (payload) => {
@@ -291,7 +343,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       });
       try {
         status.update("Waiting for the local TTS server");
-        const speech = await tts.synthesize({ text: brief.narration });
+        const speech = await deps.tts.synthesize({ text: brief.narration });
         audioArtifactId = briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
         audio = { audio: speech.data, mimeType: speech.mimeType };
         durationMs = speech.durationMs;
@@ -337,7 +389,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       });
       try {
         sendSpan.update("Waiting for Matrix");
-        const sent = await messaging.send({
+        const sent = await deps.messaging.send({
           kind: "voice",
           audio: audio.audio,
           mimeType: audio.mimeType,
@@ -378,7 +430,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const sent: Array<{ kind: "text" | "voice"; eventId: string }> = [];
 
     const text = buildBriefMessage(brief.markdown, brief.sources);
-    const textMessage = await messaging.send({
+    const textMessage = await deps.messaging.send({
       kind: "text",
       text,
       html: markdownToHtml(text),
@@ -393,7 +445,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
     const audio = briefs.getAudio(id);
     if (audio) {
-      const voice = await messaging.send({
+      const voice = await deps.messaging.send({
         kind: "voice",
         audio: audio.audio,
         mimeType: audio.mimeType,
@@ -427,6 +479,16 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("artifact.get", (payload) => {
     return artifacts.get(requireString(asRecord(payload), "id"));
+  });
+
+  router.register("artifact.search", (payload) => {
+    const record = asRecord(payload);
+    const limit = typeof record.limit === "number" ? record.limit : 100;
+    return artifacts.search(optionalString(record, "query"), {
+      kind: optionalString(record, "kind"),
+      contextId: optionalString(record, "contextId"),
+      limit,
+    });
   });
 
   router.register("artifact.content", (payload) => {
@@ -496,9 +558,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   // Read-only message types: no audit events, so polling cannot feed itself
-  // and the persisted event log only contains real activity.
+  // and the persisted event log only contains real activity. Settings edits
+  // are quiet too: their payload carries secrets, so they are audited through
+  // the value-free `settings.updated` event instead.
   const READ_ONLY_TYPES = [
     "config.get",
+    "settings.list",
+    "settings.set",
+    "settings.clear",
     "context.list",
     "topic.list",
     "job.list",
@@ -510,6 +577,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "brief.audio",
     "artifact.list",
     "artifact.get",
+    "artifact.search",
     "artifact.content",
     "artifact.data",
     "event.pull",

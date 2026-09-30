@@ -2,10 +2,30 @@
   import { Button, TextFieldOutlined } from "m3-svelte";
   import { eventStream } from "../lib/events.svelte";
   import type { DomainEvent } from "../lib/api";
+  import { paths, router } from "../lib/router.svelte";
   import Pane from "./Pane.svelte";
 
-  let filter = $state("");
-  let selectedId = $state<string | null>(null);
+  const route = $derived(router.current);
+  const selectedId = $derived(route.segments[0] ?? null);
+
+  // The topic filter lives in `?topic=`; typing rewrites the current history
+  // entry so back/forward are not flooded with filter states.
+  let filter = $state(route.query.topic ?? "");
+
+  $effect(() => {
+    const query = route.query.topic ?? "";
+    if (query !== filter) filter = query;
+  });
+
+  function setFilter(value: string): void {
+    filter = value;
+    router.navigate(paths.events(selectedId, value.trim() || undefined), { replace: true });
+  }
+
+  function clear(): void {
+    eventStream.clear();
+    router.navigate(paths.events(undefined, filter.trim() || undefined), { replace: true });
+  }
 
   // Newest first, de-duplicated by seq (the feed is append-only but a batch
   // must never be able to break the keyed list).
@@ -33,11 +53,15 @@
 
 <Pane variant="list" title="Live events">
   {#snippet actions()}
-    <Button variant="text" onclick={() => eventStream.clear()}>Clear</Button>
+    <Button variant="text" onclick={clear}>Clear</Button>
   {/snippet}
 
   <div class="filter">
-    <TextFieldOutlined label="Filter by topic" bind:value={filter} />
+    <TextFieldOutlined
+      label="Filter by topic"
+      value={filter}
+      oninput={(event) => setFilter(event.currentTarget.value)}
+    />
   </div>
 
   {#if filtered.length === 0}
@@ -49,7 +73,7 @@
           type="button"
           class="event"
           class:selected={selectedId === event.id}
-          onclick={() => (selectedId = event.id)}
+          onclick={() => router.navigate(paths.events(event.id, filter.trim() || undefined))}
         >
           <span class="time">{formatTime(event.ts)}</span>
           <span class="topic">{event.topic}</span>

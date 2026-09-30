@@ -1,9 +1,7 @@
 <script lang="ts">
-  import { Button, Chip, Icon, ListItem, Select } from "m3-svelte";
-  import iconBolt from "@ktibow/iconset-material-symbols/bolt";
-  import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
+  import { Button, Chip, Dialog, Icon, ListItem, Select } from "m3-svelte";
   import iconChevronRight from "@ktibow/iconset-material-symbols/chevron-right";
-  import iconError from "@ktibow/iconset-material-symbols/error";
+  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import {
@@ -14,25 +12,38 @@
     type WorkflowRunDetail,
     type WorkflowRunInfo,
   } from "../lib/api";
-  import { reportError } from "../lib/feedback";
+  import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
+  import { paths, router } from "../lib/router.svelte";
   import ArtifactDrawer from "./ArtifactDrawer.svelte";
   import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
+  import RunStatusIcon from "./RunStatusIcon.svelte";
   import StatusFeedPanel from "./StatusFeed.svelte";
 
   let contexts = $state<AppContextInfo[]>([]);
   let workflows = $state<WorkflowInfo[]>([]);
   let runs = $state<WorkflowRunInfo[]>([]);
-  let contextFilter = $state("all");
-  let selectedWorkflowId = $state<string | null>(null);
   let selected = $state<WorkflowRunDetail | null>(null);
   let openedArtifact = $state<ArtifactInfo | null>(null);
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
+
+  // URL scheme: /workflows[/:workflowId[/:runId]] with ?context= and ?artifact=.
+  const route = $derived(router.current);
+  const workflowId = $derived(route.segments[0] ?? null);
+  const runId = $derived(route.segments[1] ?? null);
+  const contextFilter = $derived(route.query.context ?? "all");
+
+  let context = $state(contextFilter);
+  $effect(() => {
+    if (contextFilter !== context) context = contextFilter;
+  });
 
   const contextOptions = $derived([
     { text: "All contexts", value: "all" },
-    ...contexts.map((context) => ({ text: context.name, value: context.id })),
+    ...contexts.map((entry) => ({ text: entry.name, value: entry.id })),
   ]);
 
   const visibleWorkflows = $derived(
@@ -40,14 +51,67 @@
   );
 
   const selectedWorkflow = $derived(
-    workflows.find((workflow) => workflow.id === selectedWorkflowId) ?? null,
+    workflows.find((workflow) => workflow.id === workflowId) ?? null,
   );
 
-  async function loadRuns(): Promise<void> {
-    runs = selectedWorkflowId
-      ? await commands.workflows.runs({ workflow: selectedWorkflowId, limit: 50 })
-      : [];
+  /** Query for the current view state; `null` drops the artifact parameter. */
+  function workflowQuery(artifact: string | null = null): { context?: string; artifact?: string } {
+    return {
+      context: contextFilter === "all" ? undefined : contextFilter,
+      artifact: artifact ?? undefined,
+    };
   }
+
+  async function loadRuns(id: string): Promise<void> {
+    try {
+      const loaded = await commands.workflows.runs({ workflow: id, limit: 50 });
+      if (workflowId !== id) return;
+      runs = loaded;
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  async function loadRun(id: string): Promise<void> {
+    try {
+      const detail = await commands.workflows.runGet(id);
+      if (runId !== id) return;
+      selected = detail;
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
+  // The URL owns the drill-down: workflow and run segments drive the loads.
+  $effect(() => {
+    const id = workflowId;
+    openedArtifact = null;
+    selected = null;
+    if (!id) {
+      runs = [];
+      return;
+    }
+    void loadRuns(id);
+  });
+
+  $effect(() => {
+    const id = runId;
+    if (!id) {
+      selected = null;
+      return;
+    }
+    void loadRun(id);
+  });
+
+  $effect(() => {
+    const artifactId = route.query.artifact ?? null;
+    if (!artifactId) {
+      openedArtifact = null;
+      return;
+    }
+    if (!selected) return;
+    openedArtifact = selected.artifacts.find((artifact) => artifact.id === artifactId) ?? null;
+  });
 
   async function refresh(): Promise<void> {
     try {
@@ -55,18 +119,12 @@
         commands.contexts.list(),
         commands.workflows.list(),
       ]);
-      if (selectedWorkflowId && !workflows.some((w) => w.id === selectedWorkflowId)) {
-        selectedWorkflowId = null;
-        selected = null;
+      if (workflowId && !workflows.some((w) => w.id === workflowId)) {
+        router.navigate(paths.workflows(undefined, undefined, workflowQuery()), { replace: true });
+        return;
       }
-      await loadRuns();
-      if (selected) {
-        if (!runs.some((run) => run.id === selected.id)) {
-          selected = null;
-        } else {
-          selected = await commands.workflows.runGet(selected.id);
-        }
-      }
+      if (workflowId) await loadRuns(workflowId);
+      if (runId) await loadRun(runId);
     } catch (error) {
       reportError(error);
     }
@@ -74,46 +132,68 @@
 
   useRefresh(["workflow.", "job.", "artifact.", "context."], refresh);
 
-  $effect(() => {
-    // A context filter that hides the selected workflow clears the selection.
-    if (selectedWorkflowId && !visibleWorkflows.some((w) => w.id === selectedWorkflowId)) {
-      selectedWorkflowId = null;
-      selected = null;
-      runs = [];
-    }
-  });
+  function openWorkflow(id: string): void {
+    router.navigate(paths.workflows(id, undefined, workflowQuery()));
+  }
 
-  async function selectWorkflow(workflow: WorkflowInfo): Promise<void> {
-    if (selectedWorkflowId === workflow.id) return;
-    selectedWorkflowId = workflow.id;
-    selected = null;
-    openedArtifact = null;
-    try {
-      await loadRuns();
-    } catch (error) {
-      reportError(error);
-    }
+  function selectContext(value: string): void {
+    context = value;
+    router.navigate(
+      paths.workflows(workflowId, runId, {
+        context: value === "all" ? undefined : value,
+        artifact: route.query.artifact,
+      }),
+      { replace: true },
+    );
   }
 
   async function runNow(id: string): Promise<void> {
     try {
-      await commands.workflows.run(id, {}, contextFilter === "all" ? undefined : contextFilter);
+      const result = await commands.workflows.run(
+        id,
+        {},
+        contextFilter === "all" ? undefined : contextFilter,
+      );
+      // Jump straight to the fresh run so its activity can be watched live.
+      router.navigate(paths.workflows(result.workflow, result.runId, workflowQuery()));
     } catch (error) {
       reportError(error);
     }
   }
 
-  async function selectRun(run: WorkflowRunInfo): Promise<void> {
-    if (selected?.id === run.id) {
-      selected = null;
-      openedArtifact = null;
+  function openRun(id: string): void {
+    if (runId === id) {
+      router.navigate(paths.workflows(workflowId, undefined, workflowQuery()));
       return;
     }
+    router.navigate(paths.workflows(workflowId, id, workflowQuery()));
+  }
+
+  function openArtifact(artifact: ArtifactInfo): void {
+    router.navigate(
+      paths.workflows(workflowId, runId, workflowQuery(artifact.id)),
+    );
+  }
+
+  function closeArtifact(): void {
+    router.navigate(paths.workflows(workflowId, runId, workflowQuery()), { replace: true });
+  }
+
+  async function deleteRun(withArtifacts: boolean): Promise<void> {
+    if (!selected || deleting) return;
+    const run = selected;
+    deleting = true;
     try {
-      selected = await commands.workflows.runGet(run.id);
-      openedArtifact = null;
+      await commands.workflows.removeRun(run.id, withArtifacts);
+      confirmingDelete = false;
+      router.navigate(paths.workflows(workflowId, undefined, workflowQuery()), { replace: true });
+      reportSuccess(
+        `Run ${run.id.slice(0, 8)} deleted${withArtifacts ? ` with ${run.artifacts.length} artifact(s)` : ""}`,
+      );
     } catch (error) {
       reportError(error);
+    } finally {
+      deleting = false;
     }
   }
 
@@ -133,16 +213,6 @@
     return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
   }
 
-  function statusChip(status: WorkflowRunInfo["status"]): {
-    icon: string;
-    label: string;
-  } {
-    if (status === "running") return { icon: iconBolt, label: "running" };
-    if (status === "failed") return { icon: iconError, label: "failed" };
-    if (status === "skipped") return { icon: iconSchedule, label: "skipped" };
-    return { icon: iconCheck, label: "done" };
-  }
-
   function outputPreview(run: WorkflowRunDetail): string {
     if (run.error) return run.error;
     if (run.output === undefined || run.output === null) return "–";
@@ -156,14 +226,19 @@
 
 <Pane variant="list" width="19rem" title="Workflows">
   <div class="filters">
-    <Select label="Context" options={contextOptions} bind:value={contextFilter} />
+    <Select
+      label="Context"
+      options={contextOptions}
+      value={context}
+      onchange={(event) => selectContext(event.currentTarget.value)}
+    />
   </div>
 
   <DataList items={visibleWorkflows} empty="No workflows in this context.">
     {#snippet children(workflow)}
-      <div class="entry" class:selected={selectedWorkflowId === workflow.id}>
+      <div class="entry" class:selected={workflowId === workflow.id}>
         <ListItem
-          onclick={() => selectWorkflow(workflow)}
+          onclick={() => openWorkflow(workflow.id)}
           overline={workflow.contextId ?? "default context"}
           headline={workflow.id}
           supporting={`${workflow.description} · triggers ${workflow.triggers.join(", ") || "none"}`}
@@ -192,20 +267,15 @@
   {#if selectedWorkflow}
     <DataList items={runs} empty="No runs for this workflow yet.">
       {#snippet children(run)}
-        <div class="entry" class:selected={selected?.id === run.id}>
+        <div class="entry" class:selected={runId === run.id}>
           <ListItem
-            onclick={() => selectRun(run)}
+            onclick={() => openRun(run.id)}
             overline={triggerLabel(run)}
             headline={`${run.workflow} · ${run.contextId}`}
             supporting={`${formatDateTime(run.startedAt)} · ${durationLabel(run)}`}
           >
             {#snippet leading()}
-              <Icon icon={statusChip(run.status).icon} />
-            {/snippet}
-            {#snippet trailing()}
-              <Chip variant="assist" icon={statusChip(run.status).icon}>
-                {statusChip(run.status).label}
-              </Chip>
+              <RunStatusIcon status={run.status} />
             {/snippet}
           </ListItem>
         </div>
@@ -225,12 +295,19 @@
 >
   {#snippet actions()}
     {#if selected}
-      <Chip variant="assist" icon={statusChip(selected.status).icon}>
-        {statusChip(selected.status).label}
-      </Chip>
+      <RunStatusIcon status={selected.status} size={20} />
       <Chip variant="assist" icon={iconSchedule}>
         {formatRelativeTime(selected.startedAt)}
       </Chip>
+      <Button
+        variant="text"
+        iconType="full"
+        title="Delete run"
+        onclick={() => (confirmingDelete = true)}
+        disabled={deleting}
+      >
+        <Icon icon={iconDelete} />
+      </Button>
     {/if}
   {/snippet}
 
@@ -248,7 +325,7 @@
       {#snippet children(artifact)}
         <div class="entry" class:selected={openedArtifact?.id === artifact.id}>
           <ListItem
-            onclick={() => (openedArtifact = artifact)}
+            onclick={() => openArtifact(artifact)}
             overline={artifact.kind}
             headline={artifact.name ?? artifact.id.slice(0, 8)}
             supporting={`${artifact.contentType} · ${formatDateTime(artifact.createdAt)}`}
@@ -265,8 +342,31 @@
   {/if}
 </Pane>
 
+<Dialog headline="Delete this run?" bind:open={confirmingDelete}>
+  <p>
+    Run {selected?.id.slice(0, 8)} ({selected?.workflow}) will be removed from the history.
+    {#if (selected?.artifacts.length ?? 0) > 0}
+      Delete the {selected?.artifacts.length} artifact(s) it produced as well? Artifacts that are
+      kept stay available in the Artifacts tab.
+    {:else}
+      It produced no artifacts.
+    {/if}
+  </p>
+  {#snippet buttons()}
+    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
+      Cancel
+    </Button>
+    <Button variant="text" onclick={() => deleteRun(false)} disabled={deleting}>
+      Keep artifacts
+    </Button>
+    <Button variant="filled" onclick={() => deleteRun(true)} disabled={deleting}>
+      Delete artifacts too
+    </Button>
+  {/snippet}
+</Dialog>
+
 {#if openedArtifact}
-  <ArtifactDrawer artifact={openedArtifact} onclose={() => (openedArtifact = null)} />
+  <ArtifactDrawer artifact={openedArtifact} onclose={closeArtifact} />
 {/if}
 
 <style>

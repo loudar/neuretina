@@ -347,9 +347,25 @@ Only truly custom pieces are hand-styled (the dense event log and the audio elem
 those use the M3 design tokens.
 
 The whole app is a full-width three-pane layout: a navigation rail on the left (sections plus a
-single engine-health pill — green when every integration is configured and the event stream is
-live, red when anything is down), a content list in the middle, and a details pane on the right.
+single engine-health pill — green `Online` when the event stream is live and every integration is
+configured, amber `Partial` when the stream is live but integrations are missing, red `Offline`
+when the live event stream is down), a content list in the middle, and a details pane on the right.
 Lists never overflow their rows: long names, overlines and supporting lines ellipsize.
+
+The **Settings tab** edits integration keys, URLs, models and research defaults. Values are stored
+in the SQLite key/value store and applied immediately (the kernel rebuilds its providers on save).
+The environment always wins: a `.env` variable shadows the database value, rows overridden this way
+show an amber warning icon (hover explains which variable wins), and **Reset** deletes the stored
+override so the value falls back to `.env` or the built-in default.
+
+**Every navigation state lives in the URL** (`web/src/lib/router.svelte.ts`, history API, no hash):
+the active tab, the open item and the filters are path segments and query parameters, e.g.
+`/briefs/<id>?source=…`, `/topics/<id>`, `/jobs/<id>`, `/artifacts/<id>?q=…`,
+`/events/<id>?topic=…` and `/workflows/<workflow>/<run>?context=…&artifact=…`. Links are shareable —
+opening a workflow-run or artifact URL lands directly on it — and browser back/forward work
+throughout. **Run now** (Briefs, Scheduled tasks and Workflows) jumps straight to the new run, so
+its live activity starts streaming without any extra clicks; `workflow.run` / `job.run` return the
+run id before the run finishes so the UI can navigate to it.
 
 The Briefs list shows each brief with colour-coded badges (topic count, source count, audio
 availability). The details view shows the full summary, plays the stored audio, offers
@@ -358,7 +374,17 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
 
 The Workflows tab shows contexts, workflow definitions (with **Run now**), recent runs and — when
 you open a run — its live per-run activity feed, output/error preview and the artifacts it
-produced. The Activity card at the top keeps showing the live overview of everything running.
+produced. Run status is shown as a single icon: a spinner while running, a green check when done,
+a grey skip icon when nothing was found, a red error icon when it failed. A run can be deleted
+behind a confirmation dialog that asks whether its artifacts should go with it (kept artifacts
+stay in the Artifacts tab). The Activity card at the top keeps showing the live overview of
+everything running.
+
+The Artifacts tab lists every workflow output with a text search over content, names and metadata.
+Opening an artifact renders it (markdown briefs with citation pills, inline audio, image previews,
+text or metadata) and offers **Open run** to jump to the run that produced it and **Delete** to
+remove it (children like a brief's audio go with it). The same view backs the artifact drawer in
+the Workflows tab.
 
 ## Topics and scheduled tasks
 
@@ -434,6 +460,10 @@ message to its handler. Handler results come back **in the same HTTP response**:
 { "ok": true, "type": "topic.create", "correlationId": "…", "result": { "id": "…" } }
 ```
 
+Triggers answer before the work is done: `workflow.run` and `job.run` return
+`{ started: true, runId, … }` — the run is persisted synchronously, so the id can be fetched
+(`workflow.run.get`) or linked right away.
+
 Errors use proper status codes (`400` validation, `404` unknown type, `502` provider failure) with
 `{ "ok": false, "error": "…", "code": "…" }`. Types starting with `hook.*` are fire-and-forget:
 they are forwarded to the bus as `hook.<channel>` events and answered with `202`.
@@ -442,13 +472,15 @@ they are forwarded to the bus as `hook.<channel>` events and answered with `202`
 and `event.wait` — a long-poll that returns as soon as an event newer than `since` exists, or an
 empty list after `timeoutMs` (max 55s). The UI loops on `event.wait`, which keeps the feed live
 without any streaming connection. Read-only message types (`event.*`, `*.list`, `*.get`,
-`brief.audio`, `config.get`) are "quiet": they generate no audit events, so polling can never feed
-itself.
+`artifact.search`, `brief.audio`, `config.get`) are "quiet": they generate no audit events, so
+polling can never feed
+itself. Settings edits (`settings.set/clear`) are quiet too — their payload carries secrets, so the
+change is audited through the value-free `settings.updated` event instead.
 
-Built-in message types: `config.get`, `context.list`, `topic.list/create/update/delete`,
-`job.list/create/update/delete/run`, `workflow.list/run/run.list/run.get`,
-`brief.list/get/audio/audio.generate/send/delete`,
-`artifact.list/get/content/data/delete`, `event.pull/wait`. Adding one is
+Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
+`topic.list/create/update/delete`, `job.list/create/update/delete/run`,
+`workflow.list/run/run.list/run.get/run.delete`, `brief.list/get/audio/audio.generate/send/delete`,
+`artifact.list/search/get/content/data/delete`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
 ## Live activity feed (WebSocket)
@@ -496,9 +528,11 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 
 ## Events
 
-Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.*`, `agent.*` (including
+Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.started/finished/failed/deleted`,
+`agent.*` (including
 `agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `brief.*`, `tts.synthesized`,
-`message.voice.sent`, `hook.received`, `chat.*` (commands, `chat.message.received` for every allowed
+`message.voice.sent`, `settings.updated`, `hook.received`, `chat.*` (commands,
+`chat.message.received` for every allowed
 message, and follow-up Q&A), `system.*`. Events are
 persisted in SQLite (`events` table) and read back through the webhook via `event.pull` /
 `event.wait`, which is what makes the Svelte live view resumable.

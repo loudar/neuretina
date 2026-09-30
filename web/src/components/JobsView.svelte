@@ -10,6 +10,7 @@
   import { reportError } from "../lib/feedback";
   import { formatDateTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
+  import { paths, router } from "../lib/router.svelte";
   import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
 
@@ -21,7 +22,6 @@
 
   let jobs = $state<ScheduledJob[]>([]);
   let workflows = $state<WorkflowInfo[]>([]);
-  let selectedId = $state<string | null>(null);
   let busy = $state(false);
   let saving = $state(false);
   let running = $state(false);
@@ -35,8 +35,24 @@
   let editName = $state("");
   let editCron = $state("");
 
-  const selected = $derived(jobs.find((job) => job.id === selectedId) ?? null);
+  const route = $derived(router.current);
+  const jobId = $derived(route.segments[0] ?? null);
+  const selected = $derived(jobs.find((job) => job.id === jobId) ?? null);
   const workflowOptions = $derived(workflows.map((entry) => ({ text: entry.id, value: entry.id })));
+
+  // Seed the edit fields when a different job is opened; a background refresh
+  // of the list must not clobber unsaved edits.
+  let editedJobId: string | null = null;
+  $effect(() => {
+    if (!selected) {
+      editedJobId = null;
+      return;
+    }
+    if (editedJobId === selected.id) return;
+    editedJobId = selected.id;
+    editName = selected.name;
+    editCron = selected.cron;
+  });
 
   async function refresh(): Promise<void> {
     try {
@@ -44,8 +60,8 @@
       if (workflows.length > 0 && !workflows.some((entry) => entry.id === workflow)) {
         workflow = workflows[0]!.id;
       }
-      if (selectedId && !jobs.some((job) => job.id === selectedId)) {
-        selectedId = null;
+      if (jobId && !jobs.some((job) => job.id === jobId)) {
+        router.navigate(paths.jobs(), { replace: true });
       }
     } catch (error) {
       reportError(error);
@@ -79,9 +95,7 @@
   }
 
   function select(job: ScheduledJob): void {
-    selectedId = job.id;
-    editName = job.name;
-    editCron = job.cron;
+    router.navigate(paths.jobs(job.id));
   }
 
   async function save(): Promise<void> {
@@ -119,7 +133,9 @@
     if (!selected || running) return;
     running = true;
     try {
-      await commands.jobs.run(selected.id);
+      const result = await commands.jobs.run(selected.id);
+      // Jump to the fresh run so its activity can be watched live.
+      router.navigate(paths.workflows(result.workflow, result.runId));
     } catch (error) {
       reportError(error);
     } finally {
@@ -130,8 +146,8 @@
   async function remove(): Promise<void> {
     if (!selected) return;
     const target = selected;
+    router.navigate(paths.jobs());
     try {
-      selectedId = null;
       await commands.jobs.remove(target.id);
     } catch (error) {
       reportError(error);
@@ -173,7 +189,7 @@
 
   <DataList items={jobs} empty="No scheduled tasks.">
     {#snippet children(job)}
-      <div class="entry" class:selected={selectedId === job.id} class:disabled={!job.enabled}>
+      <div class="entry" class:selected={jobId === job.id} class:disabled={!job.enabled}>
         <ListItem
           onclick={() => select(job)}
           overline={job.enabled ? "enabled" : "disabled"}

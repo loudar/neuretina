@@ -3,30 +3,38 @@
   import { Chip, NavigationRail, NavigationRailItem, Snackbar } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
+  import iconCategory from "@ktibow/iconset-material-symbols/category";
   import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconHistory from "@ktibow/iconset-material-symbols/history";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
-  import { commands, type AppConfigInfo } from "./lib/api";
+  import iconSettings from "@ktibow/iconset-material-symbols/settings";
+  import iconWarning from "@ktibow/iconset-material-symbols/warning";
   import { eventStream } from "./lib/events.svelte";
   import { statusFeed } from "./lib/statuses.svelte";
+  import { configState } from "./lib/config.svelte";
+  import { paths, router } from "./lib/router.svelte";
   import BriefsView from "./components/BriefsView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
   import JobsView from "./components/JobsView.svelte";
   import WorkflowsView from "./components/WorkflowsView.svelte";
+  import ArtifactsView from "./components/ArtifactsView.svelte";
   import EventsView from "./components/EventsView.svelte";
+  import SettingsView from "./components/SettingsView.svelte";
 
-  let tab = $state("briefs");
-  let config = $state<AppConfigInfo | null>(null);
+  const tab = $derived(router.current.tab);
+  const config = $derived(configState.value);
 
   const nav = [
     { label: "Briefs", value: "briefs", icon: iconArticle },
     { label: "Topics", value: "topics", icon: iconLabel },
     { label: "Scheduled tasks", value: "jobs", icon: iconSchedule },
     { label: "Workflows", value: "workflows", icon: iconBolt },
+    { label: "Artifacts", value: "artifacts", icon: iconCategory },
     { label: "Live events", value: "events", icon: iconHistory },
-  ];
+    { label: "Settings", value: "settings", icon: iconSettings },
+  ] as const;
 
   const integrations = $derived(
     config
@@ -40,7 +48,9 @@
       : [],
   );
 
-  // One pill for the whole engine: green when everything is up, red otherwise.
+  // One pill for the whole engine: green when the event stream is live and
+  // every integration is configured, amber when the stream is live but some
+  // integrations are missing, red when the event stream is down.
   const health = $derived.by(() => {
     const down = integrations.filter((integration) => !integration.ok).map((i) => i.label);
     if (!config) {
@@ -55,8 +65,8 @@
     }
     if (down.length > 0) {
       return {
-        state: "down" as const,
-        label: "Offline",
+        state: "partial" as const,
+        label: "Partial",
         detail: `Not configured: ${down.join(", ")}`,
       };
     }
@@ -70,12 +80,7 @@
   onMount(() => {
     eventStream.start();
     statusFeed.start();
-    void commands
-      .config()
-      .then((loaded) => (config = loaded))
-      .catch(() => {
-        config = null;
-      });
+    void configState.load();
     return () => {
       eventStream.stop();
       statusFeed.stop();
@@ -96,13 +101,20 @@
         label={item.label}
         icon={item.icon}
         active={tab === item.value}
-        onclick={() => (tab = item.value)}
+        onclick={() => router.navigate(paths.tab(item.value))}
       />
     {/each}
 
     <div class="rail-footer">
       <span class="health {health.state}" title={health.detail}>
-        <Chip variant="assist" icon={health.state === "up" ? iconCheck : iconError}>
+        <Chip
+          variant="assist"
+          icon={health.state === "up"
+            ? iconCheck
+            : health.state === "partial"
+              ? iconWarning
+              : iconError}
+        >
           {health.label}
         </Chip>
       </span>
@@ -117,6 +129,10 @@
     <JobsView defaultCron={config?.defaults.briefCron} />
   {:else if tab === "workflows"}
     <WorkflowsView />
+  {:else if tab === "artifacts"}
+    <ArtifactsView />
+  {:else if tab === "settings"}
+    <SettingsView />
   {:else}
     <EventsView />
   {/if}
@@ -166,6 +182,15 @@
   }
 
   .health.up :global(button.m3-container .leading) {
+    color: inherit;
+  }
+
+  .health.partial :global(button.m3-container) {
+    background-color: var(--m3c-tertiary-container);
+    color: var(--m3c-on-tertiary-container);
+  }
+
+  .health.partial :global(button.m3-container .leading) {
     color: inherit;
   }
 

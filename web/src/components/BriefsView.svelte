@@ -16,6 +16,7 @@
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
+  import { paths, router } from "../lib/router.svelte";
   import {
     domainInitial,
     filterSources,
@@ -35,7 +36,22 @@
   let deleting = $state(false);
   let generating = $state(false);
   let voiceEnabled = $state(true);
-  let sourceFilter = $state("");
+
+  const route = $derived(router.current);
+  const briefId = $derived(route.segments[0] ?? null);
+
+  // The source filter lives in `?source=`; typing rewrites the current
+  // history entry so back/forward are not flooded with filter states.
+  let sourceFilter = $state(route.query.source ?? "");
+  $effect(() => {
+    const query = route.query.source ?? "";
+    if (query !== sourceFilter) sourceFilter = query;
+  });
+
+  function setSourceFilter(value: string): void {
+    sourceFilter = value;
+    router.navigate(paths.briefs(briefId, { source: value.trim() || undefined }), { replace: true });
+  }
 
   const filteredSources = $derived(filterSources(selected?.sources ?? [], sourceFilter));
   const sourceGroups = $derived(groupSourcesByDomain(filteredSources));
@@ -52,14 +68,15 @@
     }
   }
 
-  async function select(id: string): Promise<void> {
+  async function loadBrief(id: string): Promise<void> {
     try {
       const brief = await commands.briefs.get(id);
+      if (briefId !== id) return;
       selected = brief;
       audioUrl = null;
-      sourceFilter = "";
       if (brief.hasAudio) {
         const audio = await commands.briefs.audio(id);
+        if (briefId !== id) return;
         audioUrl = audio?.dataUrl ?? null;
       }
     } catch (error) {
@@ -67,10 +84,23 @@
     }
   }
 
+  // The URL owns the selection: /briefs/<id> loads the brief, /briefs clears it.
+  $effect(() => {
+    const id = briefId;
+    if (!id) {
+      selected = null;
+      audioUrl = null;
+      return;
+    }
+    void loadBrief(id);
+  });
+
   async function runNow(): Promise<void> {
     busy = true;
     try {
-      await commands.workflows.run("briefing", { generateAudio: voiceEnabled });
+      const run = await commands.workflows.run("briefing", { generateAudio: voiceEnabled });
+      // Jump to the fresh run so its activity can be watched live.
+      router.navigate(paths.workflows(run.workflow, run.runId));
     } catch (error) {
       reportError(error);
     } finally {
@@ -108,11 +138,11 @@
 
   async function deleteSelected(): Promise<void> {
     if (!selected || deleting) return;
+    const target = selected;
     deleting = true;
+    router.navigate(paths.briefs());
     try {
-      await commands.briefs.remove(selected.id);
-      selected = null;
-      audioUrl = null;
+      await commands.briefs.remove(target.id);
       confirmingDelete = false;
       reportSuccess("Brief deleted");
     } catch (error) {
@@ -122,17 +152,19 @@
     }
   }
 
-  useRefresh(["brief.generated", "tts.synthesized", "message.voice.sent", "brief.deleted"], async () => {
-    await refreshList();
-    if (!selected) return;
-    // The selected brief may have been deleted (here or elsewhere).
-    if (!briefs.some((brief) => brief.id === selected?.id)) {
-      selected = null;
-      audioUrl = null;
-      return;
-    }
-    await select(selected.id);
-  });
+  useRefresh(
+    ["brief.generated", "tts.synthesized", "message.voice.sent", "brief.deleted", "artifact.deleted"],
+    async () => {
+      await refreshList();
+      if (!briefId) return;
+      // The open brief may have been deleted (here or elsewhere).
+      if (!briefs.some((brief) => brief.id === briefId)) {
+        router.navigate(paths.briefs(), { replace: true });
+        return;
+      }
+      await loadBrief(briefId);
+    },
+  );
 </script>
 
 <Pane variant="list" title="Briefs">
@@ -158,7 +190,7 @@
   <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
     {#snippet children(brief)}
       <div class="entry" class:selected={selected?.id === brief.id}>
-        <button type="button" class="brief-row" onclick={() => select(brief.id)}>
+        <button type="button" class="brief-row" onclick={() => router.navigate(paths.briefs(brief.id))}>
           <span class="brief-date">{formatListDate(brief.createdAt)}</span>
           <span class="badges">
             <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
@@ -235,9 +267,10 @@
         <TextFieldOutlined
           label="Filter sources"
           leadingIcon={iconSearch}
-          bind:value={sourceFilter}
+          value={sourceFilter}
+          oninput={(event) => setSourceFilter(event.currentTarget.value)}
           trailing={filtering
-            ? { icon: iconClose, onclick: () => (sourceFilter = "") }
+            ? { icon: iconClose, onclick: () => setSourceFilter("") }
             : undefined}
         />
         {#if sourceGroups.length === 0}

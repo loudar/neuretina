@@ -5,6 +5,7 @@ import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 
 function db(): SqliteDatabase {
   return new SqliteDatabase(":memory:");
@@ -176,5 +177,23 @@ describe("BriefRepository", () => {
     expect(repo.list()).toHaveLength(0);
     expect(repo.getAudio(brief.id)).toBeNull();
     expect(() => repo.remove(brief.id)).toThrow(/not found/);
+  });
+});
+
+describe("WorkflowRunRepository", () => {
+  test("removes runs and reports missing ones", () => {
+    const repo = new WorkflowRunRepository(db());
+    const run = repo.create({
+      workflow: "briefing",
+      contextId: "morning-briefing",
+      trigger: "manual",
+    });
+
+    expect(repo.list()).toHaveLength(1);
+    const removed = repo.remove(run.id);
+    expect(removed.id).toBe(run.id);
+    expect(repo.list()).toHaveLength(0);
+    expect(() => repo.get(run.id)).toThrow(/not found/);
+    expect(() => repo.remove(run.id)).toThrow(/not found/);
   });
 });

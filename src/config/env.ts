@@ -103,7 +103,7 @@ export interface AppConfig {
   };
 }
 
-type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined>;
 
 function str(env: Env, name: string, fallback?: string): string | undefined {
   const value = env[name];
