@@ -228,7 +228,7 @@
   );
 </script>
 
-<Pane variant="list" title="Briefs" storageKey="briefs">
+<Pane variant="list" title="Briefs">
   {#snippet actions()}
     <label
       class="voice-toggle"

@@ -167,7 +167,7 @@
   }
 </script>
 
-<Pane variant="list" title="Scheduled tasks" storageKey="jobs">
+<Pane variant="list" title="Scheduled tasks">
   <div class="add-form">
     <TextFieldOutlined label="Name" bind:value={name} />
     <TextFieldOutlined label="Cron expression" bind:value={cron} enter={create} />

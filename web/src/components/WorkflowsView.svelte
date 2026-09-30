@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Button, Chip, Dialog, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Chip, Dialog, Icon, ListItem, Select, VariableTabs } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconChevronRight from "@ktibow/iconset-material-symbols/chevron-right";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
-  import iconEdit from "@ktibow/iconset-material-symbols/edit";
+  import iconHistory from "@ktibow/iconset-material-symbols/history";
+  import iconInfo from "@ktibow/iconset-material-symbols/info";
   import iconPayments from "@ktibow/iconset-material-symbols/payments";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
@@ -12,7 +13,6 @@
     type AppContextInfo,
     type ArtifactInfo,
     type DeliveryChannelInfo,
-    type DeliveryChannelType,
     type DeliveryRecord,
     type DeliveryWorkflowInfo,
     type Topic,
@@ -29,6 +29,7 @@
   import Pane from "./Pane.svelte";
   import RunStatusIcon from "./RunStatusIcon.svelte";
   import StatusFeedPanel from "./StatusFeed.svelte";
+  import WorkflowForm from "./WorkflowForm.svelte";
 
   let contexts = $state<AppContextInfo[]>([]);
   let workflows = $state<WorkflowInfo[]>([]);
@@ -43,21 +44,36 @@
 
   let topics = $state<Topic[]>([]);
   let channels = $state<DeliveryChannelInfo[]>([]);
-  let editorOpen = $state(false);
-  let editingId = $state<string | null>(null);
+
+  /** Active tab right of the workflow list; a run in the URL opens on Runs. */
+  let tab = $state(router.current.segments[1] ? "runs" : "details");
+
+  // Details tab editor. `editorId` records which workflow the fields hold;
+  // the *Base* shadows are the saved values the dirty check compares against.
+  let editorId = $state<string | null>(null);
   let editorName = $state("");
   let editorTopicIds = $state<string[]>([]);
   let editorChannelIds = $state<string[]>([]);
+  let editorBaseName = $state("");
+  let editorBaseTopicIds = $state<string[]>([]);
+  let editorBaseChannelIds = $state<string[]>([]);
+  let editorLoading = $state(false);
   let savingWorkflow = $state(false);
+
+  // New-workflow dialog state; kept apart so it cannot clobber the editor.
+  let createOpen = $state(false);
+  let newName = $state("");
+  let newTopicIds = $state<string[]>([]);
+  let newChannelIds = $state<string[]>([]);
+
   let confirmingDeleteWorkflow = $state(false);
   let deleteWorkflowTarget = $state<WorkflowInfo | null>(null);
   let deletingWorkflow = $state(false);
 
-  const TYPE_LABELS: Record<DeliveryChannelType, string> = {
-    matrix: "Matrix",
-    discord: "Discord",
-    email: "Email",
-  };
+  const TAB_ITEMS = [
+    { name: "Details", value: "details", icon: iconInfo },
+    { name: "Runs", value: "runs", icon: iconHistory },
+  ];
 
   // URL scheme: /workflows[/:workflowId[/:runId]] with ?context=.
   const route = $derived(router.current);
@@ -83,6 +99,14 @@
     workflows.find((workflow) => workflow.id === workflowId) ?? null,
   );
 
+  const selectedEditable = $derived(selectedWorkflow !== null && isEditable(selectedWorkflow));
+
+  const selectedResettable = $derived(
+    selectedWorkflow !== null && isBriefingReset(selectedWorkflow),
+  );
+
+  const selectedUser = $derived(selectedWorkflow !== null && selectedWorkflow.user === true);
+
   const userWorkflowInfo = $derived.by(() => {
     const map = new Map<string, UserWorkflowInfo>();
     for (const entry of userWorkflows) map.set(entry.id, entry);
@@ -95,10 +119,30 @@
     return map;
   });
 
-  const canSaveWorkflow = $derived.by(() => {
-    if (savingWorkflow || !editorName.trim()) return false;
-    return editorTopicIds.length > 0;
+  const editorReady = $derived(
+    selectedWorkflow !== null && editorId === selectedWorkflow.id && !editorLoading,
+  );
+
+  const editorDirty = $derived.by(() => {
+    if (!editorReady) return false;
+    return (
+      editorName.trim() !== editorBaseName ||
+      !sameIds(editorTopicIds, editorBaseTopicIds) ||
+      !sameIds(editorChannelIds, editorBaseChannelIds)
+    );
   });
+
+  const canSaveWorkflow = $derived(
+    editorReady &&
+      editorDirty &&
+      !savingWorkflow &&
+      editorName.trim() !== "" &&
+      editorTopicIds.length > 0,
+  );
+
+  const canCreateWorkflow = $derived(
+    !savingWorkflow && newName.trim() !== "" && newTopicIds.length > 0,
+  );
 
   const resettingBriefing = $derived(
     deleteWorkflowTarget !== null && isBriefingReset(deleteWorkflowTarget),
@@ -139,6 +183,43 @@
     }
   }
 
+  // Seeds the details editor with the workflow's saved settings.
+  async function loadEditor(workflow: WorkflowInfo): Promise<void> {
+    const id = workflow.id;
+    const info = userWorkflowInfo.get(id);
+    editorId = id;
+    editorLoading = true;
+    try {
+      const [loadedTopics, loadedChannels, attached] = await Promise.all([
+        commands.topics.list(),
+        commands.delivery.channels(),
+        commands.delivery.workflows(),
+      ]);
+      if (workflowId !== id) return;
+      topics = loadedTopics;
+      channels = loadedChannels;
+      const presetTopicIds = info?.topicIds ?? workflow.topicIds;
+      // The un-customized briefing covers all topics until a customization pins them.
+      let topicIds = presetTopicIds ? [...presetTopicIds] : [];
+      if (!presetTopicIds && id === "briefing") {
+        topicIds = loadedTopics.map((topic) => topic.id);
+      }
+      const channelIds = [
+        ...(attached.find((entry) => entry.workflow === id)?.channelIds ?? []),
+      ];
+      editorName = info?.name ?? id;
+      editorTopicIds = topicIds;
+      editorChannelIds = channelIds;
+      editorBaseName = editorName;
+      editorBaseTopicIds = [...topicIds];
+      editorBaseChannelIds = [...channelIds];
+    } catch (error) {
+      reportError(error);
+    } finally {
+      if (editorId === id) editorLoading = false;
+    }
+  }
+
   // The URL owns the drill-down: workflow and run segments drive the loads.
   $effect(() => {
     const id = workflowId;
@@ -167,6 +248,18 @@
       return;
     }
     void loadDeliveries(run.id);
+  });
+
+  // Seed the editor when a different workflow is selected; a background
+  // refresh of the list must not clobber unsaved edits.
+  $effect(() => {
+    const workflow = selectedWorkflow;
+    if (!workflow) {
+      editorId = null;
+      return;
+    }
+    if (editorId === workflow.id) return;
+    void loadEditor(workflow);
   });
 
   async function refresh(): Promise<void> {
@@ -229,6 +322,7 @@
         contextFilter === "all" ? undefined : contextFilter,
       );
       // Jump straight to the fresh run so its activity can be watched live.
+      tab = "runs";
       router.navigate(paths.workflows(result.workflow, result.runId, workflowQuery()));
     } catch (error) {
       reportError(error);
@@ -236,91 +330,77 @@
   }
 
   async function openCreate(): Promise<void> {
-    editingId = null;
-    editorName = "";
-    editorTopicIds = [];
-    editorChannelIds = [];
+    newName = "";
+    newTopicIds = [];
+    newChannelIds = [];
     try {
       [topics, channels] = await Promise.all([
         commands.topics.list(),
         commands.delivery.channels(),
       ]);
-      editorOpen = true;
+      createOpen = true;
     } catch (error) {
       reportError(error);
     }
   }
 
-  async function openEdit(workflow: WorkflowInfo): Promise<void> {
-    editingId = workflow.id;
-    const info = userWorkflowInfo.get(workflow.id);
-    editorName = info?.name ?? workflow.id;
-    const presetTopicIds = info?.topicIds ?? workflow.topicIds;
-    editorTopicIds = [...(presetTopicIds ?? [])];
-    try {
-      const [loadedTopics, loadedChannels, attached] = await Promise.all([
-        commands.topics.list(),
-        commands.delivery.channels(),
-        commands.delivery.workflows(),
-      ]);
-      topics = loadedTopics;
-      channels = loadedChannels;
-      // The un-customized briefing covers all topics until a customization pins them.
-      if (!presetTopicIds && workflow.id === "briefing") {
-        editorTopicIds = loadedTopics.map((topic) => topic.id);
-      }
-      const channelIds = attached.find((entry) => entry.workflow === workflow.id)?.channelIds ?? [];
-      editorChannelIds = [...channelIds];
-      editorOpen = true;
-    } catch (error) {
-      reportError(error);
-    }
-  }
-
-  function toggleTopic(id: string): void {
-    editorTopicIds = editorTopicIds.includes(id)
-      ? editorTopicIds.filter((entry) => entry !== id)
-      : [...editorTopicIds, id];
-  }
-
-  function toggleChannel(id: string): void {
-    editorChannelIds = editorChannelIds.includes(id)
-      ? editorChannelIds.filter((entry) => entry !== id)
-      : [...editorChannelIds, id];
+  function isEditable(workflow: WorkflowInfo): boolean {
+    return workflow.user === true || workflow.id === "briefing";
   }
 
   function sameIds(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((id) => b.includes(id));
   }
 
-  // Saves the workflow first, then reconciles channel attachments against the
-  // workflow's current attachments.
+  // Attaches/detaches delivery channels so the set matches `channelIds`.
+  async function reconcileChannels(id: string, channelIds: string[]): Promise<void> {
+    const attached = await commands.delivery.workflows();
+    const current = attached.find((entry) => entry.workflow === id)?.channelIds ?? [];
+    for (const channelId of channelIds) {
+      if (!current.includes(channelId)) await commands.delivery.attach(id, channelId);
+    }
+    for (const channelId of current) {
+      if (!channelIds.includes(channelId)) await commands.delivery.detach(id, channelId);
+    }
+  }
+
+  async function createWorkflow(): Promise<void> {
+    if (!canCreateWorkflow) return;
+    savingWorkflow = true;
+    try {
+      const created = await commands.userWorkflows.create({
+        name: newName.trim(),
+        topicIds: [...newTopicIds],
+      });
+      await reconcileChannels(created.id, newChannelIds);
+      reportSuccess("Workflow saved");
+      createOpen = false;
+      await refresh();
+    } catch (error) {
+      reportError(error);
+    } finally {
+      savingWorkflow = false;
+    }
+  }
+
+  // Saves the details editor: the name/topics row first (an upsert also
+  // customizes a built-in workflow), then the channel attachments.
   async function saveWorkflow(): Promise<void> {
-    if (!canSaveWorkflow) return;
+    const id = editorId;
+    if (!id || !canSaveWorkflow) return;
     savingWorkflow = true;
     try {
       const name = editorName.trim();
       const topicIds = [...editorTopicIds];
-      let id = editingId;
-      if (id) {
-        const info = userWorkflowInfo.get(id);
-        const changed = !info || info.name !== name || !sameIds(info.topicIds, topicIds);
-        // The briefing customization is an idempotent upsert, so push it even when nothing changed.
-        if (id === "briefing" || changed) await commands.userWorkflows.update(id, { name, topicIds });
-      } else {
-        const created = await commands.userWorkflows.create({ name, topicIds });
-        id = created.id;
+      const info = userWorkflowInfo.get(id);
+      if (!info || info.name !== name || !sameIds(info.topicIds, topicIds)) {
+        await commands.userWorkflows.update(id, { name, topicIds });
       }
-      const attached = await commands.delivery.workflows();
-      const current = attached.find((entry) => entry.workflow === id)?.channelIds ?? [];
-      for (const channelId of editorChannelIds) {
-        if (!current.includes(channelId)) await commands.delivery.attach(id, channelId);
-      }
-      for (const channelId of current) {
-        if (!editorChannelIds.includes(channelId)) await commands.delivery.detach(id, channelId);
-      }
+      await reconcileChannels(id, editorChannelIds);
+      editorBaseName = name;
+      editorBaseTopicIds = [...topicIds];
+      editorBaseChannelIds = [...editorChannelIds];
       reportSuccess("Workflow saved");
-      editorOpen = false;
       await refresh();
     } catch (error) {
       reportError(error);
@@ -331,6 +411,10 @@
 
   function isBriefingReset(workflow: WorkflowInfo): boolean {
     return workflow.id === "briefing" && workflow.user === true;
+  }
+
+  function confirmDeleteSelectedWorkflow(): void {
+    if (selectedWorkflow) confirmDeleteWorkflow(selectedWorkflow);
   }
 
   function confirmDeleteWorkflow(workflow: WorkflowInfo): void {
@@ -352,6 +436,8 @@
         router.navigate(paths.workflows(undefined, undefined, workflowQuery()), { replace: true });
       }
       await refresh();
+      // Force the details editor to re-seed from the refreshed data.
+      editorId = null;
     } catch (error) {
       reportError(error);
     } finally {
@@ -456,203 +542,241 @@
   }
 </script>
 
-<Pane variant="list" width="19rem" title="Workflows" storageKey="workflows">
-  {#snippet actions()}
-    <Button variant="tonal" iconType="left" title="New workflow" onclick={openCreate}>
-      <Icon icon={iconAdd} /> New workflow
-    </Button>
-  {/snippet}
+<div class="view">
+  <Pane variant="list" title="Workflows">
+    {#snippet actions()}
+      <Button variant="tonal" iconType="left" title="New workflow" onclick={openCreate}>
+        <Icon icon={iconAdd} /> New workflow
+      </Button>
+    {/snippet}
 
-  <div class="filters">
-    <Select
-      label="Context"
-      options={contextOptions}
-      value={context}
-      onchange={(event) => selectContext(event.currentTarget.value)}
-    />
-  </div>
+    <div class="filters">
+      <Select
+        label="Context"
+        options={contextOptions}
+        value={context}
+        onchange={(event) => selectContext(event.currentTarget.value)}
+      />
+    </div>
 
-  <DataList items={visibleWorkflows} empty="No workflows in this context.">
-    {#snippet children(workflow)}
-      <div class="entry" class:selected={workflowId === workflow.id}>
-        <ListItem
-          onclick={() => openWorkflow(workflow.id)}
-          overline={workflowOverline(workflow)}
-          headline={workflowHeadline(workflow)}
-          supporting={workflowSupporting(workflow)}
+    <DataList items={visibleWorkflows} empty="No workflows in this context.">
+      {#snippet children(workflow)}
+        <div class="entry" class:selected={workflowId === workflow.id}>
+          <ListItem
+            onclick={() => openWorkflow(workflow.id)}
+            overline={workflowOverline(workflow)}
+            headline={workflowHeadline(workflow)}
+            supporting={workflowSupporting(workflow)}
+          >
+            {#snippet leading()}
+              <Icon icon={iconSchedule} />
+            {/snippet}
+            {#snippet trailing()}
+              <Button
+                variant="tonal"
+                iconType="full"
+                title="Run now"
+                onclick={() => runNow(workflow.id)}
+                disabled={!workflow.triggers.includes("manual")}
+              >
+                <Icon icon={iconPlay} />
+              </Button>
+            {/snippet}
+          </ListItem>
+        </div>
+      {/snippet}
+    </DataList>
+  </Pane>
+
+  <div class="content">
+    <div class="tabbar">
+      <VariableTabs bind:tab items={TAB_ITEMS} />
+    </div>
+
+    <div class="tabpage" class:active={tab === "runs"}>
+      <div class="row">
+        <Pane variant="list" title="Runs" subtitle={selectedWorkflow?.id}>
+          {#if selectedWorkflow}
+            <DataList items={runs} empty="No runs for this workflow yet.">
+              {#snippet children(run)}
+                <div class="entry" class:selected={runId === run.id}>
+                  <ListItem
+                    onclick={() => openRun(run.id)}
+                    overline={triggerLabel(run)}
+                    headline={`${run.workflow} · ${run.contextId}`}
+                    supporting={`${formatDateTime(run.startedAt)} · ${durationLabel(run)}${run.cost ? ` · ${costLabel(run.cost)}` : ""}`}
+                  >
+                    {#snippet leading()}
+                      <RunStatusIcon status={run.status} />
+                    {/snippet}
+                  </ListItem>
+                </div>
+              {/snippet}
+            </DataList>
+          {:else}
+            <p class="muted">Select a workflow to see its runs.</p>
+          {/if}
+        </Pane>
+
+        <Pane
+          variant="detail"
+          title={selected ? `Run ${selected.id.slice(0, 8)}` : "Run details"}
+          subtitle={selected
+            ? `${selected.workflow} · ${selected.contextId} · ${triggerLabel(selected)}`
+            : undefined}
         >
-          {#snippet leading()}
-            <Icon icon={iconSchedule} />
+          {#snippet actions()}
+            {#if selected}
+              <RunStatusIcon status={selected.status} size={20} />
+              <Chip variant="assist" icon={iconSchedule}>
+                {formatRelativeTime(selected.startedAt)}
+              </Chip>
+              {#if selected.cost}
+                <Chip variant="assist" icon={iconPayments}>{costLabel(selected.cost)}</Chip>
+              {/if}
+              {#if selected.status === "running"}
+                <span class="danger">
+                  <Button variant="tonal" iconType="left" onclick={cancelRun} disabled={cancelling}>
+                    Cancel
+                  </Button>
+                </span>
+              {/if}
+              <span class="danger">
+                <Button
+                  variant="text"
+                  iconType="full"
+                  title="Delete run"
+                  onclick={() => (confirmingDelete = true)}
+                  disabled={deleting}
+                >
+                  <Icon icon={iconDelete} />
+                </Button>
+              </span>
+            {/if}
           {/snippet}
-          {#snippet trailing()}
-            {#if workflow.user || workflow.id === "briefing"}
+
+          {#if selected}
+            <p class="preview">{outputPreview(selected)}</p>
+
+            <StatusFeedPanel
+              runId={selected.id}
+              title="Run activity"
+              empty="No activity recorded for this run."
+            />
+
+            <h3 class="subhead">Artifacts</h3>
+            <DataList items={selected.artifacts} empty="This run produced no artifacts.">
+              {#snippet children(artifact)}
+                <div class="entry">
+                  <ListItem
+                    onclick={() => openArtifact(artifact)}
+                    overline={artifact.kind}
+                    headline={artifact.name ?? artifact.id.slice(0, 8)}
+                    supporting={`${artifact.contentType} · ${formatDateTime(artifact.createdAt)}`}
+                  >
+                    {#snippet trailing()}
+                      <Icon icon={iconChevronRight} />
+                    {/snippet}
+                  </ListItem>
+                </div>
+              {/snippet}
+            </DataList>
+
+            {#if deliveries.length > 0}
+              <h3 class="subhead">Deliveries</h3>
+              <DataList items={deliveries} empty="">
+                {#snippet children(record)}
+                  <div class="delivery">
+                    <span class="provider-tag delivery-status" data-status={record.status}>
+                      {record.status}
+                    </span>
+                    <div class="delivery-info">
+                      <span class="delivery-channel">{record.channelId}</span>
+                      {#if record.error}
+                        <span class="delivery-error">{record.error}</span>
+                      {/if}
+                    </div>
+                    <span class="muted delivery-kind">{record.kind}</span>
+                  </div>
+                {/snippet}
+              </DataList>
+            {/if}
+          {:else}
+            <p class="muted">Select a run to see its activity, output and artifacts.</p>
+          {/if}
+        </Pane>
+      </div>
+    </div>
+
+    <div class="tabpage" class:active={tab === "details"}>
+      <Pane
+        variant="detail"
+        title={selectedWorkflow ? workflowHeadline(selectedWorkflow) : "Workflow details"}
+        subtitle={selectedWorkflow ? workflowSupporting(selectedWorkflow) : undefined}
+      >
+        {#snippet actions()}
+          {#if selectedUser}
+            <span class="danger">
               <Button
                 variant="text"
                 iconType="full"
-                title="Edit workflow"
-                onclick={(event) => {
-                  event.stopPropagation();
-                  void openEdit(workflow);
-                }}
+                title={selectedResettable ? "Reset workflow" : "Delete workflow"}
+                onclick={confirmDeleteSelectedWorkflow}
+                disabled={deletingWorkflow}
               >
-                <Icon icon={iconEdit} />
+                <Icon icon={iconDelete} />
               </Button>
-              {#if workflow.id === "briefing" && workflow.user}
-                <span class="danger">
-                  <Button
-                    variant="text"
-                    iconType="full"
-                    title="Reset workflow"
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      confirmDeleteWorkflow(workflow);
-                    }}
-                  >
-                    <Icon icon={iconDelete} />
-                  </Button>
-                </span>
-              {:else if workflow.id !== "briefing"}
-                <span class="danger">
-                  <Button
-                    variant="text"
-                    iconType="full"
-                    title="Delete workflow"
-                    onclick={(event) => {
-                      event.stopPropagation();
-                      confirmDeleteWorkflow(workflow);
-                    }}
-                  >
-                    <Icon icon={iconDelete} />
-                  </Button>
-                </span>
-              {/if}
-            {/if}
-            <Button
-              variant="tonal"
-              iconType="full"
-              title="Run now"
-              onclick={() => runNow(workflow.id)}
-              disabled={!workflow.triggers.includes("manual")}
-            >
-              <Icon icon={iconPlay} />
-            </Button>
-          {/snippet}
-        </ListItem>
-      </div>
-    {/snippet}
-  </DataList>
-</Pane>
-
-<Pane variant="list" width="21rem" title="Runs" subtitle={selectedWorkflow?.id} storageKey="workflows-runs">
-  {#if selectedWorkflow}
-    <DataList items={runs} empty="No runs for this workflow yet.">
-      {#snippet children(run)}
-        <div class="entry" class:selected={runId === run.id}>
-          <ListItem
-            onclick={() => openRun(run.id)}
-            overline={triggerLabel(run)}
-            headline={`${run.workflow} · ${run.contextId}`}
-            supporting={`${formatDateTime(run.startedAt)} · ${durationLabel(run)}${run.cost ? ` · ${costLabel(run.cost)}` : ""}`}
-          >
-            {#snippet leading()}
-              <RunStatusIcon status={run.status} />
-            {/snippet}
-          </ListItem>
-        </div>
-      {/snippet}
-    </DataList>
-  {:else}
-    <p class="muted">Select a workflow to see its runs.</p>
-  {/if}
-</Pane>
-
-<Pane
-  variant="detail"
-  title={selected ? `Run ${selected.id.slice(0, 8)}` : "Run details"}
-  subtitle={selected
-    ? `${selected.workflow} · ${selected.contextId} · ${triggerLabel(selected)}`
-    : undefined}
->
-  {#snippet actions()}
-    {#if selected}
-      <RunStatusIcon status={selected.status} size={20} />
-      <Chip variant="assist" icon={iconSchedule}>
-        {formatRelativeTime(selected.startedAt)}
-      </Chip>
-      {#if selected.cost}
-        <Chip variant="assist" icon={iconPayments}>{costLabel(selected.cost)}</Chip>
-      {/if}
-      {#if selected.status === "running"}
-        <span class="danger">
-          <Button variant="tonal" iconType="left" onclick={cancelRun} disabled={cancelling}>
-            Cancel
-          </Button>
-        </span>
-      {/if}
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          title="Delete run"
-          onclick={() => (confirmingDelete = true)}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
-    {/if}
-  {/snippet}
-
-  {#if selected}
-    <p class="preview">{outputPreview(selected)}</p>
-
-    <StatusFeedPanel
-      runId={selected.id}
-      title="Run activity"
-      empty="No activity recorded for this run."
-    />
-
-    <h3 class="subhead">Artifacts</h3>
-    <DataList items={selected.artifacts} empty="This run produced no artifacts.">
-      {#snippet children(artifact)}
-        <div class="entry">
-          <ListItem
-            onclick={() => openArtifact(artifact)}
-            overline={artifact.kind}
-            headline={artifact.name ?? artifact.id.slice(0, 8)}
-            supporting={`${artifact.contentType} · ${formatDateTime(artifact.createdAt)}`}
-          >
-            {#snippet trailing()}
-              <Icon icon={iconChevronRight} />
-            {/snippet}
-          </ListItem>
-        </div>
-      {/snippet}
-    </DataList>
-
-    {#if deliveries.length > 0}
-      <h3 class="subhead">Deliveries</h3>
-      <DataList items={deliveries} empty="">
-        {#snippet children(record)}
-          <div class="delivery">
-            <span class="provider-tag delivery-status" data-status={record.status}>
-              {record.status}
             </span>
-            <div class="delivery-info">
-              <span class="delivery-channel">{record.channelId}</span>
-              {#if record.error}
-                <span class="delivery-error">{record.error}</span>
-              {/if}
-            </div>
-            <span class="muted delivery-kind">{record.kind}</span>
-          </div>
+          {/if}
         {/snippet}
-      </DataList>
-    {/if}
-  {:else}
-    <p class="muted">Select a run to see its activity, output and artifacts.</p>
-  {/if}
-</Pane>
+
+        {#if !selectedWorkflow}
+          <p class="muted">Select a workflow to see and edit its settings.</p>
+        {:else if !selectedEditable}
+          <div class="facts">
+            <div class="fact">
+              <span class="label">Description</span>
+              <span>{selectedWorkflow.description}</span>
+            </div>
+            <div class="fact">
+              <span class="label">Triggers</span>
+              <span>{selectedWorkflow.triggers.join(", ") || "none"}</span>
+            </div>
+            <div class="fact">
+              <span class="label">Context</span>
+              <span>{selectedWorkflow.contextId ?? "default context"}</span>
+            </div>
+          </div>
+          <p class="muted hint">This workflow is built in and has no editable settings.</p>
+        {:else if !editorReady}
+          <p class="muted">Loading…</p>
+        {:else}
+          <div class="detail-form">
+            <WorkflowForm
+              bind:name={editorName}
+              bind:topicIds={editorTopicIds}
+              bind:channelIds={editorChannelIds}
+              {topics}
+              {channels}
+              disabled={savingWorkflow}
+              capped={false}
+              onenter={() => void saveWorkflow()}
+            />
+            <div class="actions">
+              <Button
+                variant="filled"
+                onclick={() => void saveWorkflow()}
+                disabled={!canSaveWorkflow}
+              >
+                Save changes
+              </Button>
+            </div>
+          </div>
+        {/if}
+      </Pane>
+    </div>
+  </div>
+</div>
 
 <Dialog headline="Delete this run?" bind:open={confirmingDelete}>
   <p>
@@ -681,58 +805,23 @@
   {/snippet}
 </Dialog>
 
-<Dialog headline={editingId ? "Edit workflow" : "New workflow"} bind:open={editorOpen}>
+<Dialog headline="New workflow" bind:open={createOpen}>
   <div class="workflow-form">
-    <TextFieldOutlined
-      label="Name"
-      bind:value={editorName}
-      enter={() => void saveWorkflow()}
+    <WorkflowForm
+      bind:name={newName}
+      bind:topicIds={newTopicIds}
+      bind:channelIds={newChannelIds}
+      {topics}
+      {channels}
+      disabled={savingWorkflow}
+      onenter={() => void createWorkflow()}
     />
-    <div class="field-group">
-      <h3 class="group-label">Topics</h3>
-      {#if topics.length === 0}
-        <p class="muted">No topics yet. Create topics first, then pick the ones to cover.</p>
-      {:else}
-        <div class="toggle-list">
-          {#each topics as topic (topic.id)}
-            <label class="toggle-row" class:muted={topic.muted}>
-              <Switch
-                checked={editorTopicIds.includes(topic.id)}
-                disabled={savingWorkflow}
-                onchange={() => toggleTopic(topic.id)}
-              />
-              <span>{topic.name}{topic.muted ? " (muted)" : ""}</span>
-            </label>
-          {/each}
-        </div>
-      {/if}
-    </div>
-    <div class="field-group">
-      <h3 class="group-label">Delivery channels</h3>
-      {#if channels.length === 0}
-        <p class="muted">No delivery channels yet.</p>
-      {:else}
-        <div class="toggle-list">
-          {#each channels as channel (channel.id)}
-            <label class="toggle-row">
-              <Switch
-                checked={editorChannelIds.includes(channel.id)}
-                disabled={savingWorkflow}
-                onchange={() => toggleChannel(channel.id)}
-              />
-              <span>{channel.name}</span>
-              <span class="provider-tag">{TYPE_LABELS[channel.type]}</span>
-            </label>
-          {/each}
-        </div>
-      {/if}
-    </div>
   </div>
   {#snippet buttons()}
-    <Button variant="text" onclick={() => (editorOpen = false)} disabled={savingWorkflow}>
+    <Button variant="text" onclick={() => (createOpen = false)} disabled={savingWorkflow}>
       Cancel
     </Button>
-    <Button variant="filled" onclick={() => void saveWorkflow()} disabled={!canSaveWorkflow}>
+    <Button variant="filled" onclick={() => void createWorkflow()} disabled={!canCreateWorkflow}>
       Save
     </Button>
   {/snippet}
@@ -769,6 +858,56 @@
 </Dialog>
 
 <style>
+  .view {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .content {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* Match the tab strip height to the pane headers so the top bars line up. */
+  .tabbar {
+    flex: none;
+    border-bottom: 1px solid var(--m3c-outline-variant);
+  }
+
+  .tabbar :global(.divider) {
+    display: none;
+  }
+
+  .tabbar :global(.m3-container),
+  .tabbar :global(.primary > label.tall) {
+    height: 3.5rem;
+  }
+
+  /* Both tab pages stay mounted (hidden rather than removed) so switching
+     tabs keeps pane widths, scroll positions and loaded runs intact. */
+  .tabpage {
+    display: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .tabpage.active {
+    display: flex;
+  }
+
+  .row {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
   .subhead {
     margin: 1.25rem 0 0.5rem;
     padding-inline: 0.25rem;
@@ -779,45 +918,39 @@
   }
 
   .workflow-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
     width: min(24rem, 100%);
   }
 
-  .field-group {
+  .detail-form {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.9rem;
+    max-width: 36rem;
   }
 
-  .group-label {
-    @apply --m3-title-small;
-    color: var(--m3c-on-surface-variant);
-  }
-
-  .toggle-list {
+  .facts {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
-    max-height: 12rem;
-    overflow-y: auto;
-    padding: 0.1rem;
-  }
-
-  .toggle-row {
-    display: flex;
-    align-items: center;
     gap: 0.5rem;
-    padding: 0.15rem 0;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
+    max-width: 36rem;
   }
 
-  .toggle-row.muted {
-    opacity: 0.65;
+  .fact {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+  }
+
+  .fact .label {
+    min-width: 5.5rem;
+    color: var(--m3c-on-surface-variant);
+    font-size: 0.8rem;
+  }
+
+  .hint {
+    margin-top: 1rem;
+    max-width: 36rem;
   }
 
   .entry {

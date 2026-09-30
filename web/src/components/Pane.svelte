@@ -1,17 +1,23 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
+  import { untrack } from "svelte";
+  import {
+    SIDEBAR_DEFAULT_WIDTH_REM,
+    SIDEBAR_MAX_WIDTH_REM,
+    SIDEBAR_MIN_WIDTH_REM,
+    claimSidebarIndex,
+    clearSidebarWidth,
+    readSidebarWidth,
+    writeSidebarWidth,
+  } from "../lib/sidebarWidths.svelte";
 
   interface Props {
     title?: string;
     subtitle?: string;
     /** List panes are fixed-width; detail panes fill the rest. */
     variant?: "list" | "detail";
-    /** Width of a list pane (CSS length). */
-    width?: string;
     /** Allow the pane width to be dragged. Defaults to list panes. */
     resizable?: boolean;
-    /** Key used to remember the dragged width across reloads. */
-    storageKey?: string;
     actions?: Snippet;
     children: Snippet;
   }
@@ -20,16 +26,14 @@
     title,
     subtitle,
     variant = "detail",
-    width = "22rem",
     resizable = variant === "list",
-    storageKey,
     actions,
     children,
   }: Props = $props();
 
-  const MIN_WIDTH_REM = 13;
-  const MAX_WIDTH_REM = 40;
-  const DEFAULT_WIDTH_REM = 22;
+  // List panes claim a position when they mount, so the same sidebar position
+  // keeps the same width in every tab. `variant` never changes for a pane.
+  const sidebarIndex = untrack(() => (variant === "list" ? claimSidebarIndex() : null));
 
   function rootFontSize(): number {
     const parsed = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
@@ -37,30 +41,21 @@
   }
 
   function clampWidth(value: number, rootSize = rootFontSize()): number {
-    return Math.min(Math.max(value, MIN_WIDTH_REM * rootSize), MAX_WIDTH_REM * rootSize);
+    return Math.min(Math.max(value, SIDEBAR_MIN_WIDTH_REM * rootSize), SIDEBAR_MAX_WIDTH_REM * rootSize);
   }
 
-  function propWidth(rootSize = rootFontSize()): number {
-    const trimmed = width.trim();
-    const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return DEFAULT_WIDTH_REM * rootSize;
-    return trimmed.endsWith("rem") ? parsed * rootSize : parsed;
+  function defaultWidth(rootSize = rootFontSize()): number {
+    return clampWidth(SIDEBAR_DEFAULT_WIDTH_REM * rootSize, rootSize);
   }
 
-  function storedWidth(): number | null {
-    if (!storageKey) return null;
-    try {
-      const raw = localStorage.getItem(`briefing.pane.${storageKey}`);
-      const parsed = raw === null ? Number.NaN : Number.parseFloat(raw);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-    } catch {
-      return null;
-    }
+  function initialWidth(): number {
+    const stored = sidebarIndex === null ? null : readSidebarWidth(sidebarIndex);
+    return stored === null ? defaultWidth() : clampWidth(stored);
   }
 
   const canResize = $derived(resizable && variant === "list");
 
-  let currentWidth = $state(clampWidth(storedWidth() ?? propWidth()));
+  let currentWidth = $state(initialWidth());
   let dragging = $state(false);
   let dragStartX = 0;
   let dragStartWidth = 0;
@@ -75,10 +70,8 @@
   });
 
   function persistWidth(): void {
-    if (!storageKey) return;
-    try {
-      localStorage.setItem(`briefing.pane.${storageKey}`, String(Math.round(currentWidth)));
-    } catch {}
+    if (sidebarIndex === null) return;
+    writeSidebarWidth(sidebarIndex, currentWidth);
   }
 
   function startResize(event: PointerEvent): void {
@@ -103,11 +96,9 @@
   }
 
   function resetWidth(): void {
-    currentWidth = propWidth();
-    if (!storageKey) return;
-    try {
-      localStorage.removeItem(`briefing.pane.${storageKey}`);
-    } catch {}
+    currentWidth = defaultWidth();
+    if (sidebarIndex === null) return;
+    clearSidebarWidth(sidebarIndex);
   }
 
   function onKeydown(event: KeyboardEvent): void {
@@ -122,7 +113,7 @@
   class="pane {variant}"
   class:resizable={canResize}
   class:dragging
-  style:width={canResize ? `${currentWidth}px` : variant === "list" ? width : undefined}
+  style:width={variant === "list" ? `${currentWidth}px` : undefined}
 >
   {#if title}
     <header class="head">

@@ -51,7 +51,7 @@
   }
 </script>
 
-<Pane variant="list" title="Live events" storageKey="events">
+<Pane variant="list" title="Live events">
   {#snippet actions()}
     <span class="danger">
       <Button variant="text" onclick={clear}>Clear</Button>
