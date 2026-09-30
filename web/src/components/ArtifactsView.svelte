@@ -92,7 +92,7 @@
 </script>
 
 <Pane variant="list" title="Artifacts">
-  <div class="search">
+  <div class="filters">
     <TextFieldOutlined
       label="Search artifacts"
       leadingIcon={iconSearch}
@@ -146,20 +146,4 @@
 </Pane>
 
 <style>
-  .search {
-    padding: 0.25rem 0.25rem 0.6rem;
-  }
-
-  .entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    border-radius: var(--m3-shape-medium);
-    transition: background-color 150ms;
-  }
-
-  .entry.selected {
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-  }
 </style>

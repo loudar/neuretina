@@ -6,7 +6,6 @@
   import { reportError, reportSuccess } from "../lib/feedback";
   import { paths, router } from "../lib/router.svelte";
   import MarkdownView from "./MarkdownView.svelte";
-  import SourcesList from "./SourcesList.svelte";
 
   interface Props {
     artifact: ArtifactInfo;
@@ -113,8 +112,6 @@
   <p class="muted">No content stored for this artifact.</p>
 {/if}
 
-<SourcesList {sources} />
-
 {#if !isMarkdown}
   <h3 class="subhead">Metadata</h3>
   <pre>{JSON.stringify(artifact.metadata, null, 2)}</pre>
@@ -151,10 +148,6 @@
   img {
     max-width: 100%;
     border-radius: var(--m3-shape-small);
-  }
-
-  .subhead {
-    margin: 1.25rem 0 0.5rem;
   }
 
   pre {

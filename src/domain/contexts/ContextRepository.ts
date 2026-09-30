@@ -1,4 +1,5 @@
 import { NotFoundError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
 /** The context the engine ships with; owns the briefing topics/jobs/artifacts. */
@@ -99,15 +100,7 @@ export class ContextRepository implements ContextStore {
 }
 
 function toContext(row: ContextRow): AppContext {
-  let settings: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(row.settings);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      settings = parsed as Record<string, unknown>;
-    }
-  } catch {
-    settings = {};
-  }
+  const settings = parseJsonObject(row.settings);
 
   return {
     id: row.id,

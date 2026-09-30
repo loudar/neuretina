@@ -1,4 +1,5 @@
 import type { SearchMedia, SearchResult } from "../../capabilities/search/SearchProvider.ts";
+import { dedupeBy } from "../../core/collections.ts";
 import { createSubprocessExecutor } from "../codemode/executor.ts";
 import type { CodeModeExecutor } from "../codemode/types.ts";
 import type { Tool, ToolContext } from "../Tool.ts";
@@ -186,7 +187,7 @@ export class CodeModeTool implements Tool<CodeModeResult> {
       toolCallsByTool,
       toolUsages,
       queries,
-      results: dedupeSources(results),
+      results: dedupeBy(results, (source) => source.url),
       durationMs: Date.now() - started,
     };
   }
@@ -240,13 +241,4 @@ function clipLogs(logs: string[], maxChars: number): string[] {
   return clipped;
 }
 
-function dedupeSources(sources: CodeModeSource[]): CodeModeSource[] {
-  const seen = new Set<string>();
-  const unique: CodeModeSource[] = [];
-  for (const source of sources) {
-    if (seen.has(source.url)) continue;
-    seen.add(source.url);
-    unique.push(source);
-  }
-  return unique;
-}
+

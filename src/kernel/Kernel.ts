@@ -38,7 +38,10 @@ import {
   type DeliveryStore,
 } from "../domain/delivery/DeliveryRepository.ts";
 import { DeliveryService, type DeliveryRouter } from "../delivery/DeliveryService.ts";
-import { matrixChannelConfig } from "../providers/delivery/MatrixDeliveryChannel.ts";
+import {
+  matrixChannelConfig,
+  type MatrixChannelConfig,
+} from "../providers/delivery/MatrixDeliveryChannel.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
 import { createUserWorkflowSync } from "../workflows/UserBriefingWorkflow.ts";
 import { QuestionWorkflow } from "../workflows/QuestionWorkflow.ts";
@@ -228,29 +231,19 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const firstMatrixChannel = (): DeliveryChannel | undefined =>
     deliveries.channels().find((channel) => channel.type === "matrix" && channel.enabled);
 
-  const buildMatrixClient = (): MatrixClient => {
-    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
-    return new MatrixClient({
-      homeserverUrl: matrix?.homeserverUrl,
-      accessToken: matrix?.accessToken,
-      username: matrix?.username,
-      password: matrix?.password,
-    });
-  };
+  /** Connection fields shared by the Matrix client, messaging and chat listener. */
+  const matrixConnection = (): MatrixChannelConfig | undefined =>
+    matrixChannelConfig(firstMatrixChannel()?.config);
+
+  const buildMatrixClient = (): MatrixClient => new MatrixClient(matrixConnection() ?? {});
 
   let matrixClient = buildMatrixClient();
 
-  const buildMessaging = (): MessagingProvider => {
-    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
-    return new MatrixMessagingProvider({
-      homeserverUrl: matrix?.homeserverUrl,
-      accessToken: matrix?.accessToken,
-      username: matrix?.username,
-      password: matrix?.password,
-      roomId: matrix?.roomId,
+  const buildMessaging = (): MessagingProvider =>
+    new MatrixMessagingProvider({
+      ...(matrixConnection() ?? {}),
       client: matrixClient,
     });
-  };
 
   const bag = {
     llm: overrides.llm ?? buildLlm(),
@@ -428,7 +421,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   });
 
   const createChatListener = (client: MatrixClient): MatrixCommandListener | null => {
-    const matrix = matrixChannelConfig(firstMatrixChannel()?.config);
+    const matrix = matrixConnection();
     if (!matrix?.roomId) return null;
 
     return new MatrixCommandListener({

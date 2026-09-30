@@ -1,5 +1,6 @@
 import type { AgentRunResult } from "../../agents/Agent.ts";
 import type { FinanceUsage } from "../../capabilities/finance/FinanceProvider.ts";
+import { finiteNumber } from "../records.ts";
 import type { CostTracker } from "./CostTracker.ts";
 
 /** Sandbox tools that run against the paid Perplexity web search. */
@@ -60,9 +61,9 @@ export function collectFinanceUsage(result: AgentRunResult): FinanceUsage[] {
 function collectUsage(usage: unknown, out: FinanceUsage[]): void {
   if (!usage || typeof usage !== "object") return;
   const record = usage as Record<string, unknown>;
-  const inputTokens = asNumber(record.inputTokens);
-  const outputTokens = asNumber(record.outputTokens);
-  const costUsd = asNumber(record.costUsd);
+  const inputTokens = finiteNumber(record.inputTokens);
+  const outputTokens = finiteNumber(record.outputTokens);
+  const costUsd = finiteNumber(record.costUsd);
   if (inputTokens === undefined && outputTokens === undefined && costUsd === undefined) return;
   out.push({
     ...(inputTokens !== undefined ? { inputTokens } : {}),
@@ -71,6 +72,4 @@ function collectUsage(usage: unknown, out: FinanceUsage[]): void {
   });
 }
 
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
+

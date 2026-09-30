@@ -1,4 +1,5 @@
 import { NotFoundError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { DEFAULT_CONTEXT_ID } from "../contexts/ContextRepository.ts";
 
@@ -271,13 +272,5 @@ function toArtifact(row: ArtifactRow, withData: boolean): Artifact {
 }
 
 function parseMetadata(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // fall through to an empty metadata object
-  }
-  return {};
+  return parseJsonObject(value);
 }

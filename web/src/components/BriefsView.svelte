@@ -15,7 +15,6 @@
   import DataList from "./DataList.svelte";
   import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
-  import SourcesList from "./SourcesList.svelte";
 
   let briefs = $state<Brief[]>([]);
   let selected = $state<Brief | null>(null);
@@ -198,7 +197,7 @@
 <Pane variant="list" title="Briefs">
   {#snippet actions()}
     <label
-      class="voice-toggle"
+      class="inline-toggle voice-toggle"
       title={voiceEnabled
         ? "Voice + text — switch off for text-only delivery"
         : "Text only — switch on to include the voice message"}
@@ -283,9 +282,12 @@
         <p class="muted">Loading audio…</p>
       {/if}
 
-      <MarkdownView markdown={selected.markdown} sources={selected.sources} />
-
-      <SourcesList sources={selected.sources} filter={sourceFilter} onfilter={setSourceFilter} />
+      <MarkdownView
+        markdown={selected.markdown}
+        sources={selected.sources}
+        filter={sourceFilter}
+        onfilter={setSourceFilter}
+      />
     </div>
   {:else}
     <p class="muted">Select a brief to read it and play the audio.</p>
@@ -369,14 +371,7 @@
   }
 
   .voice-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
     min-height: 2rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
   }
 
   .brief-body {
@@ -385,25 +380,13 @@
     margin-inline: auto;
   }
 
-  .entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    border-radius: var(--m3-shape-medium);
-    transition: background-color 150ms;
-  }
-
-  .entry.selected {
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-  }
-
   .brief-row {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 0.3rem;
     width: 100%;
+    box-sizing: border-box;
     padding: 0.55rem 0.75rem;
     border: none;
     border-radius: var(--m3-shape-medium);

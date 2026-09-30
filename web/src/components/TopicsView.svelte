@@ -151,7 +151,7 @@
           {/snippet}
           {#snippet trailing()}
             <label
-              class="include-toggle"
+              class="inline-toggle"
               title={topic.muted
                 ? "Excluded from briefings — turn on to include"
                 : "Included in briefings — turn off to exclude"}
@@ -177,7 +177,7 @@
   {#snippet actions()}
     {#if selected}
       <label
-        class="include-toggle"
+        class="inline-toggle"
         title={selected.muted
           ? "Excluded from briefings — turn on to include"
           : "Included in briefings — turn off to exclude"}
@@ -236,56 +236,8 @@
 </Dialog>
 
 <style>
-  .add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    padding: 0.25rem 0.25rem 0.75rem;
-    border-bottom: 1px solid var(--m3c-outline-variant);
-    margin-bottom: 0.5rem;
-  }
-
-  .entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    border-radius: var(--m3-shape-medium);
-    transition: background-color 150ms;
-  }
-
-  .entry.selected {
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-  }
-
   .entry.muted {
     opacity: 0.65;
   }
 
-  .include-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .toggle-label {
-    line-height: 1;
-  }
-
-  .detail-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    max-width: 36rem;
-  }
-
-  .hint {
-    max-width: 36rem;
-    font-size: 0.85rem;
-    line-height: 1.5;
-  }
 </style>

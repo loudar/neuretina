@@ -1,4 +1,5 @@
 import { NotFoundError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
 export type TriggerKind = "schedule" | "matrix" | "manual";
@@ -200,26 +201,16 @@ function toRun(row: RunRow): WorkflowRun {
     workflow: row.workflow,
     contextId: row.context_id,
     trigger: row.trigger as TriggerKind,
-    triggerDetail: parseJson(row.trigger_detail, {}),
+    triggerDetail: parseJsonObject(row.trigger_detail),
     status: row.status as WorkflowRunStatus,
-    input: parseJson(row.input, {}),
-    output: row.output === null ? undefined : parseJson(row.output, null),
+    input: parseJsonObject(row.input),
+    output: row.output === null ? undefined : parseJsonObject(row.output),
     error: row.error ?? undefined,
-    cost: row.cost === null ? undefined : parseJson(row.cost, null),
-    checkpoint: row.checkpoint === null ? undefined : parseJson(row.checkpoint, null),
+    cost: row.cost === null ? undefined : parseJsonObject(row.cost),
+    checkpoint: row.checkpoint === null ? undefined : parseJsonObject(row.checkpoint),
     startedAt: row.started_at,
     finishedAt: row.finished_at ?? undefined,
   };
 }
 
-function parseJson(value: string, fallback: unknown): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-    return (fallback ?? {}) as Record<string, unknown>;
-  } catch {
-    return (fallback ?? {}) as Record<string, unknown>;
-  }
-}
+

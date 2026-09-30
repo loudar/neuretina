@@ -1,4 +1,5 @@
 import { ValidationError } from "../../core/errors.ts";
+import { stringField } from "../../core/records.ts";
 import type { DeliveryChannelSender } from "../../capabilities/delivery/DeliveryChannel.ts";
 import type { DeliveryChannelType } from "../../domain/delivery/DeliveryRepository.ts";
 import {
@@ -33,7 +34,4 @@ export function createDeliverySender(
   }
 }
 
-function stringField(config: Record<string, unknown>, key: string): string | undefined {
-  const value = config[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
+

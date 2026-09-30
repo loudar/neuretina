@@ -1,5 +1,6 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 import { DEFAULT_CONTEXT_ID } from "../contexts/ContextRepository.ts";
 
 export type JobRunStatus = "success" | "failed";
@@ -169,12 +170,7 @@ export class JobRepository implements JobStore {
 }
 
 function toJob(row: JobRow): ScheduledJob {
-  let parsedInput: Record<string, unknown> = {};
-  try {
-    parsedInput = JSON.parse(row.input) as Record<string, unknown>;
-  } catch {
-    parsedInput = {};
-  }
+  const parsedInput = parseJsonObject(row.input);
 
   return {
     id: row.id,

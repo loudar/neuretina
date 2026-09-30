@@ -1,3 +1,4 @@
+import { isoDate } from "../../core/dates.ts";
 import { NotFoundError } from "../../core/errors.ts";
 import type { BriefStore } from "../../domain/briefs/BriefRepository.ts";
 import type { Tool } from "../Tool.ts";
@@ -46,7 +47,7 @@ export class BriefGetTool implements Tool<PastBriefResult> {
 
     return {
       id: brief.id,
-      date: new Date(brief.createdAt).toISOString().slice(0, 10),
+      date: isoDate(brief.createdAt),
       topics: brief.topics,
       markdown: brief.markdown,
       sources: brief.sources.map((source) => ({ title: source.title, url: source.url })),

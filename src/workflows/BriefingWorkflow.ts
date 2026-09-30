@@ -18,9 +18,12 @@ import type {
 } from "../core/workflow/definition.ts";
 import { StepPipeline, type PipelineState } from "../core/workflow/StepPipeline.ts";
 import type { Workflow, WorkflowContext, WorkflowRunContext } from "../core/workflow/Workflow.ts";
+import { dedupeBy } from "../core/collections.ts";
 import { addAgentCost } from "../core/cost/agentCosts.ts";
+import { isoDate } from "../core/dates.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
+import { audioExtension } from "../core/media.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { BriefSource, BriefStore, BriefWithAudio } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
@@ -461,7 +464,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const found = outcome.found && outcome.notes.trim().length > 0;
     const sources = found ? collectSources(result) : [];
     const queries = collectQueries(result);
-    const uniqueSources = dedupeSources(sources).slice(0, 80);
+    const uniqueSources = dedupeBy(sources, (source) => source.url).slice(0, 80);
     const missingTopics = outcome.missingTopics.filter((name) =>
       topicNames.some((topic) => topic.toLowerCase() === name.toLowerCase()),
     );
@@ -843,7 +846,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         return undefined;
       }
 
-      const mergedSources = dedupeSources([...sources, ...findings.sources]).slice(0, 80);
+      const mergedSources = dedupeBy([...sources, ...findings.sources], (source) => source.url).slice(0, 80);
       const section = await researcher.writeImplications(findings, mergedSources, context, span?.id);
       if (!section.trim()) {
         span?.done("Follow-ups found nothing new");
@@ -937,7 +940,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         })
       : JSON.stringify({
           language: this.deps.defaults.language,
-          date: new Date().toISOString().slice(0, 10),
+          date: isoDate(),
           topics: research.topics,
           sources: research.sources.map((source, index) => ({
             n: index + 1,
@@ -1181,17 +1184,6 @@ export function parseResearchOutcome(text: string): {
   return { found: true, notes: text.trim(), missingTopics: [] };
 }
 
-function dedupeSources(sources: BriefSource[]): BriefSource[] {
-  const seen = new Set<string>();
-  const unique: BriefSource[] = [];
-  for (const source of sources) {
-    if (seen.has(source.url)) continue;
-    seen.add(source.url);
-    unique.push(source);
-  }
-  return unique;
-}
-
 export function formatNoMaterialNotice(topics: string[], queries: string[]): string {  const lines: string[] = [
     "No brief today: the research found nothing usable for the configured topic(s).",
     "",
@@ -1258,10 +1250,4 @@ export function sanitizeNarration(text: string): string {
     .trim();
 }
 
-/** File extension for a stored brief's audio, derived from its MIME type. */
-function audioExtension(mimeType: string): string {
-  if (mimeType.includes("ogg") || mimeType.includes("opus")) return "ogg";
-  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-  if (mimeType.includes("wav")) return "wav";
-  return "bin";
-}
+

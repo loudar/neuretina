@@ -128,6 +128,7 @@
     gap: 0.75rem;
     align-items: baseline;
     width: 100%;
+    box-sizing: border-box;
     padding: 0.4rem 0.5rem;
     border: none;
     border-radius: var(--m3-shape-small);
@@ -184,10 +185,6 @@
     min-width: 6.5rem;
     color: var(--m3c-on-surface-variant);
     font-size: 0.8rem;
-  }
-
-  .subhead {
-    margin: 1.25rem 0 0.5rem;
   }
 
   pre {

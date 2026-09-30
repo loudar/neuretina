@@ -479,10 +479,6 @@
   }
 
   function openRun(id: string): void {
-    if (runId === id) {
-      router.navigate(paths.workflows(workflowId, undefined, workflowQuery()));
-      return;
-    }
     router.navigate(paths.workflows(workflowId, id, workflowQuery()));
   }
 
@@ -781,6 +777,15 @@
         subtitle={selectedWorkflow ? workflowSummary(selectedWorkflow) : undefined}
       >
         {#snippet actions()}
+          {#if selectedEditable}
+            <Button
+              variant="filled"
+              onclick={() => void saveWorkflow()}
+              disabled={!canSaveWorkflow}
+            >
+              Save changes
+            </Button>
+          {/if}
           {#if selectedUser}
             <span class="danger">
               <Button
@@ -839,18 +844,6 @@
             editable={selectedEditable}
             ontoggle={toggleAssignment}
           />
-
-          {#if selectedEditable}
-            <div class="actions save-row">
-              <Button
-                variant="filled"
-                onclick={() => void saveWorkflow()}
-                disabled={!canSaveWorkflow}
-              >
-                Save changes
-              </Button>
-            </div>
-          {/if}
         {/if}
       </Pane>
     </div>
@@ -987,65 +980,16 @@
   }
 
   .subhead {
-    margin: 1.25rem 0 0.5rem;
     padding-inline: 0.25rem;
-  }
-
-  .filters {
-    padding: 0.25rem 0.25rem 0.6rem;
   }
 
   .workflow-form {
     width: min(24rem, 100%);
   }
 
-  .detail-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    max-width: 36rem;
-  }
-
-  .save-row {
-    margin-top: 1rem;
-  }
-
-  .facts {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    max-width: 36rem;
-  }
-
-  .fact {
-    display: flex;
-    align-items: baseline;
-    gap: 0.75rem;
-    font-size: 0.9rem;
-  }
-
-  .fact .label {
-    min-width: 5.5rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.8rem;
-  }
-
   .hint {
     margin-top: 1rem;
     max-width: 36rem;
-  }
-
-  .entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    border-radius: var(--m3-shape-medium);
-    transition: background-color 150ms;
-  }
-
-  .entry.selected {
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
   }
 
   .preview {

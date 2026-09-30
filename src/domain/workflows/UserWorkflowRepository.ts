@@ -1,5 +1,6 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 
 /**
  * A user-created workflow instance: the pipeline runs over the configured
@@ -152,15 +153,7 @@ function normalizeInputs(inputs: Record<string, unknown>): Record<string, unknow
 }
 
 function toUserWorkflow(row: UserWorkflowRow): UserWorkflow {
-  let inputs: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(row.inputs) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      inputs = parsed as Record<string, unknown>;
-    }
-  } catch {
-    inputs = {};
-  }
+  const inputs = parseJsonObject(row.inputs);
 
   return {
     id: row.id,

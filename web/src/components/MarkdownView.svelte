@@ -3,13 +3,17 @@
   import { renderCitations } from "../lib/citations";
   import { READING_SIZES, readingPrefs, type ReadingSize } from "../lib/reading.svelte";
   import { markdownToHtml } from "../../../src/core/markdown.ts";
+  import SourcesList from "./SourcesList.svelte";
 
   interface Props {
     markdown: string;
     sources?: BriefSource[];
+    /** Optional controlled source filter (the briefs view keeps it in the URL). */
+    filter?: string;
+    onfilter?: (value: string) => void;
   }
 
-  let { markdown, sources = [] }: Props = $props();
+  let { markdown, sources = [], filter, onfilter }: Props = $props();
 
   const html = $derived(renderCitations(markdownToHtml(markdown), sources));
 
@@ -38,6 +42,8 @@
   </span>
 
   <div class="markdown">{@html html}</div>
+
+  <SourcesList {sources} {filter} {onfilter} />
 </div>
 
 <style>

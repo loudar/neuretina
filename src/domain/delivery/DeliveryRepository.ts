@@ -1,5 +1,6 @@
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { NotFoundError, ValidationError } from "../../core/errors.ts";
+import { parseJsonObject } from "../../core/json.ts";
 
 export type DeliveryChannelType = "matrix" | "discord" | "email";
 
@@ -373,15 +374,7 @@ export function assertChannelType(type: unknown): asserts type is DeliveryChanne
 }
 
 function toChannel(row: ChannelRow): DeliveryChannel {
-  let config: Record<string, unknown> = {};
-  try {
-    const parsed = JSON.parse(row.config) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      config = parsed as Record<string, unknown>;
-    }
-  } catch {
-    config = {};
-  }
+  const config = parseJsonObject(row.config);
   return {
     id: row.id,
     type: row.type as DeliveryChannelType,

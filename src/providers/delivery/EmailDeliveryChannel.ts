@@ -1,5 +1,6 @@
 import { createTransport, type Transporter } from "nodemailer";
 import { ConfigurationError } from "../../core/errors.ts";
+import { numberField, stringField } from "../../core/records.ts";
 import type {
   DeliveryChannelSender,
   DeliverySentMessage,
@@ -108,12 +109,4 @@ export class EmailDeliveryChannel implements DeliveryChannelSender {
   }
 }
 
-function stringField(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
 
-function numberField(record: Record<string, unknown>, key: string): number | undefined {
-  const value = record[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}

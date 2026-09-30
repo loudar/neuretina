@@ -1,5 +1,6 @@
 import type { SearchMedia } from "../../capabilities/search/SearchProvider.ts";
 import { NotFoundError } from "../../core/errors.ts";
+import { numberField, stringField } from "../../core/records.ts";
 import type { Artifact, ArtifactStore } from "../artifacts/ArtifactRepository.ts";
 
 export interface BriefSource {
@@ -203,15 +204,7 @@ function toBrief(artifact: Artifact): Brief {
   };
 }
 
-function stringField(metadata: Record<string, unknown>, key: string): string | undefined {
-  const value = metadata[key];
-  return typeof value === "string" && value ? value : undefined;
-}
 
-function numberField(metadata: Record<string, unknown>, key: string): number | undefined {
-  const value = metadata[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
 
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];

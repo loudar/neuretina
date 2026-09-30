@@ -1,6 +1,8 @@
+import { isoDate } from "../core/dates.ts";
 import { errorMessage, ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
+import { audioExtension } from "../core/media.ts";
 import type { DeliveryChannelSender } from "../capabilities/delivery/DeliveryChannel.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 import type {
@@ -198,8 +200,8 @@ export class DeliveryService implements DeliveryRouter {
             sender.sendVoice({
               audio: input.audio!,
               mimeType: mime,
-              filename: `morning-brief-${dateStamp()}.${extensionFor(mime)}`,
-              caption: `Morning brief – ${dateStamp()}`,
+              filename: `morning-brief-${isoDate()}.${audioExtension(mime)}`,
+              caption: `Morning brief – ${isoDate()}`,
               text: input.narration ?? input.summary,
             }),
           ),
@@ -316,13 +318,4 @@ export class DeliveryService implements DeliveryRouter {
   }
 }
 
-function dateStamp(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
-function extensionFor(mimeType: string): string {
-  if (mimeType.includes("ogg") || mimeType.includes("opus")) return "ogg";
-  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-  if (mimeType.includes("wav")) return "wav";
-  return "bin";
-}

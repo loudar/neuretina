@@ -174,7 +174,7 @@
     <Select label="Workflow" options={workflowOptions} bind:value={workflow} />
     <div class="add-row">
       <label
-        class="voice-toggle"
+        class="inline-toggle"
         title={voiceEnabled
           ? "Voice + text — switch off for text-only delivery"
           : "Text only — switch on to include the voice message"}
@@ -219,7 +219,7 @@
   {#snippet actions()}
     {#if selected}
       <label
-        class="voice-toggle"
+        class="inline-toggle"
         title={selected.input.generateAudio === false
           ? "Text only — switch on to include the voice message"
           : "Voice + text — switch off for text-only delivery"}
@@ -301,15 +301,6 @@
 </Dialog>
 
 <style>
-  .add-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    padding: 0.25rem 0.25rem 0.75rem;
-    border-bottom: 1px solid var(--m3c-outline-variant);
-    margin-bottom: 0.5rem;
-  }
-
   .add-row {
     display: flex;
     align-items: center;
@@ -317,63 +308,12 @@
     gap: 0.5rem;
   }
 
-  .voice-toggle,
-  .inline-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .toggle-label {
-    line-height: 1;
-  }
-
-  .entry {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    width: 100%;
-    border-radius: var(--m3-shape-medium);
-    transition: background-color 150ms;
-  }
-
-  .entry.selected {
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-  }
 
   .entry.disabled {
     opacity: 0.65;
   }
 
-  .detail-form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.9rem;
-    max-width: 36rem;
-  }
-
   .facts {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
     margin-top: 1.25rem;
-    max-width: 36rem;
-  }
-
-  .fact {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.9rem;
-  }
-
-  .fact .label {
-    min-width: 5.5rem;
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.8rem;
   }
 </style>

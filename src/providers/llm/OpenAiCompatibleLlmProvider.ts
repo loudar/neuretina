@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
+import { finiteNumber, numberField } from "../../core/records.ts";
 import { requestJson } from "../../infra/http/request.ts";
 import { APP_USER_AGENT } from "../../version.ts";
 import type {
@@ -151,8 +152,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 
 function numericField(value: unknown, key: string): number | undefined {
   if (!value || typeof value !== "object") return undefined;
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === "number" && Number.isFinite(field) ? field : undefined;
+  return numberField(value as Record<string, unknown>, key);
 }
 
 function costOf(usage: unknown): number | undefined {
@@ -163,7 +163,8 @@ function costOf(usage: unknown): number | undefined {
       ? (record.cost as Record<string, unknown>).total_cost
       : undefined;
   for (const value of [record.cost, record.total_cost, nested]) {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
+    const usd = finiteNumber(value);
+    if (usd !== undefined) return usd;
   }
   return undefined;
 }
