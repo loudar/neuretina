@@ -405,7 +405,8 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     key: "DEFAULT_FOLLOWUP_RESEARCH",
     group: "Research defaults",
     label: "Follow-up research",
-    description: "Dispatch subagents to dig into implications and context after the first draft.",
+    description:
+      "Dispatch subagents after the first draft: dig into implications and context, then trace claims back to primary sources.",
     kind: "boolean",
     default: "true",
     apply: (config, value) => {

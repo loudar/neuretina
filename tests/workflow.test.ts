@@ -39,6 +39,11 @@ interface SetupOptions {
   followups?: boolean;
   /** The stub planner reports nothing worth digging into. */
   noFollowupTasks?: boolean;
+  /** The primary-source pass returns these upgrades (and optionally a revision). */
+  sourceUpgrades?: {
+    markdown?: string;
+    upgrades: Array<{ for: number; title: string; url: string }>;
+  };
 }
 
 function setup(options: SetupOptions = {}) {
@@ -52,6 +57,12 @@ function setup(options: SetupOptions = {}) {
 
   const llm = stubLlm((request) => {
     const system = request.messages[0]?.content ?? "";
+
+    if (system.includes("source upgrades")) {
+      return completion(
+        JSON.stringify(options.sourceUpgrades ?? { markdown: "", upgrades: [] }),
+      );
+    }
 
     if (system.includes("editor")) {
       compilerCalls += 1;
@@ -526,6 +537,57 @@ describe("BriefingWorkflow", () => {
     expect(output.skipped).toBe(false);
     expect(dispatcherInputs).toHaveLength(1);
     expect(compilerInputs).toHaveLength(1);
+  });
+
+  test("upgrades secondary coverage to a primary source after the implications pass", async () => {
+    const primary = {
+      for: 1,
+      title: "Rust 1.90 released",
+      url: "https://blog.rust-lang.org/2026/09/01/Rust-1.90.html",
+    };
+    const { workflow, topics, briefs, bus, statuses } = setup({
+      followups: true,
+      sourceUpgrades: {
+        markdown:
+          "# Morning brief\n\n## Rust\nRust 1.90 is out [1].\n\n## Implications\nRust adoption keeps accelerating [1].",
+        upgrades: [primary],
+      },
+    });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c19", bus, logger: log, statuses },
+    );
+
+    const stored = briefs.get(output.briefId!);
+    expect(stored.sources[0]?.url).toBe(primary.url);
+    expect(stored.sources[0]?.title).toBe(primary.title);
+    expect(stored.markdown).toContain("Rust 1.90 is out");
+    expect(stored.narration).toContain("Rust 1.90 is out");
+    expect(stored.narration).not.toContain("[1]");
+  });
+
+  test("keeps the draft when the primary-source revision is not acceptable", async () => {
+    const { workflow, topics, briefs, bus, statuses } = setup({
+      followups: true,
+      sourceUpgrades: {
+        markdown: "# Rewritten\n\nNope.",
+        upgrades: [{ for: 1, title: "Official", url: "https://origin.example.com/a" }],
+      },
+    });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c20", bus, logger: log, statuses },
+    );
+
+    const stored = briefs.get(output.briefId!);
+    // The upgrade still lands, but the mangled rewrite is rejected.
+    expect(stored.sources[0]?.url).toBe("https://origin.example.com/a");
+    expect(stored.markdown).toContain("All quiet");
+    expect(stored.markdown).not.toContain("Completely different");
   });
 
   test("collects finance lookup sources alongside search results", async () => {

@@ -21,6 +21,7 @@ import type { Workflow, WorkflowContext, WorkflowRunContext } from "../core/work
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
 import { FollowupResearch } from "./FollowupResearch.ts";
+import { SourceUpgrades } from "./SourceUpgrades.ts";
 
 export { extractJson };
 
@@ -269,6 +270,23 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         const markdown = `${compiled.markdown.trimEnd()}\n\n## Implications\n\n${deeper.section.trim()}`;
         compiled = { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
         briefSources = deeper.sources;
+      }
+
+      // With the draft (and its implications) settled, give every claim a
+      // chance at a primary source — the official announcement instead of
+      // coverage about it. A failed pass keeps the draft as it is.
+      const upgraded = await this.researchPrimarySources(
+        topicNames,
+        compiled.markdown,
+        briefSources,
+        context,
+      );
+      if (upgraded) {
+        compiled = {
+          markdown: upgraded.markdown,
+          narration: sanitizeNarration(stripMarkdown(upgraded.markdown)),
+        };
+        briefSources = upgraded.sources;
       }
     }
 
@@ -609,6 +627,39 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     } catch (error) {
       span?.failed(`Digging deeper failed (${errorMessage(error)})`);
       logger.warn("follow-up research failed; keeping the draft", {
+        error: errorMessage(error),
+      });
+      return undefined;
+    }
+  }
+
+  private async researchPrimarySources(
+    topics: string[],
+    markdown: string,
+    sources: BriefSource[],
+    context: WorkflowContext,
+  ): Promise<{ markdown: string; sources: BriefSource[] } | undefined> {
+    try {
+      const upgrades = new SourceUpgrades({
+        llm: this.deps.llm,
+        webSearch: this.deps.webSearch,
+        defaults: {
+          recency: this.deps.defaults.recency,
+          resultsPerProvider: this.deps.defaults.resultsPerProvider,
+          language: this.deps.defaults.language,
+        },
+      });
+
+      const outcome = await upgrades.run({ topics, markdown, sources }, context);
+      if (!outcome) return undefined;
+
+      context.logger.info("primary-source pass complete", {
+        upgraded: outcome.upgraded,
+        revised: outcome.markdown !== markdown,
+      });
+      return { markdown: outcome.markdown, sources: outcome.sources };
+    } catch (error) {
+      context.logger.warn("primary-source pass failed; keeping the draft", {
         error: errorMessage(error),
       });
       return undefined;

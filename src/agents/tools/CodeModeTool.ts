@@ -65,6 +65,8 @@ const TOOL_DOCS: Record<string, string> = {
   Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).`,
   wikipedia_search: `wikipedia_search({ query, limit? }) -> same shape
   Wikipedia only (all language editions), for background, definitions and context.`,
+  web_search: `web_search({ query, limit?, recency? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
+  Open web search without a source allowlist, for primary sources: official announcements, company blogs and IR pages, filings, documentation, government and agency publications.`,
   bluesky_search: `bluesky_search({ query, limit?, recency? }) -> same shape
   Recent Bluesky posts, where hype, skepticism and disagreement show up.`,
   perplexity_finance: `perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }

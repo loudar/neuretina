@@ -436,8 +436,14 @@ the Workflows tab.
   briefs and returns compact findings with attributions; their sources are merged into the brief's
   source list and a short **"Implications" section is appended** to the brief — which is also read
   aloud with the rest. If nothing qualifies, or the follow-ups find nothing, the draft is kept
-  unchanged, and a failed follow-up never throws away a good brief. Disable the whole step with
-  `DEFAULT_FOLLOWUP_RESEARCH=false`.
+  unchanged, and a failed follow-up never throws away a good brief.
+- **Primary-source upgrades:** after the implications are settled, one more research agent hunts for
+  **primary sources** behind the brief's claims — the official announcement, company blog or IR page,
+  filing, documentation or government publication instead of the news coverage about it. When it
+  finds one it replaces the matching entry in the source list (citation numbers stay stable) and may
+  adjust the claim's wording to match the primary source more precisely. Source counts and the word
+  budget are capped, and a failed or fruitless pass always keeps the draft as it is.
+- Disable both post-draft passes with `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
   an event.
