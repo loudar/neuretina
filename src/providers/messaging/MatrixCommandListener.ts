@@ -422,12 +422,28 @@ export function stripReplyFallback(body: string): string {
   return lines.slice(index).join("\n").trim();
 }
 
+/**
+ * The event a reply targets. Per the Matrix spec a rich reply carries
+ * `"m.in_reply_to": { event_id }` directly under `m.relates_to` (no rel_type);
+ * thread replies use rel_type `m.thread` and embed the same marker for the
+ * quoted message, so both shapes resolve. Some bridges emit the legacy
+ * `rel_type: "m.in_reply_to"` variant with a top-level event id.
+ */
 function quotedEventIdOf(content: Record<string, unknown>): string | undefined {
   const relatesTo = content["m.relates_to"];
   if (!relatesTo || typeof relatesTo !== "object") return undefined;
+
+  const inReplyTo = (relatesTo as Record<string, unknown>)["m.in_reply_to"];
+  if (inReplyTo && typeof inReplyTo === "object") {
+    const eventId = (inReplyTo as { event_id?: unknown }).event_id;
+    if (typeof eventId === "string" && eventId) return eventId;
+  }
+
   const relation = relatesTo as { rel_type?: unknown; event_id?: unknown };
-  if (relation.rel_type !== "m.in_reply_to") return undefined;
-  return typeof relation.event_id === "string" ? relation.event_id : undefined;
+  if (relation.rel_type === "m.in_reply_to" && typeof relation.event_id === "string") {
+    return relation.event_id;
+  }
+  return undefined;
 }
 
 export function parseChatCommand(text: string): { command: string; args: string } | null {

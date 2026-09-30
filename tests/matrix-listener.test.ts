@@ -50,6 +50,7 @@ function setupListener(options: {
   allowedSenders?: string[];
   onCommand?: (command: ChatCommand) => Promise<string>;
   onMessage?: (input: MatrixTriggerInput) => Promise<{ answer?: string } | undefined>;
+  extraBatches?: Record<string, { next_batch: string; events: unknown[] }>;
 }) {
   const db = new SqliteDatabase(":memory:");
   const kv = new KeyValueRepository(db);
@@ -120,30 +121,43 @@ function setupListener(options: {
             join: {
               "!room:matrix.test": {
                 timeline: {
-                  events: [
-                    {
-                      type: "m.room.message",
-                      sender: "@user:matrix.test",
-                      event_id: "$m5",
-                      content: {
-                        msgtype: "m.text",
-                        body: "> <@bot:matrix.test> Morning brief\n\nwhat is X?",
-                        "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$botmsg" },
+                  events:
+                    options.extraBatches?.s1?.events ??
+                    [
+                      {
+                        type: "m.room.message",
+                        sender: "@user:matrix.test",
+                        event_id: "$m5",
+                        content: {
+                          msgtype: "m.text",
+                          body: "> <@bot:matrix.test> Morning brief\n\nwhat is X?",
+                          "m.relates_to": { "m.in_reply_to": { event_id: "$botmsg" } },
+                        },
                       },
-                    },
-                    {
-                      type: "m.room.message",
-                      sender: "@user:matrix.test",
-                      event_id: "$m6",
-                      content: {
-                        msgtype: "m.text",
-                        body: "> <@someone:matrix.test> hello\n\nnot for the bot",
-                        "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$someone-else" },
+                      {
+                        type: "m.room.message",
+                        sender: "@user:matrix.test",
+                        event_id: "$m6",
+                        content: {
+                          msgtype: "m.text",
+                          body: "> <@someone:matrix.test> hello\n\nnot for the bot",
+                          "m.relates_to": { "m.in_reply_to": { event_id: "$someone-else" } },
+                        },
                       },
-                    },
-                  ],
+                    ],
                 },
               },
+            },
+          },
+        });
+      }
+      const extra = options.extraBatches?.[since];
+      if (extra) {
+        return Response.json({
+          next_batch: extra.next_batch,
+          rooms: {
+            join: {
+              "!room:matrix.test": { timeline: { events: extra.events } },
             },
           },
         });
@@ -299,6 +313,71 @@ describe("MatrixCommandListener", () => {
 
     const reply = sent.find((request) => request.body?.includes("Answer text"));
     expect(reply?.body).toContain('"event_id":"$m5"');
+  });
+
+  test("answers thread replies and legacy reply markers quoting the bot", async () => {
+    const { listener, bus, sent, messages } = setupListener({
+      extraBatches: {
+        s1: {
+          next_batch: "s2",
+          events: [
+            {
+              type: "m.room.message",
+              sender: "@user:matrix.test",
+              event_id: "$m7",
+              content: {
+                msgtype: "m.text",
+                body: "> <@bot:matrix.test> Morning brief\n\nwhat about X?",
+                "m.relates_to": {
+                  rel_type: "m.thread",
+                  event_id: "$threadroot",
+                  "m.in_reply_to": { event_id: "$botmsg" },
+                },
+              },
+            },
+            {
+              type: "m.room.message",
+              sender: "@user:matrix.test",
+              event_id: "$m8",
+              content: {
+                msgtype: "m.text",
+                body: "> <@bot:matrix.test> Morning brief\n\nlegacy quote",
+                "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$botmsg" },
+              },
+            },
+          ],
+        },
+      },
+    });
+    bus.publish(
+      "message.text.sent",
+      { correlationId: "c-bot", channel: "!room:matrix.test", eventId: "$botmsg" },
+      { source: "test" },
+    );
+
+    await listener.start();
+    const deadline = Date.now() + 3000;
+    while (messages.length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    listener.stop();
+
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({
+      body: "what about X?",
+      quotedEventId: "$botmsg",
+      replyToBot: true,
+    });
+    expect(messages[1]).toMatchObject({
+      body: "legacy quote",
+      quotedEventId: "$botmsg",
+      replyToBot: true,
+    });
+
+    const replies = sent.filter((request) => request.body?.includes("Answer text"));
+    expect(replies).toHaveLength(2);
+    expect(replies[0]?.body).toContain('"event_id":"$m7"');
+    expect(replies[1]?.body).toContain('"event_id":"$m8"');
   });
 });
 
