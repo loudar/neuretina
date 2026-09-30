@@ -335,13 +335,10 @@
   }
 
   .reading-sizes {
-    position: absolute;
-    top: 0;
-    right: 0;
-    z-index: 1;
-    display: inline-flex;
-    align-items: center;
+    display: flex;
+    justify-content: flex-end;
     gap: 0.1rem;
+    margin-bottom: 0.15rem;
   }
 
   .aa {
