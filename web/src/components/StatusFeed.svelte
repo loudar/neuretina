@@ -151,9 +151,13 @@
       <h3>{title}</h3>
       <div class="chips">
         {#if runningCount > 0}
-          <Chip variant="assist" icon={iconBolt}>{runningCount} running</Chip>
+          <span class="tone-accent">
+            <Chip variant="assist" icon={iconBolt}>{runningCount} running</Chip>
+          </span>
         {:else}
-          <Chip variant="assist" icon={iconCheck}>idle</Chip>
+          <span class="tone-success">
+            <Chip variant="assist" icon={iconCheck}>idle</Chip>
+          </span>
         {/if}
       </div>
     </div>

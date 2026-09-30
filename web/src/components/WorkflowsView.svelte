@@ -299,15 +299,17 @@
       <Chip variant="assist" icon={iconSchedule}>
         {formatRelativeTime(selected.startedAt)}
       </Chip>
-      <Button
-        variant="text"
-        iconType="full"
-        title="Delete run"
-        onclick={() => (confirmingDelete = true)}
-        disabled={deleting}
-      >
-        <Icon icon={iconDelete} />
-      </Button>
+      <span class="danger">
+        <Button
+          variant="text"
+          iconType="full"
+          title="Delete run"
+          onclick={() => (confirmingDelete = true)}
+          disabled={deleting}
+        >
+          <Icon icon={iconDelete} />
+        </Button>
+      </span>
     {/if}
   {/snippet}
 
@@ -356,12 +358,16 @@
     <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
       Cancel
     </Button>
-    <Button variant="text" onclick={() => deleteRun(false)} disabled={deleting}>
-      Keep artifacts
-    </Button>
-    <Button variant="filled" onclick={() => deleteRun(true)} disabled={deleting}>
-      Delete artifacts too
-    </Button>
+    <span class="danger">
+      <Button variant="text" onclick={() => deleteRun(false)} disabled={deleting}>
+        Keep artifacts
+      </Button>
+    </span>
+    <span class="danger">
+      <Button variant="filled" onclick={() => deleteRun(true)} disabled={deleting}>
+        Delete artifacts too
+      </Button>
+    </span>
   {/snippet}
 </Dialog>
 

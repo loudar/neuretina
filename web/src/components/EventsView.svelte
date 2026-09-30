@@ -53,7 +53,9 @@
 
 <Pane variant="list" title="Live events">
   {#snippet actions()}
-    <Button variant="text" onclick={clear}>Clear</Button>
+    <span class="danger">
+      <Button variant="text" onclick={clear}>Clear</Button>
+    </span>
   {/snippet}
 
   <div class="filter">

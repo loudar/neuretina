@@ -47,7 +47,7 @@
   }
 
   .status.succeeded {
-    color: light-dark(#1f6f36, #a9d9b4);
+    color: var(--m3c-success);
   }
 
   .status.failed {

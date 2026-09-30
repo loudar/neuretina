@@ -183,6 +183,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       language: config.qwenTts.language,
       speed: config.qwenTts.speed,
       apiKey: config.qwenTts.apiKey,
+      timeoutMs: config.qwenTts.timeoutMs,
     });
 
   const buildMatrixClient = (): MatrixClient =>

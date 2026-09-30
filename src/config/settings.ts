@@ -224,6 +224,18 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
       config.qwenTts.apiKey = optional(value);
     },
   },
+  {
+    key: "QWEN_TTS_TIMEOUT_MS",
+    group: "Speech (Qwen3-TTS)",
+    label: "Synthesis timeout (ms)",
+    description:
+      "Per-attempt limit for one synthesis request. CPU inference needs minutes per brief; GPU servers answer in seconds.",
+    kind: "number",
+    default: "600000",
+    apply: (config, value) => {
+      config.qwenTts.timeoutMs = toNumber(value, 600_000);
+    },
+  },
 
   {
     key: "BLUESKY_IDENTIFIER",

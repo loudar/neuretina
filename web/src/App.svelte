@@ -14,6 +14,7 @@
   import { eventStream } from "./lib/events.svelte";
   import { statusFeed } from "./lib/statuses.svelte";
   import { configState } from "./lib/config.svelte";
+  import { mountCitationPopovers } from "./lib/citePopover";
   import { paths, router } from "./lib/router.svelte";
   import BriefsView from "./components/BriefsView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
@@ -77,13 +78,25 @@
     };
   });
 
+  const healthTone = $derived(
+    health.state === "up"
+      ? "tone-success"
+      : health.state === "partial"
+        ? "tone-warning"
+        : health.state === "down"
+          ? "tone-error"
+          : "",
+  );
+
   onMount(() => {
     eventStream.start();
     statusFeed.start();
     void configState.load();
+    const stopCitationPopovers = mountCitationPopovers();
     return () => {
       eventStream.stop();
       statusFeed.stop();
+      stopCitationPopovers();
     };
   });
 </script>
@@ -106,7 +119,7 @@
     {/each}
 
     <div class="rail-footer">
-      <span class="health {health.state}" title={health.detail}>
+      <span class="health {healthTone}" title={health.detail}>
         <Chip
           variant="assist"
           icon={health.state === "up"
@@ -174,32 +187,5 @@
 
   .health :global(button.m3-container) {
     border-color: transparent;
-  }
-
-  .health.up :global(button.m3-container) {
-    background-color: light-dark(#e7f4ea, #22392a);
-    color: light-dark(#1f6f36, #a9d9b4);
-  }
-
-  .health.up :global(button.m3-container .leading) {
-    color: inherit;
-  }
-
-  .health.partial :global(button.m3-container) {
-    background-color: var(--m3c-tertiary-container);
-    color: var(--m3c-on-tertiary-container);
-  }
-
-  .health.partial :global(button.m3-container .leading) {
-    color: inherit;
-  }
-
-  .health.down :global(button.m3-container) {
-    background-color: var(--m3c-error-container);
-    color: var(--m3c-on-error-container);
-  }
-
-  .health.down :global(button.m3-container .leading) {
-    color: inherit;
   }
 </style>

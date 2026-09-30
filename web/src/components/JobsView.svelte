@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Dialog, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
@@ -25,6 +25,8 @@
   let busy = $state(false);
   let saving = $state(false);
   let running = $state(false);
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
 
   let name = $state("morning-brief");
   let cron = $state("0 7 * * *");
@@ -144,13 +146,17 @@
   }
 
   async function remove(): Promise<void> {
-    if (!selected) return;
+    if (!selected || deleting) return;
     const target = selected;
+    deleting = true;
     router.navigate(paths.jobs());
     try {
       await commands.jobs.remove(target.id);
+      confirmingDelete = false;
     } catch (error) {
       reportError(error);
+    } finally {
+      deleting = false;
     }
   }
 
@@ -229,9 +235,16 @@
       <Button variant="tonal" iconType="left" onclick={run} disabled={running}>
         <Icon icon={iconPlay} /> Run now
       </Button>
-      <Button variant="text" iconType="full" onclick={remove}>
-        <Icon icon={iconDelete} />
-      </Button>
+      <span class="danger">
+        <Button
+          variant="text"
+          iconType="full"
+          onclick={() => (confirmingDelete = true)}
+          disabled={deleting}
+        >
+          <Icon icon={iconDelete} />
+        </Button>
+      </span>
     {/if}
   {/snippet}
 
@@ -271,6 +284,21 @@
     <p class="muted">Select a task to edit it, run it, or add a new one on the left.</p>
   {/if}
 </Pane>
+
+<Dialog headline="Delete this task?" bind:open={confirmingDelete}>
+  <p>
+    Scheduled task "{selected?.name}" (workflow {selected?.workflow}, cron {selected?.cron}) will
+    be permanently removed. Past runs and artifacts are kept. This cannot be undone.
+  </p>
+  {#snippet buttons()}
+    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
+      Cancel
+    </Button>
+    <span class="danger">
+      <Button variant="filled" onclick={remove} disabled={deleting}>Delete</Button>
+    </span>
+  {/snippet}
+</Dialog>
 
 <style>
   .add-form {

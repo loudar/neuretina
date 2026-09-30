@@ -21,6 +21,8 @@ export interface QwenTtsOptions {
   speed?: number;
   /** Only needed when the local server enforces auth. */
   apiKey?: string;
+  /** Per-attempt synthesis timeout (default 90s); CPU servers need minutes. */
+  timeoutMs?: number;
 }
 
 /**
@@ -89,7 +91,7 @@ export class QwenTtsProvider implements TextToSpeechProvider {
         },
         body: JSON.stringify(payload),
       },
-      { retries: 2 },
+      { retries: 2, timeoutMs: this.options.timeoutMs },
     );
 
     const buffer = await response.arrayBuffer();

@@ -74,6 +74,8 @@ export interface AppConfig {
     language?: string;
     speed: number;
     apiKey?: string;
+    /** Per-attempt synthesis timeout; CPU servers need minutes per brief. */
+    timeoutMs: number;
   };
   /** Kept for later; the ElevenLabs provider module is currently unused. */
   elevenlabs: {
@@ -192,6 +194,10 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       language: str(env, "QWEN_TTS_LANGUAGE"),
       speed: num(env, "QWEN_TTS_SPEED", 1),
       apiKey: str(env, "QWEN_TTS_API_KEY"),
+      // Local CPU inference runs several times slower than real time, so the
+      // default leaves room for a minute of narration (GPU servers answer
+      // in seconds and never come close to this bound).
+      timeoutMs: num(env, "QWEN_TTS_TIMEOUT_MS", 600_000),
     },
     elevenlabs: {
       apiKey: str(env, "KEY_ELEVENLABS"),

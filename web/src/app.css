@@ -11,7 +11,7 @@
 }
 
 /*
- * Material 3 theme, baseline palette (seed #6750a4), light + dark.
+ * Material 3 theme, light + dark.
  * Token names follow the M3 Svelte conventions (--m3c-*).
  */
 :root {
@@ -19,26 +19,26 @@
   --density: 0;
   --m3-font: "Google Sans Flex Variable", "Google Sans Flex", system-ui, sans-serif;
 
-  --m3c-primary: #6750a4;
+  --m3c-primary: #43474e;
   --m3c-on-primary: #ffffff;
-  --m3c-primary-container: #eaddff;
-  --m3c-on-primary-container: #21005d;
-  --m3c-primary-container-subtle: #eaddff;
-  --m3c-on-primary-container-subtle: #21005d;
+  --m3c-primary-container: #dde3ea;
+  --m3c-on-primary-container: #171c22;
+  --m3c-primary-container-subtle: #dde3ea;
+  --m3c-on-primary-container-subtle: #171c22;
 
-  --m3c-secondary: #625b71;
+  --m3c-secondary: #5b6067;
   --m3c-on-secondary: #ffffff;
-  --m3c-secondary-container: #e8def8;
-  --m3c-on-secondary-container: #1d192b;
-  --m3c-secondary-container-subtle: #e8def8;
-  --m3c-on-secondary-container-subtle: #1d192b;
+  --m3c-secondary-container: #e1e4ea;
+  --m3c-on-secondary-container: #191c20;
+  --m3c-secondary-container-subtle: #e1e4ea;
+  --m3c-on-secondary-container-subtle: #191c20;
 
-  --m3c-tertiary: #7d5260;
+  --m3c-tertiary: #00696d;
   --m3c-on-tertiary: #ffffff;
-  --m3c-tertiary-container: #ffd8e4;
-  --m3c-on-tertiary-container: #31111d;
-  --m3c-tertiary-container-subtle: #ffd8e4;
-  --m3c-on-tertiary-container-subtle: #31111d;
+  --m3c-tertiary-container: #a6eef1;
+  --m3c-on-tertiary-container: #00363a;
+  --m3c-tertiary-container-subtle: #a6eef1;
+  --m3c-on-tertiary-container-subtle: #00363a;
 
   --m3c-error: #b3261e;
   --m3c-on-error: #ffffff;
@@ -47,45 +47,55 @@
   --m3c-error-container-subtle: #f9dedc;
   --m3c-on-error-container-subtle: #410e0b;
 
-  --m3c-surface: #fffbfe;
-  --m3c-on-surface: #1c1b1f;
-  --m3c-on-surface-variant: #49454f;
+  --m3c-success: #1f6f36;
+  --m3c-on-success: #ffffff;
+  --m3c-success-container: #e3f4e8;
+  --m3c-on-success-container: #1b5c2e;
+
+  --m3c-warning: #8a6100;
+  --m3c-on-warning: #ffffff;
+  --m3c-warning-container: #fdf0cf;
+  --m3c-on-warning-container: #6d4d00;
+
+  --m3c-surface: #fafafb;
+  --m3c-on-surface: #1a1c1e;
+  --m3c-on-surface-variant: #43474e;
   --m3c-surface-container-lowest: #ffffff;
-  --m3c-surface-container-low: #f7f2fa;
-  --m3c-surface-container: #f3edf7;
-  --m3c-surface-container-high: #ece6f0;
-  --m3c-surface-container-highest: #e6e0e9;
-  --m3c-outline: #79747e;
-  --m3c-outline-variant: #cac4d0;
-  --m3c-inverse-surface: #313033;
-  --m3c-inverse-on-surface: #f4eff4;
-  --m3c-inverse-primary: #d0bcff;
+  --m3c-surface-container-low: #f4f4f6;
+  --m3c-surface-container: #eeeff1;
+  --m3c-surface-container-high: #e8e9ec;
+  --m3c-surface-container-highest: #e2e3e6;
+  --m3c-outline: #74777d;
+  --m3c-outline-variant: #c3c6cc;
+  --m3c-inverse-surface: #2f3033;
+  --m3c-inverse-on-surface: #f1f0f2;
+  --m3c-inverse-primary: #c2c7cf;
   --m3c-shadow: #000000;
   --m3c-scrim: #000000;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --m3c-primary: #d0bcff;
-    --m3c-on-primary: #381e72;
-    --m3c-primary-container: #4f378b;
-    --m3c-on-primary-container: #eaddff;
-    --m3c-primary-container-subtle: #4f378b;
-    --m3c-on-primary-container-subtle: #eaddff;
+    --m3c-primary: #c2c7cf;
+    --m3c-on-primary: #2c3136;
+    --m3c-primary-container: #41464d;
+    --m3c-on-primary-container: #dfe3e9;
+    --m3c-primary-container-subtle: #41464d;
+    --m3c-on-primary-container-subtle: #dfe3e9;
 
-    --m3c-secondary: #ccc2dc;
-    --m3c-on-secondary: #332d41;
-    --m3c-secondary-container: #4a4458;
-    --m3c-on-secondary-container: #e8def8;
-    --m3c-secondary-container-subtle: #4a4458;
-    --m3c-on-secondary-container-subtle: #e8def8;
+    --m3c-secondary: #c2c6cd;
+    --m3c-on-secondary: #2c3136;
+    --m3c-secondary-container: #41464d;
+    --m3c-on-secondary-container: #dfe2e8;
+    --m3c-secondary-container-subtle: #41464d;
+    --m3c-on-secondary-container-subtle: #dfe2e8;
 
-    --m3c-tertiary: #efb8c8;
-    --m3c-on-tertiary: #492532;
-    --m3c-tertiary-container: #633b48;
-    --m3c-on-tertiary-container: #ffd8e4;
-    --m3c-tertiary-container-subtle: #633b48;
-    --m3c-on-tertiary-container-subtle: #ffd8e4;
+    --m3c-tertiary: #7fd5da;
+    --m3c-on-tertiary: #00373a;
+    --m3c-tertiary-container: #004f53;
+    --m3c-on-tertiary-container: #9bf0f4;
+    --m3c-tertiary-container-subtle: #004f53;
+    --m3c-on-tertiary-container-subtle: #9bf0f4;
 
     --m3c-error: #f2b8b5;
     --m3c-on-error: #601410;
@@ -94,19 +104,29 @@
     --m3c-error-container-subtle: #8c1d18;
     --m3c-on-error-container-subtle: #f9dedc;
 
-    --m3c-surface: #1c1b1f;
-    --m3c-on-surface: #e6e1e5;
-    --m3c-on-surface-variant: #cac4d0;
-    --m3c-surface-container-lowest: #0f0d13;
-    --m3c-surface-container-low: #1d1b20;
-    --m3c-surface-container: #211f26;
-    --m3c-surface-container-high: #2b2930;
-    --m3c-surface-container-highest: #36343b;
-    --m3c-outline: #938f99;
-    --m3c-outline-variant: #49454f;
-    --m3c-inverse-surface: #e6e1e5;
-    --m3c-inverse-on-surface: #313033;
-    --m3c-inverse-primary: #6750a4;
+    --m3c-success: #a9d9b4;
+    --m3c-on-success: #0d3d1f;
+    --m3c-success-container: #22392a;
+    --m3c-on-success-container: #c5ead0;
+
+    --m3c-warning: #e8c26a;
+    --m3c-on-warning: #3f2e00;
+    --m3c-warning-container: #3b2f10;
+    --m3c-on-warning-container: #f0d491;
+
+    --m3c-surface: #121416;
+    --m3c-on-surface: #e2e2e5;
+    --m3c-on-surface-variant: #c2c6cc;
+    --m3c-surface-container-lowest: #0d0e10;
+    --m3c-surface-container-low: #1a1b1e;
+    --m3c-surface-container: #1e2023;
+    --m3c-surface-container-high: #282a2e;
+    --m3c-surface-container-highest: #333539;
+    --m3c-outline: #8c9096;
+    --m3c-outline-variant: #42464c;
+    --m3c-inverse-surface: #e2e2e5;
+    --m3c-inverse-on-surface: #2f3033;
+    --m3c-inverse-primary: #43474e;
   }
 }
 
@@ -193,6 +213,147 @@ h3 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.danger {
+  display: contents;
+  --m3c-primary: var(--m3c-error);
+  --m3c-on-primary: var(--m3c-on-error);
+  --m3c-secondary-container: var(--m3c-error-container);
+  --m3c-on-secondary-container: var(--m3c-on-error-container);
+}
+
+.tone-success,
+.tone-warning,
+.tone-error,
+.tone-accent {
+  display: contents;
+  --m3c-primary: currentColor;
+}
+
+.tone-success > .m3-container {
+  background-color: var(--m3c-success-container);
+  border-color: transparent;
+  color: var(--m3c-on-success-container);
+}
+
+.tone-warning > .m3-container {
+  background-color: var(--m3c-warning-container);
+  border-color: transparent;
+  color: var(--m3c-on-warning-container);
+}
+
+.tone-error > .m3-container {
+  background-color: var(--m3c-error-container);
+  border-color: transparent;
+  color: var(--m3c-on-error-container);
+}
+
+.tone-accent > .m3-container {
+  background-color: var(--m3c-tertiary-container);
+  border-color: transparent;
+  color: var(--m3c-on-tertiary-container);
+}
+
+.cite-anchor {
+  position: relative;
+}
+
+.cite-anchor:hover {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--m3c-primary);
+  text-underline-offset: 0.22em;
+  cursor: help;
+}
+
+.cite-anchor:focus-visible {
+  outline: 2px solid var(--m3c-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.cite-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  z-index: 90;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 12rem;
+  max-width: min(26rem, 80vw);
+  padding: 0.3rem;
+  border: 1px solid var(--m3c-outline-variant);
+  border-radius: var(--m3-shape-medium);
+  background-color: var(--m3c-surface-container-high);
+  box-shadow: var(--m3-elevation-3);
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: start;
+  white-space: normal;
+}
+
+.cite-popover::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: -0.5rem;
+  height: 0.5rem;
+}
+
+.cite-anchor:hover .cite-popover,
+.cite-anchor:focus-within .cite-popover {
+  display: flex;
+}
+
+.cite-popover-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--m3-shape-small);
+  color: var(--m3c-on-surface);
+  text-decoration: none;
+}
+
+.cite-popover-item:hover {
+  background-color: var(--m3c-surface-container-highest);
+}
+
+.cite-ref {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  margin-top: 0.1rem;
+  padding: 0 0.3em;
+  border-radius: var(--m3-shape-full);
+  background-color: var(--m3c-tertiary-container);
+  color: var(--m3c-on-tertiary-container);
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.cite-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.cite-popover-title {
+  font-size: 0.92rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.cite-popover-meta {
+  color: var(--m3c-on-surface-variant);
+  font-size: 0.74rem;
+  line-height: 1.3;
 }
 
 

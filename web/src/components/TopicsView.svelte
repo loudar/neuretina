@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     Button,
+    Dialog,
     Icon,
     ListItem,
     Switch,
@@ -28,6 +29,8 @@
   let editDescription = $state("");
   let saving = $state(false);
   let togglingId = $state<string | null>(null);
+  let confirmingDelete = $state(false);
+  let deleting = $state(false);
 
   const route = $derived(router.current);
   const topicId = $derived(route.segments[0] ?? null);
@@ -111,13 +114,17 @@
   }
 
   async function remove(): Promise<void> {
-    if (!selected) return;
+    if (!selected || deleting) return;
     const target = selected;
+    deleting = true;
     router.navigate(paths.topics());
     try {
       await commands.topics.remove(target.id);
+      confirmingDelete = false;
     } catch (error) {
       reportError(error);
+    } finally {
+      deleting = false;
     }
   }
 </script>
@@ -185,9 +192,16 @@
         />
         <span class="toggle-label">{selected.muted ? "Excluded" : "Included"}</span>
       </label>
-      <Button variant="text" iconType="full" onclick={remove}>
-        <Icon icon={iconDelete} />
-      </Button>
+      <span class="danger">
+        <Button
+          variant="text"
+          iconType="full"
+          onclick={() => (confirmingDelete = true)}
+          disabled={deleting}
+        >
+          <Icon icon={iconDelete} />
+        </Button>
+      </span>
     {/if}
   {/snippet}
 
@@ -209,6 +223,21 @@
     <p class="muted">Select a topic to edit it, or add a new one on the left.</p>
   {/if}
 </Pane>
+
+<Dialog headline="Delete this topic?" bind:open={confirmingDelete}>
+  <p>
+    "{selected?.name}" will be permanently removed. Existing briefs are kept. This cannot be
+    undone.
+  </p>
+  {#snippet buttons()}
+    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
+      Cancel
+    </Button>
+    <span class="danger">
+      <Button variant="filled" onclick={remove} disabled={deleting}>Delete</Button>
+    </span>
+  {/snippet}
+</Dialog>
 
 <style>
   .add-form {

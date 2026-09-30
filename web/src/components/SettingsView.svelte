@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Button, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Dialog, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconSave from "@ktibow/iconset-material-symbols/save";
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
@@ -13,6 +13,8 @@
   let drafts = $state<Record<string, string>>({});
   let loading = $state(true);
   let busy = $state<string | null>(null);
+  let resetTarget = $state<SettingInfo | null>(null);
+  let confirmingReset = $state(false);
 
   const groups = $derived([...new Set(settings.map((setting) => setting.group))]);
 
@@ -76,6 +78,13 @@
     } finally {
       busy = null;
     }
+  }
+
+  function confirmReset(): void {
+    const target = resetTarget;
+    if (!target) return;
+    confirmingReset = false;
+    void clear(target);
   }
 
   async function toggle(setting: SettingInfo, checked: boolean): Promise<void> {
@@ -200,7 +209,10 @@
                     variant="outlined"
                     iconType="left"
                     title="Delete the stored database value"
-                    onclick={() => void clear(setting)}
+                    onclick={() => {
+                      resetTarget = setting;
+                      confirmingReset = true;
+                    }}
                     disabled={busy === setting.key}
                   >
                     <Icon icon={iconUndo} /> Reset
@@ -213,6 +225,19 @@
       </section>
     {/each}
   {/if}
+
+  <Dialog headline="Reset this setting?" bind:open={confirmingReset}>
+    <p>
+      The stored value for "{resetTarget?.label}" will be deleted, so its default or environment
+      value applies again.
+    </p>
+    {#snippet buttons()}
+      <Button variant="text" onclick={() => (confirmingReset = false)}>Cancel</Button>
+      <span class="danger">
+        <Button variant="filled" onclick={confirmReset}>Reset</Button>
+      </span>
+    {/snippet}
+  </Dialog>
 </Pane>
 
 <style>
@@ -266,7 +291,7 @@
 
   .override {
     display: inline-flex;
-    color: light-dark(#9a6700, #e8c26a);
+    color: var(--m3c-warning);
     cursor: help;
   }
 
@@ -281,7 +306,7 @@
   }
 
   .source.env {
-    color: light-dark(#9a6700, #e8c26a);
+    color: var(--m3c-warning);
   }
 
   .control {

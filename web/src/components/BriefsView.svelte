@@ -1,31 +1,21 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, Switch, TextFieldOutlined } from "m3-svelte";
-  import iconClose from "@ktibow/iconset-material-symbols/close";
+  import { Button, Dialog, Icon, Switch } from "m3-svelte";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
-  import iconExpandMore from "@ktibow/iconset-material-symbols/expand-more";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconLink from "@ktibow/iconset-material-symbols/link";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
-  import iconOpenInNew from "@ktibow/iconset-material-symbols/open-in-new";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
-  import iconSearch from "@ktibow/iconset-material-symbols/search";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands, type Brief } from "../lib/api";
-  import { renderCitations } from "../lib/citations";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
-  import {
-    domainInitial,
-    filterSources,
-    groupSourcesByDomain,
-    providerLabel,
-  } from "../lib/sources";
-  import { markdownToHtml } from "../../../src/core/markdown.ts";
   import DataList from "./DataList.svelte";
+  import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
+  import SourcesList from "./SourcesList.svelte";
 
   let briefs = $state<Brief[]>([]);
   let selected = $state<Brief | null>(null);
@@ -52,13 +42,6 @@
     sourceFilter = value;
     router.navigate(paths.briefs(briefId, { source: value.trim() || undefined }), { replace: true });
   }
-
-  const filteredSources = $derived(filterSources(selected?.sources ?? [], sourceFilter));
-  const sourceGroups = $derived(groupSourcesByDomain(filteredSources));
-  const filtering = $derived(sourceFilter.trim().length > 0);
-  const briefHtml = $derived(
-    renderCitations(markdownToHtml(selected?.markdown ?? ""), selected?.sources ?? []),
-  );
 
   async function refreshList(): Promise<void> {
     try {
@@ -234,14 +217,16 @@
       <Button variant="tonal" iconType="left" onclick={resend} disabled={resending}>
         <Icon icon={iconSend} /> Re-send
       </Button>
-      <Button
-        variant="text"
-        iconType="full"
-        onclick={() => (confirmingDelete = true)}
-        disabled={deleting}
-      >
-        <Icon icon={iconDelete} />
-      </Button>
+      <span class="danger">
+        <Button
+          variant="text"
+          iconType="full"
+          onclick={() => (confirmingDelete = true)}
+          disabled={deleting}
+        >
+          <Icon icon={iconDelete} />
+        </Button>
+      </span>
     {/if}
   {/snippet}
 
@@ -252,96 +237,9 @@
       <p class="muted">Loading audio…</p>
     {/if}
 
-    <div class="brief-text">{@html briefHtml}</div>
+    <MarkdownView markdown={selected.markdown} sources={selected.sources} />
 
-    {#if selected.sources.length > 0}
-      <div class="source-section">
-        <div class="source-section-head">
-          <h3>Sources</h3>
-          <span class="total">
-            {filtering
-              ? `${filteredSources.length} of ${selected.sources.length}`
-              : selected.sources.length}
-          </span>
-        </div>
-        <TextFieldOutlined
-          label="Filter sources"
-          leadingIcon={iconSearch}
-          value={sourceFilter}
-          oninput={(event) => setSourceFilter(event.currentTarget.value)}
-          trailing={filtering
-            ? { icon: iconClose, onclick: () => setSourceFilter("") }
-            : undefined}
-        />
-        {#if sourceGroups.length === 0}
-          <p class="muted">No sources match "{sourceFilter.trim()}".</p>
-        {:else}
-          <div class="source-groups">
-            {#each sourceGroups as group (group.domain)}
-              <details class="source-group" open={filtering}>
-                <summary>
-                  <span class="monogram" aria-hidden="true">{domainInitial(group.domain)}</span>
-                  <span class="domain">{group.domain}</span>
-                  <span class="count">{group.sources.length}</span>
-                  <span class="provider-tags">
-                    {#each group.providers as provider (provider)}
-                      <span class="provider-tag" data-provider={provider}>
-                        {providerLabel(provider)}
-                      </span>
-                    {/each}
-                  </span>
-                  <span class="chevron"><Icon icon={iconExpandMore} size={18} /></span>
-                </summary>
-                <ul>
-                  {#each group.sources as source (source.url)}
-                    <li class="source">
-                      <a class="source-head" href={source.url} target="_blank" rel="noreferrer">
-                        <span class="title">{source.title}</span>
-                        <span class="open" aria-hidden="true">
-                          <Icon icon={iconOpenInNew} size={15} />
-                        </span>
-                      </a>
-                      {#if source.provider === "bluesky" && source.snippet}
-                        <p class="snippet">{source.snippet}</p>
-                      {/if}
-                      {#if source.media?.length}
-                        <div class="media">
-                          {#each source.media as item, index (item.thumbUrl + index)}
-                            <a
-                              class="media-item"
-                              href={item.type === "video" ? source.url : item.fullUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              title={item.alt ?? "Open media"}
-                            >
-                              <img
-                                src={item.thumbUrl}
-                                alt={item.alt ?? ""}
-                                loading="lazy"
-                                width={item.width}
-                                height={item.height}
-                                style={item.width && item.height
-                                  ? `aspect-ratio: ${item.width} / ${item.height};`
-                                  : ""}
-                              />
-                              {#if item.type === "video"}
-                                <span class="play" aria-hidden="true">
-                                  <Icon icon={iconPlay} size={18} />
-                                </span>
-                              {/if}
-                            </a>
-                          {/each}
-                        </div>
-                      {/if}
-                    </li>
-                  {/each}
-                </ul>
-              </details>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
+    <SourcesList sources={selected.sources} filter={sourceFilter} onfilter={setSourceFilter} />
   {:else}
     <p class="muted">Select a brief to read it and play the audio.</p>
   {/if}
@@ -356,7 +254,9 @@
       <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
         Cancel
       </Button>
-      <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
+      <span class="danger">
+        <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
+      </span>
     {/snippet}
   </Dialog>
 </Pane>
@@ -455,285 +355,5 @@
   .badge.audio:not(.has-audio) {
     border: 1px solid var(--m3c-outline-variant);
     color: var(--m3c-on-surface-variant);
-  }
-
-  .brief-text {
-    padding: 0.25rem 0;
-    font-size: 0.95rem;
-    line-height: 1.55;
-  }
-
-  .brief-text :global(> :first-child) {
-    margin-top: 0;
-  }
-
-  .brief-text :global(h2),
-  .brief-text :global(h3),
-  .brief-text :global(h4) {
-    margin: 0.9rem 0 0.4rem;
-    font-size: 1.05rem;
-    font-weight: 600;
-  }
-
-  .brief-text :global(p) {
-    margin: 0 0 0.7rem;
-  }
-
-  .brief-text :global(ul),
-  .brief-text :global(ol) {
-    margin: 0 0 0.7rem;
-    padding-inline-start: 1.25rem;
-  }
-
-  .brief-text :global(li) {
-    margin-bottom: 0.2rem;
-  }
-
-  .brief-text :global(blockquote) {
-    margin: 0 0 0.7rem;
-    padding-inline-start: 0.75rem;
-    border-inline-start: 3px solid var(--m3c-outline-variant);
-    color: var(--m3c-on-surface-variant);
-  }
-
-  .brief-text :global(a) {
-    color: var(--m3c-primary);
-  }
-
-  .brief-text :global(a.cite) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 1.25em;
-    height: 1.25em;
-    padding: 0 0.35em;
-    margin: 0 0.1em;
-    border-radius: var(--m3-shape-full);
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-    font-size: 0.68rem;
-    font-weight: 600;
-    line-height: 1;
-    text-decoration: none;
-    vertical-align: 0.2em;
-  }
-
-  .brief-text :global(a.cite:hover) {
-    background-color: var(--m3c-primary-container);
-    color: var(--m3c-on-primary-container);
-  }
-
-  .brief-text :global(code) {
-    padding: 0.05rem 0.3rem;
-    border-radius: var(--m3-shape-small);
-    background-color: var(--m3c-surface-container-high);
-    font-size: 0.85em;
-  }
-
-  .source-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    margin-top: 1rem;
-  }
-
-  .source-section-head {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .total {
-    padding: 0.05rem 0.5rem;
-    border-radius: var(--m3-shape-full);
-    background-color: var(--m3c-surface-container-highest);
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
-    line-height: 1.5;
-  }
-
-  .source-groups {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-
-  .source-group {
-    border: 1px solid var(--m3c-outline-variant);
-    border-radius: var(--m3-shape-medium);
-    background-color: var(--m3c-surface-container-low);
-    overflow: hidden;
-  }
-
-  .source-group summary {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0.75rem;
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-
-  .source-group summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .source-group summary:hover {
-    background-color: var(--m3c-surface-container-high);
-  }
-
-  .monogram {
-    display: grid;
-    place-items: center;
-    width: 1.6rem;
-    height: 1.6rem;
-    border-radius: var(--m3-shape-full);
-    background-color: var(--m3c-secondary-container);
-    color: var(--m3c-on-secondary-container);
-    font-size: 0.8rem;
-    font-weight: 600;
-  }
-
-  .domain {
-    font-weight: 600;
-    font-size: 0.9rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .count {
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
-  }
-
-  .provider-tags {
-    display: inline-flex;
-    gap: 0.3rem;
-    margin-left: auto;
-  }
-
-  .provider-tag {
-    padding: 0.05rem 0.45rem;
-    border-radius: var(--m3-shape-full);
-    border: 1px solid var(--m3c-outline-variant);
-    color: var(--m3c-on-surface-variant);
-    font-size: 0.68rem;
-    line-height: 1.5;
-    white-space: nowrap;
-  }
-
-  .provider-tag[data-provider="perplexity"] {
-    border-color: transparent;
-    background-color: var(--m3c-primary-container);
-    color: var(--m3c-on-primary-container);
-  }
-
-  .provider-tag[data-provider="bluesky"] {
-    border-color: transparent;
-    background-color: var(--m3c-tertiary-container);
-    color: var(--m3c-on-tertiary-container);
-  }
-
-  .chevron {
-    display: inline-flex;
-    color: var(--m3c-on-surface-variant);
-    transition: transform 150ms;
-  }
-
-  .source-group[open] .chevron {
-    transform: rotate(180deg);
-  }
-
-  .source-group ul {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin: 0;
-    padding: 0 0.4rem 0.4rem;
-    list-style: none;
-  }
-
-  .source {
-    padding: 0.5rem 0.6rem;
-    border-radius: var(--m3-shape-small);
-    background-color: var(--m3c-surface-container-highest);
-  }
-
-  .source:hover {
-    background-color: var(--m3c-surface-container-high);
-  }
-
-  .source-head {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    color: var(--m3c-on-surface);
-    text-decoration: none;
-  }
-
-  .title {
-    flex: 1;
-    min-width: 0;
-    font-size: 0.88rem;
-    line-height: 1.35;
-  }
-
-  .open {
-    display: inline-flex;
-    color: var(--m3c-on-surface-variant);
-    opacity: 0;
-    transition: opacity 120ms;
-  }
-
-  .source-head:hover .open,
-  .source-head:focus-visible .open {
-    opacity: 1;
-  }
-
-  .snippet {
-    margin: 0.2rem 0 0;
-    font-size: 0.84rem;
-    line-height: 1.45;
-    color: var(--m3c-on-surface-variant);
-    white-space: pre-wrap;
-  }
-
-  .media {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.45rem;
-  }
-
-  .media-item {
-    position: relative;
-    display: inline-flex;
-    border-radius: var(--m3-shape-small);
-    overflow: hidden;
-  }
-
-  .media img {
-    display: block;
-    height: 7rem;
-    width: auto;
-    max-width: 100%;
-    object-fit: cover;
-    background-color: var(--m3c-surface-container-highest);
-  }
-
-  .media-item:hover img {
-    opacity: 0.9;
-  }
-
-  .play {
-    position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    color: #fff;
-    background-color: rgba(0, 0, 0, 0.25);
-    pointer-events: none;
   }
 </style>
