@@ -240,8 +240,11 @@ qwen3-tts-server, or a similar wrapper.
   times slower than real time (a GGML 0.6B model manages roughly 5-6x real time on a 12-core
   desktop CPU), so a brief can take minutes; GPU servers answer in seconds.
 - Some GGML-based servers (e.g. `qwentts.cpp`) reject `response_format: "opus"` and only serve
-  `wav`/`pcm` — set `QWEN_TTS_FORMAT=wav` for those. The delivered Matrix message is then WAV
-  audio rather than an Ogg/Opus voice bubble.
+  `wav`/`pcm`. Keep `QWEN_TTS_FORMAT=opus` and set `QWEN_TTS_REQUEST_FORMAT=wav`: the server is
+  asked for WAV and the engine converts it to Ogg/Opus locally with ffmpeg, so the Matrix voice
+  bubble still works. Without ffmpeg the WAV is delivered unchanged.
+- The local ffmpeg is discovered on `PATH`; `FFMPEG_PATH` pins an explicit binary (handy when the
+  server process was started before ffmpeg was installed).
 - `bun run check:tts` verifies the endpoint (`GET /models`) and synthesizes one short sentence.
 - Resilient by default: transient failures (429/5xx, network errors) are retried twice with
   backoff and error messages include the server's own explanation. If speech generation still

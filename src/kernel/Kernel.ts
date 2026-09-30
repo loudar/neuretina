@@ -180,6 +180,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
       model: config.qwenTts.model,
       voiceId: config.qwenTts.voiceId,
       outputFormat: config.qwenTts.outputFormat,
+      requestFormat: config.qwenTts.requestFormat,
       language: config.qwenTts.language,
       speed: config.qwenTts.speed,
       apiKey: config.qwenTts.apiKey,

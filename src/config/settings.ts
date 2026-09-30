@@ -195,6 +195,18 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     },
   },
   {
+    key: "QWEN_TTS_REQUEST_FORMAT",
+    group: "Speech (Qwen3-TTS)",
+    label: "Server request format",
+    description:
+      "What to ask the server for. Set wav for strict GGML servers that reject opus; the engine converts the response to the output format locally with ffmpeg. Empty asks for the output format directly.",
+    kind: "enum",
+    options: ["opus", "wav", "mp3", "flac", "aac", "pcm"],
+    apply: (config, value) => {
+      config.qwenTts.requestFormat = optional(value);
+    },
+  },
+  {
     key: "QWEN_TTS_SPEED",
     group: "Speech (Qwen3-TTS)",
     label: "Speed",

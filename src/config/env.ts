@@ -71,6 +71,8 @@ export interface AppConfig {
     model: string;
     voiceId: string;
     outputFormat: string;
+    /** Format asked from the server when it differs from outputFormat. */
+    requestFormat?: string;
     language?: string;
     speed: number;
     apiKey?: string;
@@ -191,6 +193,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       model: str(env, "QWEN_TTS_MODEL", "tts-1")!,
       voiceId: str(env, "QWEN_TTS_VOICE", "Ryan")!,
       outputFormat: str(env, "QWEN_TTS_FORMAT", "opus")!,
+      requestFormat: str(env, "QWEN_TTS_REQUEST_FORMAT"),
       language: str(env, "QWEN_TTS_LANGUAGE"),
       speed: num(env, "QWEN_TTS_SPEED", 1),
       apiKey: str(env, "QWEN_TTS_API_KEY"),

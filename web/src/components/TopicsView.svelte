@@ -215,10 +215,6 @@
         </Button>
       </div>
     </div>
-    <p class="muted hint">
-      The briefing agent researches each topic on the web and on Bluesky, then compiles a neutral
-      brief grouped by topic. Muted topics are skipped.
-    </p>
   {:else}
     <p class="muted">Select a topic to edit it, or add a new one on the left.</p>
   {/if}

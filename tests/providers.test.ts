@@ -366,6 +366,31 @@ describe("Qwen TTS provider", () => {
 
     await expect(provider.synthesize({ text: "x" })).rejects.toThrow(/QWEN_TTS_BASE_URL/);
   });
+
+  test("asks strict servers for wav while delivering the configured format", async () => {
+    let body: Record<string, unknown> = {};
+    mockFetch(async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(silentWav(), {
+        status: 200,
+        headers: { "Content-Type": "audio/wav" },
+      });
+    });
+
+    const provider = new QwenTtsProvider({
+      baseUrl: "http://tts.test/v1",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+      requestFormat: "wav",
+    });
+
+    const audio = await provider.synthesize({ text: "x" });
+
+    expect(body.response_format).toBe("wav");
+    // ffmpeg converts the WAV to Ogg/Opus; without it the WAV is kept as a fallback.
+    expect(audio.mimeType).toBe(hasFfmpeg ? "audio/ogg" : "audio/wav");
+  });
 });
 
 function silentWav(samples = 4800): Uint8Array {
@@ -394,7 +419,7 @@ function silentWav(samples = 4800): Uint8Array {
   return new Uint8Array(buffer);
 }
 
-const hasFfmpeg = Bun.which("ffmpeg") !== null;
+const hasFfmpeg = Boolean(process.env.FFMPEG_PATH) || Bun.which("ffmpeg") !== null;
 
 describe("Ogg/Opus conversion", () => {
   test.skipIf(!hasFfmpeg)("converts WAV audio with ffmpeg", async () => {

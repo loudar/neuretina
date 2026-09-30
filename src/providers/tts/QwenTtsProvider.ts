@@ -14,8 +14,14 @@ export interface QwenTtsOptions {
   model: string;
   /** Preset speaker (`Ryan`, `vivian`, …) or an OpenAI alias (`alloy`, …). */
   voiceId: string;
-  /** OpenAI speech format: `wav` | `mp3` | `opus` | `flac` | `aac` | `pcm`. */
+  /** OpenAI speech format sent to the server: `wav` | `mp3` | `opus` | `flac` | `aac` | `pcm`. */
   outputFormat: string;
+  /**
+   * What to ask the server for when it differs from `outputFormat`; the engine
+   * converts the response locally (e.g. ask a strict GGML server for `wav`
+   * while delivering Ogg/Opus voice bubbles).
+   */
+  requestFormat?: string;
   /** Optional language hint for multilingual servers, e.g. "English". */
   language?: string;
   speed?: number;
@@ -67,12 +73,18 @@ export class QwenTtsProvider implements TextToSpeechProvider {
       );
     }
 
-    const format = describeSpeechFormat(request.outputFormat ?? this.options.outputFormat);
+    // `outputFormat` is what the engine delivers; `requestFormat` (when set)
+    // is what the server is asked for, and the gap is closed with a local
+    // ffmpeg conversion below.
+    const desired = describeSpeechFormat(request.outputFormat ?? this.options.outputFormat);
+    const requested = this.options.requestFormat
+      ? describeSpeechFormat(this.options.requestFormat)
+      : desired;
     const payload: Record<string, unknown> = {
       model: request.modelId ?? this.options.model,
       input: request.text,
       voice: request.voiceId ?? this.options.voiceId,
-      response_format: format.format,
+      response_format: requested.format,
     };
     if (this.options.language) payload.language = this.options.language;
     if (this.options.speed !== undefined && this.options.speed !== 1) {
@@ -101,13 +113,13 @@ export class QwenTtsProvider implements TextToSpeechProvider {
 
     // Some servers ignore response_format and always return WAV; trust the
     // response's content type when it names an audio format we know.
-    let resolved = describeContentType(response.headers.get("content-type")) ?? format;
+    let resolved = describeContentType(response.headers.get("content-type")) ?? requested;
     let data = new Uint8Array(buffer);
 
-    // Voice bubbles need Ogg/Opus: when the server sent something else (WAV,
-    // usually), convert it locally with ffmpeg. If that is unavailable, keep
-    // the original audio rather than losing it.
-    if (format.format === "opus" && resolved.format !== "opus") {
+    // Voice bubbles need Ogg/Opus: when the server delivered something else
+    // (WAV, usually), convert it locally with ffmpeg. If that is unavailable,
+    // keep the original audio rather than losing it.
+    if (desired.format === "opus" && resolved.format !== "opus") {
       const converted = await convertToOggOpus(data);
       if (converted) {
         data = converted;
