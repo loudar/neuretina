@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BriefingWorkflow } from "../src/workflows/BriefingWorkflow.ts";
+import { BriefingWorkflow, type BriefingProgress } from "../src/workflows/BriefingWorkflow.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
@@ -60,6 +60,7 @@ function setup(options: SetupOptions = {}) {
   const briefs = new BriefRepository(new ArtifactRepository(db));
   const compilerInputs: string[] = [];
   const dispatcherInputs: string[] = [];
+  const llmRequests: LlmCompletionRequest[] = [];
   let compilerCalls = 0;
 
   const respond = (request: LlmCompletionRequest): LlmCompletionResult => {
@@ -160,6 +161,7 @@ function setup(options: SetupOptions = {}) {
   };
 
   const llm = stubLlm((request) => {
+    llmRequests.push(request);
     const result = respond(request);
     if (!options.llmUsage) return result;
     return { ...result, usage: { ...result.usage, ...options.llmUsage } };
@@ -188,7 +190,18 @@ function setup(options: SetupOptions = {}) {
     },
   });
 
-  return { workflow, topics, briefs, bus, tts, messaging, statuses, compilerInputs, dispatcherInputs };
+  return {
+    workflow,
+    topics,
+    briefs,
+    bus,
+    tts,
+    messaging,
+    statuses,
+    compilerInputs,
+    dispatcherInputs,
+    llmRequests,
+  };
 }
 
 describe("BriefingWorkflow", () => {
@@ -666,6 +679,110 @@ describe("BriefingWorkflow", () => {
     );
     expect(source).toBeDefined();
     expect(source?.provider).toBe("perplexity");
+  });
+
+  test("resumes from checkpointed progress without re-running research or the compiler", async () => {
+    const { workflow, topics, briefs, bus, tts, messaging, statuses, llmRequests } = setup();
+    topics.add({ name: "Rust" });
+
+    const events: DomainEvent[] = [];
+    bus.subscribe("*", (event) => events.push(event));
+
+    const checkpoints: BriefingProgress[] = [];
+    const progress: BriefingProgress = {
+      research: {
+        notes: "Notes: something happened https://example.com/article",
+        sources: [
+          { title: "Example article", url: "https://example.com/article", provider: "perplexity" },
+          { title: "Another source", url: "https://news.example.org/story", provider: "perplexity" },
+        ],
+        queries: ["t"],
+        missingTopics: [],
+      },
+      compiled: {
+        markdown: "# Morning brief\n\n## Rust\nAll quiet.",
+        narration: "Morning brief. Rust. All quiet.",
+      },
+    };
+
+    const output = await workflow.run(
+      { deliver: true, generateAudio: true },
+      {
+        correlationId: "c22",
+        bus,
+        logger: log,
+        statuses,
+        resume: progress,
+        checkpoint: (data) => checkpoints.push(data as BriefingProgress),
+      },
+    );
+
+    expect(output.skipped).toBe(false);
+    // Neither the research agent nor the compiler ran again.
+    expect(llmRequests).toHaveLength(0);
+    expect(events.map((event) => event.topic)).not.toContain("brief.research.started");
+    expect(events.map((event) => event.topic)).not.toContain("brief.research.completed");
+
+    // The brief is still stored, narrated and delivered.
+    const stored = briefs.get(output.briefId!, true);
+    expect(stored.markdown).toContain("All quiet");
+    expect(stored.sources).toHaveLength(2);
+    expect(stored.hasAudio).toBe(true);
+    expect(stored.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(tts.requests).toHaveLength(1);
+    expect(messaging.sent).toHaveLength(2);
+    expect(messaging.sent[1]?.message.kind).toBe("voice");
+
+    expect(checkpoints.at(-1)).toMatchObject({ briefId: output.briefId, delivered: true });
+  });
+
+  test("reuses stored audio when resuming a run whose brief already has it", async () => {
+    const { workflow, topics, briefs, bus, tts, messaging, statuses } = setup();
+    topics.add({ name: "Rust" });
+
+    const research = {
+      notes: "Notes: something happened https://example.com/article",
+      sources: [
+        { title: "Example article", url: "https://example.com/article", provider: "perplexity" },
+      ],
+      queries: ["t"],
+      missingTopics: [],
+    };
+    const compiled = {
+      markdown: "# Morning brief\n\n## Rust\nAll quiet.",
+      narration: "Morning brief. Rust. All quiet.",
+    };
+
+    // The first attempt stores the brief and its audio before being
+    // interrupted ahead of delivery.
+    const first = await workflow.run(
+      { deliver: false, generateAudio: true },
+      { correlationId: "c23", bus, logger: log, statuses, resume: { research, compiled } },
+    );
+    expect(briefs.get(first.briefId!, true).hasAudio).toBe(true);
+    expect(tts.requests).toHaveLength(1);
+
+    const second = await workflow.run(
+      { deliver: true, generateAudio: true },
+      {
+        correlationId: "c23",
+        bus,
+        logger: log,
+        statuses,
+        resume: { research, compiled, briefId: first.briefId },
+      },
+    );
+
+    expect(second.briefId).toBe(first.briefId);
+    // No second synthesis; the stored audio was reused for the voice message.
+    expect(tts.requests).toHaveLength(1);
+    expect(messaging.sent).toHaveLength(2);
+    const voice = messaging.sent[1]!.message;
+    expect(voice.kind).toBe("voice");
+    if (voice.kind === "voice") {
+      expect(voice.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
+      expect(voice.mimeType).toBe("audio/ogg");
+    }
   });
 });
 

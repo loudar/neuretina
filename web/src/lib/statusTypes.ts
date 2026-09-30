@@ -9,6 +9,7 @@ export interface StatusEntry {
   text: string;
   detail?: string;
   state: StatusState;
+  costUsd?: number;
   startedAt: number;
   updatedAt: number;
 }

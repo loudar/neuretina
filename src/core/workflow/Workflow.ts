@@ -12,6 +12,12 @@ export interface WorkflowContext {
   statuses: StatusHub;
   /** Per-run cost accumulator; absent for direct (non-runner) invocations. */
   cost?: CostTracker;
+  /** Aborted when the run is cancelled; checkpoints call `signal.throwIfAborted()`. */
+  signal?: AbortSignal;
+  /** Persists a progress checkpoint so a restarted runner can resume the run. */
+  checkpoint?: (data: unknown) => void;
+  /** Progress checkpointed by an earlier attempt; skip everything already done. */
+  resume?: unknown;
 }
 
 /** What started a run; `detail` carries the trigger-specific origin. */

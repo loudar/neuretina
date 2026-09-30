@@ -101,7 +101,7 @@ export interface AppContextInfo {
   artifacts: number;
 }
 
-export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped";
+export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
 export interface CostLine {
   /** Workflow step the cost belongs to, e.g. "Research". */
@@ -110,8 +110,8 @@ export interface CostLine {
   provider: string;
   /** Human-readable usage, e.g. "2 calls · 12,340 in / 567 out tokens". */
   detail: string;
-  /** USD when a price is known; absent when the usage could not be priced. */
-  usd?: number;
+  /** USD; unpriced usage is reported as 0. */
+  usd: number;
 }
 
 export interface CostReport {
@@ -296,6 +296,8 @@ export const commands = {
         id,
         artifacts,
       }),
+    cancel: (id: string) =>
+      send<{ ok: boolean; runId: string; cancelling: boolean }>("workflow.run.cancel", { id }),
   },
 
   artifacts: {

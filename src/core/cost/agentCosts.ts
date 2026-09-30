@@ -10,12 +10,13 @@ export function addAgentCost(
   tracker: CostTracker | undefined,
   step: string,
   result: AgentRunResult,
-): void {
-  if (!tracker) return;
-  tracker.addLlm(step, result.usage, Math.max(1, result.steps.length));
+): number {
+  if (!tracker) return 0;
+  let usd = tracker.addLlm(step, result.usage, Math.max(1, result.steps.length));
   const requests = countWebSearches(result);
-  if (requests > 0) tracker.addPerplexitySearch(step, requests);
-  for (const usage of collectFinanceUsage(result)) tracker.addFinance(step, usage);
+  if (requests > 0) usd += tracker.addPerplexitySearch(step, requests);
+  for (const usage of collectFinanceUsage(result)) usd += tracker.addFinance(step, usage);
+  return usd;
 }
 
 export function countWebSearches(result: AgentRunResult): number {

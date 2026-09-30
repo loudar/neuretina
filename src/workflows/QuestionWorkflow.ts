@@ -89,8 +89,9 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
         correlationId: context.correlationId,
         bus: context.bus,
         logger: context.logger,
+        signal: context.signal,
       });
-      addAgentCost(context.cost, "Answering", result);
+      status?.addCost(addAgentCost(context.cost, "Answering", result));
       const answer =
         sanitizeNarration(stripMarkdown(result.text)).trim() ||
         "I couldn't find a good answer for that.";

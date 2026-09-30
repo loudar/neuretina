@@ -30,6 +30,7 @@
   let openedArtifact = $state<ArtifactInfo | null>(null);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
+  let cancelling = $state(false);
 
   // URL scheme: /workflows[/:workflowId[/:runId]] with ?context= and ?artifact=.
   const route = $derived(router.current);
@@ -125,7 +126,15 @@
         return;
       }
       if (workflowId) await loadRuns(workflowId);
-      if (runId) await loadRun(runId);
+      if (runId) {
+        if (!runs.some((run) => run.id === runId)) {
+          router.navigate(paths.workflows(workflowId, undefined, workflowQuery()), {
+            replace: true,
+          });
+          return;
+        }
+        await loadRun(runId);
+      }
     } catch (error) {
       reportError(error);
     }
@@ -198,6 +207,19 @@
     }
   }
 
+  async function cancelRun(): Promise<void> {
+    if (!selected || cancelling) return;
+    cancelling = true;
+    try {
+      await commands.workflows.cancel(selected.id);
+      reportSuccess("Run cancellation requested");
+    } catch (error) {
+      reportError(error);
+    } finally {
+      cancelling = false;
+    }
+  }
+
   function triggerLabel(run: WorkflowRunInfo): string {
     const detail = run.triggerDetail ?? {};
     const origin =
@@ -219,7 +241,7 @@
   }
 
   function costLabel(cost: { totalUsd: number; complete: boolean }): string {
-    return `${cost.complete ? "" : "≥ "}${formatUsd(cost.totalUsd)}`;
+    return formatUsd(cost.totalUsd);
   }
 
   function outputPreview(run: WorkflowRunDetail): string {
@@ -311,6 +333,13 @@
       {#if selected.cost}
         <Chip variant="assist" icon={iconPayments}>{costLabel(selected.cost)}</Chip>
       {/if}
+      {#if selected.status === "running"}
+        <span class="danger">
+          <Button variant="tonal" iconType="left" onclick={cancelRun} disabled={cancelling}>
+            Cancel
+          </Button>
+        </span>
+      {/if}
       <span class="danger">
         <Button
           variant="text"
@@ -327,21 +356,6 @@
 
   {#if selected}
     <p class="preview">{outputPreview(selected)}</p>
-
-    {#if selected.cost}
-      <div class="cost">
-        <h3>Cost</h3>
-        <ul>
-          {#each selected.cost.lines as line (`${line.step}:${line.provider}`)}
-            <li>
-              <span class="cost-step">{line.step}</span>
-              <span class="cost-detail muted">{line.detail}</span>
-              <span class="cost-usd">{line.usd === undefined ? "unpriced" : formatUsd(line.usd)}</span>
-            </li>
-          {/each}
-        </ul>
-      </div>
-    {/if}
 
     <StatusFeedPanel
       runId={selected.id}
@@ -428,51 +442,5 @@
   .preview {
     margin: 0 0 1rem;
     overflow-wrap: anywhere;
-  }
-
-  .cost {
-    margin: 0 0 1rem;
-    padding: 0.6rem 0.75rem;
-    border: 1px solid var(--m3c-outline-variant);
-    border-radius: var(--m3-shape-medium);
-    background-color: var(--m3c-surface-container-low);
-  }
-
-  .cost h3 {
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin: 0 0 0.4rem;
-  }
-
-  .cost ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .cost li {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    font-size: 0.82rem;
-  }
-
-  .cost-step {
-    flex: none;
-    min-width: 9rem;
-    font-weight: 500;
-  }
-
-  .cost-detail {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  .cost-usd {
-    flex: none;
-    font-variant-numeric: tabular-nums;
   }
 </style>

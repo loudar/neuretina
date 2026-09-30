@@ -139,6 +139,33 @@ export const migrations: Migration[] = [
       ALTER TABLE workflow_runs ADD COLUMN cost TEXT;
     `,
   },
+  {
+    id: 9,
+    name: "status_entries",
+    sql: `
+      CREATE TABLE IF NOT EXISTS status_entries (
+        id             TEXT PRIMARY KEY,
+        activity_id    TEXT NOT NULL,
+        correlation_id TEXT,
+        parent_id      TEXT,
+        text           TEXT NOT NULL,
+        detail         TEXT,
+        state          TEXT NOT NULL,
+        cost_usd       REAL,
+        started_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_status_correlation ON status_entries (correlation_id);
+      CREATE INDEX IF NOT EXISTS idx_status_updated ON status_entries (updated_at DESC);
+    `,
+  },
+  {
+    id: 10,
+    name: "workflow_run_checkpoint",
+    sql: `
+      ALTER TABLE workflow_runs ADD COLUMN checkpoint TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

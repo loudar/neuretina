@@ -83,6 +83,10 @@ export class StatusService {
       });
     });
 
+    bus.subscribe("workflow.cancelled", (event) => {
+      if (event.correlationId) hub.failRunning(event.correlationId, "Cancelled");
+    });
+
     bus.subscribe("chat.command.received", (event) => {
       const payload = event.payload as { command: string; sender: string };
       hub.push(`Matrix command /${payload.command} from ${payload.sender}`, {

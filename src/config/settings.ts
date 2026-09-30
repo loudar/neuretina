@@ -429,22 +429,22 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     key: "LLM_PRICE_INPUT_PER_M",
     group: "Costs",
     label: "LLM input price (USD / 1M tokens)",
-    description: "Leave 0 when unknown; token usage is still recorded per run.",
+    description: "Defaults to the OpenCode Zen rate for DeepSeek V4.1 Flash.",
     kind: "number",
-    default: "0",
+    default: "0.3",
     apply: (config, value) => {
-      config.costs.llmInputPerMillion = Math.max(0, toNumber(value, 0));
+      config.costs.llmInputPerMillion = Math.max(0, toNumber(value, 0.3));
     },
   },
   {
     key: "LLM_PRICE_OUTPUT_PER_M",
     group: "Costs",
     label: "LLM output price (USD / 1M tokens)",
-    description: "Leave 0 when unknown; token usage is still recorded per run.",
+    description: "Defaults to the OpenCode Zen rate for DeepSeek V4.1 Flash.",
     kind: "number",
-    default: "0",
+    default: "1.2",
     apply: (config, value) => {
-      config.costs.llmOutputPerMillion = Math.max(0, toNumber(value, 0));
+      config.costs.llmOutputPerMillion = Math.max(0, toNumber(value, 1.2));
     },
   },
   {

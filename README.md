@@ -385,10 +385,14 @@ for text-only briefs, and can **delete** a brief behind an M3 confirmation dialo
 The Workflows tab shows contexts, workflow definitions (with **Run now**), recent runs and — when
 you open a run — its live per-run activity feed, output/error preview and the artifacts it
 produced. Run status is shown as a single icon: a spinner while running, a green check when done,
-a grey skip icon when nothing was found, a red error icon when it failed. A run can be deleted
-behind a confirmation dialog that asks whether its artifacts should go with it (kept artifacts
-stay in the Artifacts tab). The Activity card at the top keeps showing the live overview of
-everything running.
+a grey skip icon when nothing was found, a red error icon when it failed. A run can be cancelled
+while it is running (`workflow.run.cancel`, or the **Cancel** button in the run detail): the
+workflow stops at its next checkpoint — in-flight provider calls are aborted where possible — and
+then the run and every artifact it produced so far are deleted. A run can also be deleted behind a
+confirmation dialog that asks whether its artifacts should go with it (kept artifacts stay in the
+Artifacts tab). The Activity card at the top keeps showing the live overview of everything running.
+Run activity is persisted in SQLite, so a run's feed is still there after a restart; anything that
+was mid-flight when the process stopped is marked as interrupted.
 
 The Artifacts tab lists every workflow output with a text search over content, names and metadata.
 Opening an artifact renders it (markdown briefs with citation pills, inline audio, image previews,
@@ -444,10 +448,11 @@ the Workflows tab.
   adjust the claim's wording to match the primary source more precisely. Source counts and the word
   budget are capped, and a failed or fruitless pass always keeps the draft as it is.
 - **Cost tracking:** every workflow step reports what it spent. LLM completions contribute their
-  token usage (priced with `LLM_PRICE_INPUT_PER_M` / `LLM_PRICE_OUTPUT_PER_M` when set), every
-  Perplexity search request is counted at `PERPLEXITY_PRICE_PER_SEARCH` (default 0.005), and finance
-  lookups use the exact cost Perplexity's Agent API reports. The per-step breakdown is stored on the
-  run and shown in the run details; a `≥` total means some usage has no configured price.
+  token usage (priced with `LLM_PRICE_INPUT_PER_M` / `LLM_PRICE_OUTPUT_PER_M`, defaulting to the
+  OpenCode Zen DeepSeek V4.1 Flash rates), every Perplexity search request is counted at
+  `PERPLEXITY_PRICE_PER_SEARCH` (default 0.005), and finance lookups use the exact cost Perplexity's
+  Agent API reports. The per-step breakdown is stored on the run, and the run activity feed shows
+  each task's cost sum (unpriced usage counts as $0.00).
 - Disable both post-draft passes with `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as

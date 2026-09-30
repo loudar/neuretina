@@ -54,7 +54,7 @@ describe("CostTracker", () => {
 
     const llm = report.lines.find((line) => line.provider === "llm");
     expect(llm?.detail).toBe("2 calls · 120 in / 50 out tokens");
-    expect(llm?.usd).toBeUndefined();
+    expect(llm?.usd).toBe(0);
 
     const perplexity = report.lines.find((line) => line.provider === "perplexity");
     expect(perplexity?.detail).toBe("3 searches");

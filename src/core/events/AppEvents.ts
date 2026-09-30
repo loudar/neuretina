@@ -53,6 +53,12 @@ export interface AppEvents {
     /** Provider cost report for the run, when anything metered was used. */
     cost?: unknown;
   };
+  "workflow.cancelled": {
+    workflow: string;
+    correlationId: string;
+    contextId?: string;
+    trigger?: "schedule" | "matrix" | "manual";
+  };
   "workflow.deleted": {
     workflow: string;
     correlationId: string;

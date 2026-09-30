@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { CircularProgressEstimate, Icon } from "m3-svelte";
+  import { Icon } from "m3-svelte";
+  import iconBlock from "@ktibow/iconset-material-symbols/block";
   import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconSkip from "@ktibow/iconset-material-symbols/skip-next";
   import type { WorkflowRunStatus } from "../lib/api";
+  import PulseDot from "./PulseDot.svelte";
 
   interface Props {
     status: WorkflowRunStatus;
@@ -19,17 +21,21 @@
         ? "failed"
         : status === "skipped"
           ? "skipped"
-          : "done",
+          : status === "cancelled"
+            ? "cancelled"
+            : "done",
   );
 </script>
 
 <span class="status {status}" title={label} aria-label={label}>
   {#if status === "running"}
-    <CircularProgressEstimate {size} thickness={2} />
+    <PulseDot size={Math.round(size * 0.55)} />
   {:else if status === "failed"}
     <Icon icon={iconError} {size} />
   {:else if status === "skipped"}
     <Icon icon={iconSkip} {size} />
+  {:else if status === "cancelled"}
+    <Icon icon={iconBlock} {size} />
   {:else}
     <Icon icon={iconCheck} {size} />
   {/if}
@@ -55,6 +61,10 @@
   }
 
   .status.skipped {
+    color: var(--m3c-on-surface-variant);
+  }
+
+  .status.cancelled {
     color: var(--m3c-on-surface-variant);
   }
 </style>

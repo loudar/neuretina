@@ -110,12 +110,14 @@ export class SourceUpgrades {
     );
 
     try {
+      context.signal?.throwIfAborted();
       const result = await this.agent.run(buildSourceUpgradePrompt(input), {
         correlationId: context.correlationId,
         bus: context.bus,
         logger: context.logger,
+        signal: context.signal,
       });
-      addAgentCost(context.cost, "Primary sources", result);
+      status?.addCost(addAgentCost(context.cost, "Primary sources", result));
 
       const parsed = parseSourceUpgrades(result.text, input.sources.length);
       if (!parsed) {

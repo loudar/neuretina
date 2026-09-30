@@ -109,12 +109,18 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
             "x-opencode-session": request.sessionId ?? this.sessionId,
             "user-agent": this.userAgent,
           },
+          ...(request.signal ? { signal: request.signal } : {}),
         },
       );
 
       const choice = completion.choices[0];
       const message = choice?.message;
-      const costUsd = costOf(completion.usage);
+      const usageRecord = completion.usage as unknown;
+      const costUsd = costOf(usageRecord);
+      const inputTokens =
+        numericField(usageRecord, "prompt_tokens") ?? numericField(usageRecord, "input_tokens");
+      const outputTokens =
+        numericField(usageRecord, "completion_tokens") ?? numericField(usageRecord, "output_tokens");
 
       return {
         text: message?.content ?? "",
@@ -124,8 +130,8 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
         finishReason: choice?.finish_reason ?? "stop",
         model: completion.model,
         usage: {
-          inputTokens: completion.usage?.prompt_tokens,
-          outputTokens: completion.usage?.completion_tokens,
+          ...(inputTokens !== undefined ? { inputTokens } : {}),
+          ...(outputTokens !== undefined ? { outputTokens } : {}),
           ...(costUsd !== undefined ? { costUsd } : {}),
         },
       };
@@ -141,6 +147,12 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
       });
     }
   }
+}
+
+function numericField(value: unknown, key: string): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "number" && Number.isFinite(field) ? field : undefined;
 }
 
 function costOf(usage: unknown): number | undefined {

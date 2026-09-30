@@ -5,7 +5,8 @@ import { errorMessage } from "../core/errors.ts";
 import { EventBus } from "../core/events/EventBus.ts";
 import { EventStore, type EventLog } from "../core/events/EventStore.ts";
 import { CommandRouter } from "../core/commands/CommandRouter.ts";
-import { StatusHub } from "../core/status/StatusHub.ts";
+import { StatusHub, type StatusStore } from "../core/status/StatusHub.ts";
+import { StatusRepository } from "../domain/status/StatusRepository.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../core/workflow/Workflow.ts";
@@ -57,6 +58,7 @@ export interface KernelStores {
   briefs?: BriefStore;
   jobs?: JobStore;
   kv?: KeyValueStore;
+  statuses?: StatusStore;
 }
 
 export interface KernelOverrides {
@@ -216,8 +218,16 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     messaging: overrides.messaging ?? buildMessaging(),
   };
 
-  const statuses = new StatusHub();
+  const statusRepository = overridden.statuses ?? (db ? new StatusRepository(sqlite()) : undefined);
+  const statuses = new StatusHub({
+    ...(statusRepository ? { store: statusRepository } : {}),
+  });
   new StatusService({ bus, logger: logger.child("status"), hub: statuses });
+
+  // Bring back the persisted activity feed (its running entries become
+  // interrupted); still-running runs are resumed from their checkpoints once
+  // the runner exists.
+  if (statusRepository) statuses.restore(statusRepository.load());
 
   const workflows = new WorkflowRegistry({ bus, logger: logger.child("workflows"), statuses });
 
@@ -304,6 +314,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     statuses,
     pricing: costPricing,
   });
+  void runner
+    .resumeInterrupted()
+    .then((resumed) => {
+      if (resumed > 0) logger.info("resumed interrupted runs", { runs: resumed });
+    })
+    .catch((error) => {
+      logger.error("resuming interrupted runs failed", { error: errorMessage(error) });
+    });
   const triggers = new TriggerDispatcher({
     workflows,
     runner,
@@ -325,6 +343,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   registerCommands(commands, {
     config,
     bus,
+    logger: logger.child("commands"),
     contexts,
     runs,
     runner,

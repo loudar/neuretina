@@ -10,6 +10,8 @@ export interface StatusEntry {
   text: string;
   detail?: string;
   state: StatusState;
+  /** USD spent by this task, including its subtasks. */
+  costUsd?: number;
   startedAt: number;
   updatedAt: number;
 }
@@ -18,11 +20,20 @@ export type StatusMessage =
   | { type: "snapshot"; entries: StatusEntry[] }
   | { type: "entry"; entry: StatusEntry };
 
+/** Persistence port for the status feed; the hub stays usable without one. */
+export interface StatusStore {
+  save(entry: StatusEntry): void;
+  load(limit?: number): StatusEntry[];
+  removeByCorrelation(correlationId: string): void;
+}
+
 export interface StatusHandle {
   readonly id: string;
   update(text: string, detail?: string): void;
   done(text?: string, detail?: string): void;
   failed(text?: string, detail?: string): void;
+  /** Adds spend to this task; ancestors sum up their subtasks. */
+  addCost(usd: number): void;
 }
 
 export interface BeginStatusOptions {
@@ -46,9 +57,11 @@ export class StatusHub {
   private readonly entries = new Map<string, StatusEntry>();
   private readonly listeners = new Set<(message: StatusMessage) => void>();
   private readonly maxEntries: number;
+  private readonly store?: StatusStore;
 
-  constructor(options: { maxEntries?: number } = {}) {
+  constructor(options: { maxEntries?: number; store?: StatusStore } = {}) {
     this.maxEntries = Math.max(10, options.maxEntries ?? 120);
+    this.store = options.store;
   }
 
   begin(activityId: string, text: string, options: BeginStatusOptions = {}): StatusHandle {
@@ -58,6 +71,7 @@ export class StatusHub {
       update: (nextText, detail) => this.settle(entry.id, "running", nextText, detail),
       done: (nextText, detail) => this.settle(entry.id, "done", nextText, detail),
       failed: (nextText, detail) => this.settle(entry.id, "failed", nextText, detail),
+      addCost: (usd) => this.addCost(entry.id, usd),
     };
   }
 
@@ -77,6 +91,38 @@ export class StatusHub {
       if (entry.state !== "running" || entry.correlationId !== correlationId) continue;
       this.settle(entry.id, "failed", undefined, detail);
     }
+  }
+
+  /**
+   * Loads persisted entries after a restart. Running entries can never resume,
+   * so they are shown (and persisted) as interrupted.
+   */
+  restore(entries: StatusEntry[]): void {
+    for (const entry of entries) {
+      if (entry.state === "running") {
+        const interrupted: StatusEntry = {
+          ...entry,
+          state: "failed",
+          detail: entry.detail
+            ? `${entry.detail} · Interrupted by restart`
+            : "Interrupted by restart",
+          updatedAt: Date.now(),
+        };
+        this.entries.set(interrupted.id, interrupted);
+        this.persist(interrupted);
+      } else {
+        this.entries.set(entry.id, { ...entry });
+      }
+    }
+    this.trim();
+  }
+
+  /** Drops every entry of a run, in memory and in storage. */
+  removeByCorrelation(correlationId: string): void {
+    for (const [id, entry] of this.entries) {
+      if (entry.correlationId === correlationId) this.entries.delete(id);
+    }
+    this.store?.removeByCorrelation(correlationId);
   }
 
   snapshot(): StatusEntry[] {
@@ -114,6 +160,7 @@ export class StatusHub {
     };
 
     this.entries.set(entry.id, entry);
+    this.persist(entry);
     this.trim();
     this.broadcast({ type: "entry", entry: { ...entry } });
     return entry;
@@ -133,7 +180,30 @@ export class StatusHub {
     entry.state = state;
     entry.updatedAt = Date.now();
 
+    this.persist(entry);
     this.broadcast({ type: "entry", entry: { ...entry } });
+  }
+
+  private addCost(id: string, usd: number): void {
+    if (!Number.isFinite(usd) || usd <= 0) return;
+
+    const seen = new Set<string>();
+    let current = this.entries.get(id);
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      current.costUsd = (current.costUsd ?? 0) + usd;
+      this.persist(current);
+      this.broadcast({ type: "entry", entry: { ...current } });
+      current = current.parentId ? this.entries.get(current.parentId) : undefined;
+    }
+  }
+
+  private persist(entry: StatusEntry): void {
+    try {
+      this.store?.save({ ...entry });
+    } catch {
+      // Persistence must never break the live feed.
+    }
   }
 
   private trim(): void {

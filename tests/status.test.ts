@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { StatusHub } from "../src/core/status/StatusHub.ts";
+import { StatusHub, type StatusEntry, type StatusStore } from "../src/core/status/StatusHub.ts";
 import { StatusService } from "../src/status/StatusService.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
@@ -55,6 +55,20 @@ describe("StatusHub", () => {
     expect(entries[1]).toMatchObject({ state: "running" });
   });
 
+  test("addCost sums spend onto ancestors", () => {
+    const hub = new StatusHub();
+    const parent = hub.begin("parent", "Parent");
+    const child = hub.begin("child", "Child", { parentId: parent.id });
+
+    child.addCost(0.004);
+    child.addCost(0);
+    child.addCost(Number.NaN);
+
+    const entries = hub.snapshot();
+    expect(entries.find((entry) => entry.id === child.id)?.costUsd).toBeCloseTo(0.004, 6);
+    expect(entries.find((entry) => entry.id === parent.id)?.costUsd).toBeCloseTo(0.004, 6);
+  });
+
   test("trims old settled entries but keeps running ones", () => {
     const hub = new StatusHub({ maxEntries: 10 });
     const running = hub.begin("keep", "running");
@@ -63,6 +77,45 @@ describe("StatusHub", () => {
     const entries = hub.snapshot();
     expect(entries).toHaveLength(10);
     expect(entries.some((entry) => entry.id === running.id)).toBe(true);
+  });
+
+  test("persists entries through a store and restores them after a restart", () => {
+    const saved = new Map<string, StatusEntry>();
+    const store: StatusStore = {
+      save: (entry) => {
+        saved.set(entry.id, { ...entry });
+      },
+      load: () => [...saved.values()],
+      removeByCorrelation: (correlationId) => {
+        for (const [id, entry] of saved) {
+          if (entry.correlationId === correlationId) saved.delete(id);
+        }
+      },
+    };
+
+    const hub = new StatusHub({ store });
+    const handle = hub.begin("activity", "Running a thing", { correlationId: "run-1" });
+    handle.update("Still running");
+    handle.addCost(0.002);
+
+    const persisted = [...saved.values()][0]!;
+    expect(persisted.text).toBe("Still running");
+    expect(persisted.costUsd).toBeCloseTo(0.002, 6);
+
+    // A fresh hub after a restart restores the feed; anything that was still
+    // running is shown as interrupted.
+    const restored = new StatusHub({ store });
+    restored.restore(store.load());
+    const entry = restored.snapshot()[0]!;
+    expect(entry.text).toBe("Still running");
+    expect(entry.state).toBe("failed");
+    expect(entry.detail).toBe("Interrupted by restart");
+    expect(saved.get(entry.id)?.state).toBe("failed");
+
+    // Deleting the run drops its entries from memory and storage.
+    restored.removeByCorrelation("run-1");
+    expect(restored.snapshot()).toHaveLength(0);
+    expect(saved.size).toBe(0);
   });
 });
 

@@ -125,10 +125,11 @@ export class FollowupResearch {
         responseFormat: "json",
         temperature: 0.2,
         sessionId: context.correlationId,
+        signal: context.signal,
       });
 
       const tasks = parseFollowupTasks(completion.text);
-      context.cost?.addLlm("Follow-up planning", completion.usage);
+      status?.addCost(context.cost?.addLlm("Follow-up planning", completion.usage) ?? 0);
       status?.done(
         tasks.length > 0
           ? `Digging into ${tasks.length} follow-up question(s)`
@@ -151,6 +152,8 @@ export class FollowupResearch {
     const sources: BriefSource[] = [];
 
     for (const [index, task] of tasks.entries()) {
+      context.signal?.throwIfAborted();
+
       const status = context.statuses?.begin(
         `${context.correlationId}:followups:${index}`,
         `Digging into: ${task.question}`,
@@ -162,8 +165,9 @@ export class FollowupResearch {
           correlationId: context.correlationId,
           bus: context.bus,
           logger: context.logger,
+          signal: context.signal,
         });
-        addAgentCost(context.cost, "Follow-up research", result);
+        status?.addCost(addAgentCost(context.cost, "Follow-up research", result));
         const outcome = parseFollowupOutcome(result.text);
 
         if (outcome.found && outcome.notes) {
@@ -216,10 +220,11 @@ export class FollowupResearch {
         responseFormat: "json",
         temperature: 0.2,
         sessionId: context.correlationId,
+        signal: context.signal,
       });
 
       const parsed = extractJson<{ markdown?: unknown }>(completion.text);
-      context.cost?.addLlm("Implications", completion.usage);
+      status?.addCost(context.cost?.addLlm("Implications", completion.usage) ?? 0);
       const markdown = typeof parsed?.markdown === "string" ? parsed.markdown.trim() : "";
       if (markdown) {
         status?.done("Implications section ready");

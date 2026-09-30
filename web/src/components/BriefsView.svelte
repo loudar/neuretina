@@ -27,6 +27,39 @@
   let generating = $state(false);
   let voiceEnabled = $state(true);
 
+  type ReadingSize = "small" | "medium" | "large";
+
+  const READING_SIZES: ReadingSize[] = ["small", "medium", "large"];
+
+  const READING_SIZE_CSS: Record<ReadingSize, string> = {
+    small: "0.95rem",
+    medium: "calc(0.95rem + 2px)",
+    large: "calc(0.95rem + 4px)",
+  };
+
+  function readStoredReadingSize(): ReadingSize {
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem("briefs.readingSize");
+    } catch {
+      stored = null;
+    }
+    return stored === "small" || stored === "medium" || stored === "large" ? stored : "medium";
+  }
+
+  let readingSize = $state<ReadingSize>(readStoredReadingSize());
+
+  function setReadingSize(size: ReadingSize): void {
+    readingSize = size;
+    try {
+      localStorage.setItem("briefs.readingSize", size);
+    } catch {}
+  }
+
+  function readingSizeCss(size: ReadingSize): string {
+    return READING_SIZE_CSS[size];
+  }
+
   const route = $derived(router.current);
   const briefId = $derived(route.segments[0] ?? null);
 
@@ -231,15 +264,34 @@
   {/snippet}
 
   {#if selected}
-    {#if audioUrl}
-      <audio controls src={audioUrl}></audio>
-    {:else if selected.hasAudio}
-      <p class="muted">Loading audio…</p>
-    {/if}
+    <div class="brief-body" style:--markdown-font-size={readingSizeCss(readingSize)}>
+      {#if audioUrl}
+        <audio controls src={audioUrl}></audio>
+      {:else if selected.hasAudio}
+        <p class="muted">Loading audio…</p>
+      {/if}
 
-    <MarkdownView markdown={selected.markdown} sources={selected.sources} />
+      <div class="reading-column">
+        <span class="reading-sizes" role="group" aria-label="Reading size">
+          {#each READING_SIZES as size (size)}
+            <button
+              type="button"
+              class="aa {size}"
+              class:active={readingSize === size}
+              aria-pressed={readingSize === size}
+              title={size === "small" ? "Small text" : size === "medium" ? "Medium text" : "Large text"}
+              onclick={() => setReadingSize(size)}
+            >
+              aA
+            </button>
+          {/each}
+        </span>
 
-    <SourcesList sources={selected.sources} filter={sourceFilter} onfilter={setSourceFilter} />
+        <MarkdownView markdown={selected.markdown} sources={selected.sources} />
+
+        <SourcesList sources={selected.sources} filter={sourceFilter} onfilter={setSourceFilter} />
+      </div>
+    </div>
   {:else}
     <p class="muted">Select a brief to read it and play the audio.</p>
   {/if}
@@ -276,6 +328,63 @@
     font-size: 0.85rem;
     cursor: pointer;
     user-select: none;
+  }
+
+  .reading-column {
+    position: relative;
+  }
+
+  .reading-sizes {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.1rem;
+  }
+
+  .aa {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.8rem;
+    height: 1.7rem;
+    padding: 0 0.4rem;
+    border: none;
+    border-radius: var(--m3-shape-full);
+    background: transparent;
+    color: var(--m3c-on-surface-variant);
+    cursor: pointer;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .aa:hover {
+    background-color: var(--m3c-surface-container-high);
+  }
+
+  .aa.active {
+    background-color: var(--m3c-tertiary-container);
+    color: var(--m3c-on-tertiary-container);
+  }
+
+  .aa.small {
+    font-size: 0.72rem;
+  }
+
+  .aa.medium {
+    font-size: 0.85rem;
+  }
+
+  .aa.large {
+    font-size: 1rem;
+  }
+
+  .brief-body {
+    width: 100%;
+    max-width: 800px;
+    margin-inline: auto;
   }
 
   .entry {

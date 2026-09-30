@@ -18,8 +18,9 @@
 <style>
   .markdown {
     padding: 0.25rem 0;
-    font-size: 0.95rem;
+    font-size: var(--markdown-font-size, calc(0.95rem + 2px));
     line-height: 1.55;
+    text-align: justify;
   }
 
   .markdown :global(> :first-child) {

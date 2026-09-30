@@ -10,7 +10,7 @@ import type {
   WorkflowRunStore,
 } from "../../domain/runs/WorkflowRunRepository.ts";
 import { errorMessage } from "../errors.ts";
-import type { WorkflowRegistry } from "./Workflow.ts";
+import type { TriggerInfo, Workflow, WorkflowRegistry } from "./Workflow.ts";
 
 export interface WorkflowRunnerDeps {
   workflows: WorkflowRegistry;
@@ -40,12 +40,27 @@ export interface StartRunOptions {
  * (schedule, matrix, manual) goes through here.
  */
 export class WorkflowRunner {
+  private readonly active = new Map<string, { controller: AbortController; done: Promise<void> }>();
+
   constructor(private readonly deps: WorkflowRunnerDeps) {}
+
+  /**
+   * Signals cancellation of an active run and resolves once it has unwound
+   * (`false` when the run is not active). Callers own the cleanup: delete the
+   * run and its artifacts afterwards.
+   */
+  async cancel(id: string): Promise<boolean> {
+    const active = this.active.get(id);
+    if (!active) return false;
+    active.controller.abort();
+    await active.done;
+    return true;
+  }
 
   async start(options: StartRunOptions): Promise<WorkflowRun> {
     const workflow = this.deps.workflows.get(options.workflow);
     const contextId = options.contextId ?? workflow.contextId ?? DEFAULT_CONTEXT_ID;
-    const trigger = { kind: options.trigger, detail: options.detail ?? {} };
+    const trigger: TriggerInfo = { kind: options.trigger, detail: options.detail ?? {} };
 
     const run = this.deps.runs.create({
       id: options.runId,
@@ -56,17 +71,74 @@ export class WorkflowRunner {
       input: options.input,
     });
 
+    return this.execute(run, workflow, { contextId, trigger, input: options.input });
+  }
+
+  /** Executes an existing run, e.g. one interrupted by a restart. */
+  async resume(run: WorkflowRun): Promise<WorkflowRun> {
+    const workflow = this.deps.workflows.get(run.workflow);
+    return this.execute(run, workflow, {
+      contextId: run.contextId,
+      trigger: { kind: run.trigger, detail: run.triggerDetail },
+      input: run.input,
+    });
+  }
+
+  /**
+   * Resumes every persisted run that was still running when the process
+   * stopped. Runs whose workflow is no longer registered are failed; the
+   * others continue from their checkpoints (fire-and-forget). Returns how
+   * many were resumed.
+   */
+  async resumeInterrupted(): Promise<number> {
+    const interrupted = this.deps.runs.list({ limit: 500 }).filter((run) => run.status === "running");
+    let resumed = 0;
+
+    for (const run of interrupted) {
+      try {
+        this.deps.workflows.get(run.workflow);
+      } catch {
+        this.deps.runs.finish(run.id, {
+          status: "failed",
+          error: "Workflow is no longer registered",
+        });
+        continue;
+      }
+
+      void this.resume(run).catch((error) => {
+        this.deps.logger.warn("resuming an interrupted run failed", {
+          runId: run.id,
+          error: errorMessage(error),
+        });
+      });
+      resumed += 1;
+    }
+
+    return resumed;
+  }
+
+  private async execute(
+    run: WorkflowRun,
+    workflow: Workflow,
+    options: { contextId: string; trigger: TriggerInfo; input?: Record<string, unknown> },
+  ): Promise<WorkflowRun> {
     const logger = this.deps.logger.child(`workflow:${workflow.id}`);
     const started = Date.now();
     const cost = new CostTracker(this.deps.pricing);
+    const controller = new AbortController();
+    let settled!: () => void;
+    const done = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    this.active.set(run.id, { controller, done });
 
     this.deps.bus.publish(
       "workflow.started",
       {
         workflow: workflow.id,
         correlationId: run.id,
-        contextId,
-        trigger: options.trigger,
+        contextId: options.contextId,
+        trigger: options.trigger.kind,
         input: options.input,
       },
       { source: "workflow-runner", correlationId: run.id },
@@ -79,9 +151,12 @@ export class WorkflowRunner {
         logger,
         statuses: this.deps.statuses,
         cost,
-        contextId,
-        trigger,
+        signal: controller.signal,
+        contextId: options.contextId,
+        trigger: options.trigger,
         run,
+        checkpoint: (data) => this.deps.runs.saveCheckpoint(run.id, data),
+        resume: run.checkpoint,
       });
 
       const skipped =
@@ -100,8 +175,8 @@ export class WorkflowRunner {
         {
           workflow: workflow.id,
           correlationId: run.id,
-          contextId,
-          trigger: options.trigger,
+          contextId: options.contextId,
+          trigger: options.trigger.kind,
           durationMs: Date.now() - started,
           output,
           ...(report ? { cost: report } : {}),
@@ -113,6 +188,27 @@ export class WorkflowRunner {
     } catch (error) {
       const message = errorMessage(error);
       const report = costReport(cost);
+
+      if (controller.signal.aborted) {
+        const cancelled = this.deps.runs.finish(run.id, {
+          status: "cancelled",
+          output: { cancelled: true },
+          ...(report ? { cost: report } : {}),
+        });
+        this.deps.bus.publish(
+          "workflow.cancelled",
+          {
+            workflow: workflow.id,
+            correlationId: run.id,
+            contextId: options.contextId,
+            trigger: options.trigger.kind,
+          },
+          { source: "workflow-runner", correlationId: run.id },
+        );
+        logger.warn("workflow cancelled", { correlationId: run.id });
+        return cancelled;
+      }
+
       this.deps.runs.finish(run.id, {
         status: "failed",
         error: message,
@@ -123,8 +219,8 @@ export class WorkflowRunner {
         {
           workflow: workflow.id,
           correlationId: run.id,
-          contextId,
-          trigger: options.trigger,
+          contextId: options.contextId,
+          trigger: options.trigger.kind,
           error: message,
           ...(report ? { cost: report } : {}),
         },
@@ -132,6 +228,9 @@ export class WorkflowRunner {
       );
       logger.error("workflow failed", { correlationId: run.id, error: message });
       throw error;
+    } finally {
+      this.active.delete(run.id);
+      settled();
     }
   }
 }

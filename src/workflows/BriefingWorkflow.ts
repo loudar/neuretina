@@ -14,7 +14,7 @@ import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import type { BriefSource, BriefStore } from "../domain/briefs/BriefRepository.ts";
+import type { BriefSource, BriefStore, BriefWithAudio } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { DEFAULT_CONTEXT_ID } from "../domain/contexts/ContextRepository.ts";
 import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
@@ -62,6 +62,19 @@ export interface BriefingWorkflowOutput {
   audioBytes?: number;
   messageEventId?: string;
   reason?: string;
+}
+
+/**
+ * Restart-safe progress: everything the pipeline finished so far, checkpointed
+ * after each phase so a restarted runner can skip straight past it.
+ */
+export interface BriefingProgress {
+  research?: { notes: string; sources: BriefSource[]; queries: string[]; missingTopics: string[] };
+  compiled?: { markdown: string; narration: string };
+  implications?: { section: string; sources: BriefSource[] } | null;
+  upgraded?: { markdown: string; sources: BriefSource[] } | null;
+  briefId?: string;
+  delivered?: boolean;
 }
 
 const RESEARCH_SYSTEM_PROMPT = `You are a meticulous research assistant. You get a list of topics the user cares about — the topics may overlap.
@@ -153,6 +166,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const record = (event: string, fields: Record<string, unknown>) =>
       logger.info(event, { correlationId, ...fields });
 
+    // A run interrupted by a restart resumes here with its progress; every
+    // phase below is skipped when its checkpoint already exists.
+    const progress = (context.resume as BriefingProgress | undefined) ?? {};
+    const checkpoint = () => context.checkpoint?.(progress);
+
     const selectedTopics = this.resolveTopics(input, contextId);
     if (selectedTopics.length === 0) {
       const stored = this.deps.topics.list();
@@ -169,164 +187,204 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     }
 
     const topicNames = selectedTopics.map((topic) => topic.name);
-    bus.publish(
-      "brief.research.started",
-      { correlationId, topics: topicNames },
-      { source: `workflow:${this.id}`, correlationId },
-    );
 
-    // One research run covers all topics: the agent plans its own searches,
-    // merges overlapping topics and can consult earlier briefs.
-    const researchAgent = this.createResearchAgent(contextId);
-    const researchSpan = this.deps.statuses?.begin(
-      `${correlationId}:research`,
-      `Researching ${topicNames.length} topic(s)`,
-      { correlationId, detail: topicNames.join(", ") },
-    );
-
-    let result: AgentRunResult;
-    try {
-      result = await researchAgent.run(buildResearchPrompt(selectedTopics, this.deps.defaults.recency), {
-        correlationId,
-        bus,
-        logger: logger.child("research"),
-      });
-    } catch (error) {
-      researchSpan?.failed("Research failed");
-      throw error;
-    }
-
-    addAgentCost(context.cost, "Research", result);
-
-    const outcome = parseResearchOutcome(result.text);
-    // The agent can "succeed" with nothing usable (empty notes, step limit):
-    // never compile or store a brief out of that.
-    const found = outcome.found && outcome.notes.trim().length > 0;
-    const sources = found ? collectSources(result) : [];
-    const queries = collectQueries(result);
-    const uniqueSources = dedupeSources(sources).slice(0, 80);
-    const missingTopics = outcome.missingTopics.filter((name) =>
-      topicNames.some((topic) => topic.toLowerCase() === name.toLowerCase()),
-    );
-
-    researchSpan?.done(
-      found
-        ? `Research complete (${uniqueSources.length} source(s), ${queries.length} search(es))`
-        : "Nothing relevant found",
-    );
-
-    bus.publish(
-      "brief.research.completed",
-      {
-        correlationId,
-        topics: topicNames,
-        sources: uniqueSources.length,
-        found,
-        queries,
-        missingTopics,
-      },
-      { source: `workflow:${this.id}`, correlationId },
-    );
-    record("research completed", {
-      sources: uniqueSources.length,
-      queries: queries.length,
-      found,
-      missingTopics,
-    });
-
-    // Nothing relevant found: do not fabricate a summary, do not generate
-    // audio. Instead deliver a plain text notice with what was searched.
-    if (!found) {
-      return this.handleNoMaterial(topicNames, queries, input, context);
-    }
-
-    const compile = this.deps.statuses?.begin(`${correlationId}:compile`, "Compiling brief", {
-      correlationId,
-    });
-    let compiled: { markdown: string; narration: string; usage?: LlmUsage };
-    try {
-      compile?.update("Waiting for the compiler model");
-      compiled = await this.compile(
-        { topics: topicNames, notes: outcome.notes, sources: uniqueSources },
-        context,
+    let research = progress.research;
+    if (!research) {
+      bus.publish(
+        "brief.research.started",
+        { correlationId, topics: topicNames },
+        { source: `workflow:${this.id}`, correlationId },
       );
-      compile?.done("Brief compiled");
-    } catch (error) {
-      compile?.failed("Compilation failed");
-      throw error;
+
+      // One research run covers all topics: the agent plans its own searches,
+      // merges overlapping topics and can consult earlier briefs.
+      const researchAgent = this.createResearchAgent(contextId);
+      const researchSpan = this.deps.statuses?.begin(
+        `${correlationId}:research`,
+        `Researching ${topicNames.length} topic(s)`,
+        { correlationId, detail: topicNames.join(", ") },
+      );
+
+      let result: AgentRunResult;
+      try {
+        result = await researchAgent.run(buildResearchPrompt(selectedTopics, this.deps.defaults.recency), {
+          correlationId,
+          bus,
+          logger: logger.child("research"),
+          signal: context.signal,
+        });
+      } catch (error) {
+        researchSpan?.failed("Research failed");
+        throw error;
+      }
+
+      researchSpan?.addCost(addAgentCost(context.cost, "Research", result));
+      context.signal?.throwIfAborted();
+
+      const outcome = parseResearchOutcome(result.text);
+      // The agent can "succeed" with nothing usable (empty notes, step limit):
+      // never compile or store a brief out of that.
+      const found = outcome.found && outcome.notes.trim().length > 0;
+      const sources = found ? collectSources(result) : [];
+      const queries = collectQueries(result);
+      const uniqueSources = dedupeSources(sources).slice(0, 80);
+      const missingTopics = outcome.missingTopics.filter((name) =>
+        topicNames.some((topic) => topic.toLowerCase() === name.toLowerCase()),
+      );
+
+      researchSpan?.done(
+        found
+          ? `Research complete (${uniqueSources.length} source(s), ${queries.length} search(es))`
+          : "Nothing relevant found",
+      );
+
+      bus.publish(
+        "brief.research.completed",
+        {
+          correlationId,
+          topics: topicNames,
+          sources: uniqueSources.length,
+          found,
+          queries,
+          missingTopics,
+        },
+        { source: `workflow:${this.id}`, correlationId },
+      );
+      record("research completed", {
+        sources: uniqueSources.length,
+        queries: queries.length,
+        found,
+        missingTopics,
+      });
+
+      // Nothing relevant found: do not fabricate a summary, do not generate
+      // audio. Instead deliver a plain text notice with what was searched.
+      // This path is not checkpointed: a restart re-runs the research.
+      if (!found) {
+        return this.handleNoMaterial(topicNames, queries, input, context);
+      }
+
+      research = { notes: outcome.notes, sources: uniqueSources, queries, missingTopics };
+      progress.research = research;
+      checkpoint();
     }
-    if (compiled.usage) context.cost?.addLlm("Compilation", compiled.usage);
+
+    const uniqueSources = research.sources;
+
+    let compiled = progress.compiled;
+    if (!compiled) {
+      const compileSpan = this.deps.statuses?.begin(`${correlationId}:compile`, "Compiling brief", {
+        correlationId,
+      });
+      try {
+        compileSpan?.update("Waiting for the compiler model");
+        const draft = await this.compile(
+          { topics: topicNames, notes: research.notes, sources: uniqueSources },
+          context,
+        );
+        if (draft.usage) {
+          compileSpan?.addCost(context.cost?.addLlm("Compilation", draft.usage) ?? 0);
+        }
+        compileSpan?.done("Brief compiled");
+        compiled = { markdown: draft.markdown, narration: draft.narration };
+        progress.compiled = compiled;
+        checkpoint();
+      } catch (error) {
+        compileSpan?.failed("Compilation failed");
+        throw error;
+      }
+    }
+    context.signal?.throwIfAborted();
 
     // The first draft exists: dispatch subagents to dig into implications and
     // context it may be missing, then append what they found as an
     // "Implications" section. A failed follow-up pass never throws away the
-    // draft — it just keeps it.
+    // draft — it just keeps it. Both passes are checkpointed (including the
+    // "nothing to add" outcome) so a restart does not redo them.
     let briefSources = uniqueSources;
     if (this.deps.defaults.followups) {
-      const deeper = await this.researchFollowups(
-        topicNames,
-        compiled.markdown,
-        uniqueSources,
-        contextId,
-        context,
-      );
-      if (deeper) {
-        const markdown = `${compiled.markdown.trimEnd()}\n\n## Implications\n\n${deeper.section.trim()}`;
+      if (progress.implications === undefined) {
+        const deeper = await this.researchFollowups(
+          topicNames,
+          compiled.markdown,
+          uniqueSources,
+          contextId,
+          context,
+        );
+        progress.implications = deeper ?? null;
+        checkpoint();
+      }
+      if (progress.implications) {
+        const markdown = `${compiled.markdown.trimEnd()}\n\n## Implications\n\n${progress.implications.section.trim()}`;
         compiled = { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
-        briefSources = deeper.sources;
+        briefSources = progress.implications.sources;
       }
 
       // With the draft (and its implications) settled, give every claim a
       // chance at a primary source — the official announcement instead of
       // coverage about it. A failed pass keeps the draft as it is.
-      const upgraded = await this.researchPrimarySources(
-        topicNames,
-        compiled.markdown,
-        briefSources,
-        context,
-      );
-      if (upgraded) {
+      if (progress.upgraded === undefined) {
+        const upgraded = await this.researchPrimarySources(
+          topicNames,
+          compiled.markdown,
+          briefSources,
+          context,
+        );
+        progress.upgraded = upgraded ?? null;
+        checkpoint();
+      }
+      if (progress.upgraded) {
         compiled = {
-          markdown: upgraded.markdown,
-          narration: sanitizeNarration(stripMarkdown(upgraded.markdown)),
+          markdown: progress.upgraded.markdown,
+          narration: sanitizeNarration(stripMarkdown(progress.upgraded.markdown)),
         };
-        briefSources = upgraded.sources;
+        briefSources = progress.upgraded.sources;
       }
     }
 
-    const brief = this.deps.briefs.create({
-      correlationId,
-      workflow: this.id,
-      contextId,
-      topics: topicNames,
-      markdown: compiled.markdown,
-      narration: compiled.narration,
-      sources: briefSources,
-    });
+    context.signal?.throwIfAborted();
 
-    bus.publish(
-      "artifact.created",
-      {
-        artifactId: brief.artifactId,
-        kind: "brief",
+    let brief: BriefWithAudio | undefined = progress.briefId
+      ? this.deps.briefs.get(progress.briefId)
+      : undefined;
+
+    if (!brief) {
+      brief = this.deps.briefs.create({
+        correlationId,
         workflow: this.id,
-        correlationId,
-      },
-      { source: `workflow:${this.id}`, correlationId },
-    );
-    bus.publish(
-      "brief.generated",
-      {
-        correlationId,
-        briefId: brief.id,
-        artifactId: brief.artifactId,
+        contextId,
         topics: topicNames,
-        sources: briefSources.length,
-        characters: compiled.markdown.length,
-      },
-      { source: `workflow:${this.id}`, correlationId },
-    );
-    record("brief generated", { briefId: brief.id, characters: compiled.markdown.length });
+        markdown: compiled.markdown,
+        narration: compiled.narration,
+        sources: briefSources,
+      });
+      progress.briefId = brief.id;
+      checkpoint();
+
+      bus.publish(
+        "artifact.created",
+        {
+          artifactId: brief.artifactId,
+          kind: "brief",
+          workflow: this.id,
+          correlationId,
+        },
+        { source: `workflow:${this.id}`, correlationId },
+      );
+      bus.publish(
+        "brief.generated",
+        {
+          correlationId,
+          briefId: brief.id,
+          artifactId: brief.artifactId,
+          topics: topicNames,
+          sources: briefSources.length,
+          characters: compiled.markdown.length,
+        },
+        { source: `workflow:${this.id}`, correlationId },
+      );
+      record("brief generated", { briefId: brief.id, characters: compiled.markdown.length });
+    }
 
     const output: BriefingWorkflowOutput = {
       skipped: false,
@@ -338,70 +396,93 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const shouldDeliver = input.deliver ?? true;
     const shouldGenerateAudio = input.generateAudio ?? true;
 
+    // Delivery already happened before the restart: the run is done.
+    if (progress.delivered) return output;
     if (!shouldGenerateAudio && !shouldDeliver) return output;
 
     if (shouldGenerateAudio) {
-      const speechSpan = this.deps.statuses?.begin(`${correlationId}:tts`, "Generating speech", {
-        correlationId,
-      });
+      context.signal?.throwIfAborted();
+
+      // A resumed run may already have stored audio; reuse it instead of
+      // synthesizing (and paying for) the same speech twice.
+      const stored = this.deps.briefs.get(brief.id, true);
       let speech: SpeechAudio | undefined;
-      try {
-        speechSpan?.update("Waiting for the local TTS server");
-        speech = await this.deps.tts.synthesize({ text: compiled.narration });
-        speechSpan?.done(
-          `Speech ready (${Math.round(speech.data.byteLength / 1024)} KB${
-            speech.durationMs ? `, ${Math.round(speech.durationMs / 1000)}s` : ""
-          })`,
-        );
-      } catch (error) {
-        // A flaky speech provider must not throw away a good brief: fall back
-        // to text delivery and keep the stored brief.
-        speechSpan?.failed(`Speech generation failed — falling back to text (${errorMessage(error)})`);
-        logger.warn("speech generation failed; falling back to text", {
-          error: errorMessage(error),
+
+      if (stored.hasAudio && stored.audio) {
+        speech = {
+          data: stored.audio,
+          mimeType: stored.audioMime ?? "audio/ogg",
+          extension: audioExtension(stored.audioMime ?? "audio/ogg"),
+          durationMs: stored.audioDurationMs,
+        };
+      } else {
+        const speechSpan = this.deps.statuses?.begin(`${correlationId}:tts`, "Generating speech", {
+          correlationId,
         });
+        try {
+          speechSpan?.update("Waiting for the local TTS server");
+          speech = await this.deps.tts.synthesize({ text: compiled.narration });
+          speechSpan?.done(
+            `Speech ready (${Math.round(speech.data.byteLength / 1024)} KB${
+              speech.durationMs ? `, ${Math.round(speech.durationMs / 1000)}s` : ""
+            })`,
+          );
+        } catch (error) {
+          // A flaky speech provider must not throw away a good brief: fall back
+          // to text delivery and keep the stored brief.
+          speechSpan?.failed(`Speech generation failed — falling back to text (${errorMessage(error)})`);
+          logger.warn("speech generation failed; falling back to text", {
+            error: errorMessage(error),
+          });
+        }
       }
 
       if (!speech) {
         if (shouldDeliver) {
           output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
+          progress.delivered = true;
+          checkpoint();
         }
         return output;
       }
 
-      const audioArtifactId = this.deps.briefs.attachAudio(
-        brief.id,
-        speech.data,
-        speech.mimeType,
-        speech.durationMs,
-      );
+      context.signal?.throwIfAborted();
       output.audioBytes = speech.data.byteLength;
 
-      bus.publish(
-        "artifact.created",
-        {
-          artifactId: audioArtifactId,
-          kind: "audio",
-          workflow: this.id,
-          parentId: brief.artifactId,
-          correlationId,
-        },
-        { source: `workflow:${this.id}`, correlationId },
-      );
-      bus.publish(
-        "tts.synthesized",
-        {
-          correlationId,
-          briefId: brief.id,
-          artifactId: brief.artifactId,
-          audioArtifactId,
-          characters: compiled.narration.length,
-          bytes: speech.data.byteLength,
-          durationMs: speech.durationMs ?? 0,
-        },
-        { source: `workflow:${this.id}`, correlationId },
-      );
-      record("speech synthesized", { bytes: speech.data.byteLength });
+      if (!stored.hasAudio) {
+        const audioArtifactId = this.deps.briefs.attachAudio(
+          brief.id,
+          speech.data,
+          speech.mimeType,
+          speech.durationMs,
+        );
+
+        bus.publish(
+          "artifact.created",
+          {
+            artifactId: audioArtifactId,
+            kind: "audio",
+            workflow: this.id,
+            parentId: brief.artifactId,
+            correlationId,
+          },
+          { source: `workflow:${this.id}`, correlationId },
+        );
+        bus.publish(
+          "tts.synthesized",
+          {
+            correlationId,
+            briefId: brief.id,
+            artifactId: brief.artifactId,
+            audioArtifactId,
+            characters: compiled.narration.length,
+            bytes: speech.data.byteLength,
+            durationMs: speech.durationMs ?? 0,
+          },
+          { source: `workflow:${this.id}`, correlationId },
+        );
+        record("speech synthesized", { bytes: speech.data.byteLength });
+      }
 
       if (shouldDeliver) {
         output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
@@ -435,11 +516,15 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         record("voice brief delivered", { channel: sent.channel, eventId: sent.id });
       }
 
+      progress.delivered = true;
+      checkpoint();
       return output;
     }
 
     if (shouldDeliver) {
       output.messageEventId = await this.deliverSummary(brief.markdown, brief.sources, input.channel, context);
+      progress.delivered = true;
+      checkpoint();
     }
 
     return output;
@@ -453,6 +538,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     context: WorkflowContext,
   ): Promise<string> {
     const { bus, correlationId } = context;
+    context.signal?.throwIfAborted();
     const sendSpan = this.deps.statuses?.begin(`${correlationId}:summary`, "Sending summary", {
       correlationId,
     });
@@ -725,10 +811,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         { role: "system", content: COMPILER_SYSTEM_PROMPT },
         { role: "user", content: userContent },
       ],
-      responseFormat: "json",
-      temperature: compress ? 0.2 : 0.3,
-      sessionId: context.correlationId,
-    });
+        responseFormat: "json",
+        temperature: compress ? 0.2 : 0.3,
+        sessionId: context.correlationId,
+        signal: context.signal,
+      });
 
     const parsed = extractJson<{ markdown?: unknown }>(completion.text);
     const markdown =
@@ -922,4 +1009,12 @@ export function sanitizeNarration(text: string): string {
 
 function dateStamp(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** File extension for a stored brief's audio, derived from its MIME type. */
+function audioExtension(mimeType: string): string {
+  if (mimeType.includes("ogg") || mimeType.includes("opus")) return "ogg";
+  if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+  if (mimeType.includes("wav")) return "wav";
+  return "bin";
 }

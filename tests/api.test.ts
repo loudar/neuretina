@@ -310,6 +310,47 @@ describe("webhook gateway", () => {
     await call("artifact.delete", { id: artifact.id });
   });
 
+  test("cancels a running workflow and deletes it with its artifacts", async () => {
+    let workflowReady = false;
+    kernel.workflows.register({
+      id: "slow-test",
+      description: "test workflow",
+      run: async (_input, context) => {
+        workflowReady = true;
+        await new Promise<void>((resolve) => {
+          if (context.signal?.aborted) {
+            resolve();
+            return;
+          }
+          context.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        context.signal?.throwIfAborted();
+        return { ok: true };
+      },
+    });
+
+    const started = await call<{ runId: string }>("workflow.run", { id: "slow-test", input: {} });
+    await waitUntil(() => workflowReady);
+
+    const artifact = kernel.artifacts.create({
+      kind: "note",
+      contentType: "text/plain",
+      content: "partial output",
+      workflow: "slow-test",
+      correlationId: started.runId,
+    });
+
+    const cancelled = await call<{ ok: boolean; runId: string; cancelling: boolean }>(
+      "workflow.run.cancel",
+      { id: started.runId },
+    );
+    expect(cancelled.ok).toBe(true);
+    expect(cancelled.cancelling).toBe(true);
+
+    await waitUntil(() => !kernel.runs.list().some((run) => run.id === started.runId));
+    await expect(call("artifact.get", { id: artifact.id })).rejects.toThrow();
+  });
+
   test("searches and deletes artifacts through the gateway", async () => {
     const artifact = kernel.artifacts.create({
       kind: "note",

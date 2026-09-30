@@ -180,8 +180,8 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
     costs: {
-      llmInputPerMillion: num(env, "LLM_PRICE_INPUT_PER_M", 0),
-      llmOutputPerMillion: num(env, "LLM_PRICE_OUTPUT_PER_M", 0),
+      llmInputPerMillion: num(env, "LLM_PRICE_INPUT_PER_M", 0.3),
+      llmOutputPerMillion: num(env, "LLM_PRICE_OUTPUT_PER_M", 1.2),
       perplexitySearchPerRequest: num(env, "PERPLEXITY_PRICE_PER_SEARCH", 0.005),
     },
     llm: {

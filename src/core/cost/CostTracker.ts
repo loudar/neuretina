@@ -17,8 +17,8 @@ export interface CostLine {
   provider: string;
   /** Human-readable usage, e.g. "2 calls · 12,340 in / 567 out tokens". */
   detail: string;
-  /** USD when a price is known; absent when the usage could not be priced. */
-  usd?: number;
+  /** USD; unpriced usage is reported as 0. */
+  usd: number;
 }
 
 export interface CostReport {
@@ -56,34 +56,39 @@ export class CostTracker {
 
   constructor(private readonly pricing: CostPricing = ZERO_PRICING) {}
 
-  addLlm(step: string, usage: LlmUsage, calls = 1): void {
+  addLlm(step: string, usage: LlmUsage, calls = 1): number {
     const entry = this.entry(step, "llm");
     entry.calls += calls;
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
     if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
 
+    let added = 0;
     if (usage.costUsd !== undefined) {
-      entry.usd += usage.costUsd;
+      added = usage.costUsd;
       entry.priced = true;
-      return;
-    }
-    if (this.pricing.llmInputPerMillion > 0 || this.pricing.llmOutputPerMillion > 0) {
-      entry.usd += ((usage.inputTokens ?? 0) / 1_000_000) * this.pricing.llmInputPerMillion;
-      entry.usd += ((usage.outputTokens ?? 0) / 1_000_000) * this.pricing.llmOutputPerMillion;
+    } else if (this.pricing.llmInputPerMillion > 0 || this.pricing.llmOutputPerMillion > 0) {
+      added =
+        ((usage.inputTokens ?? 0) / 1_000_000) * this.pricing.llmInputPerMillion +
+        ((usage.outputTokens ?? 0) / 1_000_000) * this.pricing.llmOutputPerMillion;
       entry.priced = true;
     }
+    entry.usd += added;
+    return added;
   }
 
-  addPerplexitySearch(step: string, requests: number): void {
+  addPerplexitySearch(step: string, requests: number): number {
     const entry = this.entry(step, "perplexity");
     entry.requests += requests;
     if (this.pricing.perplexitySearchPerRequest > 0) {
-      entry.usd += requests * this.pricing.perplexitySearchPerRequest;
+      const added = requests * this.pricing.perplexitySearchPerRequest;
+      entry.usd += added;
       entry.priced = true;
+      return added;
     }
+    return 0;
   }
 
-  addFinance(step: string, usage: FinanceUsage): void {
+  addFinance(step: string, usage: FinanceUsage): number {
     const entry = this.entry(step, "perplexity");
     entry.lookups += 1;
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
@@ -91,13 +96,16 @@ export class CostTracker {
     if (usage.costUsd !== undefined) {
       entry.usd += usage.costUsd;
       entry.priced = true;
+      return usage.costUsd;
     }
+    return 0;
   }
 
   report(): CostReport {
-    const lines = [...this.accumulators.values()].map(toLine);
-    const totalUsd = round(lines.reduce((sum, line) => sum + (line.usd ?? 0), 0));
-    return { totalUsd, complete: lines.every((line) => line.usd !== undefined), lines };
+    const accumulators = [...this.accumulators.values()];
+    const lines = accumulators.map(toLine);
+    const totalUsd = round(lines.reduce((sum, line) => sum + line.usd, 0));
+    return { totalUsd, complete: accumulators.every((entry) => entry.priced), lines };
   }
 
   private entry(step: string, provider: string): Accumulator {
@@ -138,7 +146,7 @@ function toLine(entry: Accumulator): CostLine {
     step: entry.step,
     provider: entry.provider,
     detail: parts.join(" · "),
-    ...(entry.priced ? { usd: round(entry.usd) } : {}),
+    usd: round(entry.usd),
   };
 }
 

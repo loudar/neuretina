@@ -2,7 +2,7 @@ import { NotFoundError } from "../../core/errors.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
 export type TriggerKind = "schedule" | "matrix" | "manual";
-export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped";
+export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "skipped" | "cancelled";
 
 /** One execution of a workflow: what started it, what it produced, how it ended. */
 export interface WorkflowRun {
@@ -18,6 +18,8 @@ export interface WorkflowRun {
   error?: string;
   /** Provider cost report for the run (JSON), when anything metered was used. */
   cost?: unknown;
+  /** Workflow progress (JSON) so a restarted runner can resume where it stopped. */
+  checkpoint?: unknown;
   startedAt: number;
   finishedAt?: number;
 }
@@ -44,7 +46,14 @@ export interface WorkflowRunStore {
   get(id: string): WorkflowRun;
   list(options?: ListWorkflowRunsOptions): WorkflowRun[];
   latest(contextId?: string): WorkflowRun | null;
-  finish(id: string, patch: { status: WorkflowRunStatus; output?: unknown; error?: string }): WorkflowRun;
+  finish(
+    id: string,
+    patch: { status: WorkflowRunStatus; output?: unknown; error?: string; cost?: unknown },
+  ): WorkflowRun;
+  /** Persists a workflow progress checkpoint (JSON) for restart-safe resume. */
+  saveCheckpoint(id: string, checkpoint: unknown): void;
+  /** Marks every still-running run as failed; used at boot after a restart. */
+  failRunning(error: string): number;
   /** Removes the run record; artifacts are handled by the caller. */
   remove(id: string): WorkflowRun;
 }
@@ -60,6 +69,7 @@ interface RunRow {
   output: string | null;
   error: string | null;
   cost: string | null;
+  checkpoint: string | null;
   started_at: number;
   finished_at: number | null;
 }
@@ -158,6 +168,24 @@ export class WorkflowRunRepository implements WorkflowRunStore {
     return this.get(id);
   }
 
+  /** Persists a workflow progress checkpoint (JSON) for restart-safe resume. */
+  saveCheckpoint(id: string, checkpoint: unknown): void {
+    const result = this.db.raw
+      .query("UPDATE workflow_runs SET checkpoint = ? WHERE id = ?")
+      .run(JSON.stringify(checkpoint ?? null), id);
+    if (result.changes === 0) throw new NotFoundError(`Workflow run ${id} not found`);
+  }
+
+  /** Marks every still-running run as failed; used at boot after a restart. */
+  failRunning(error: string): number {
+    const result = this.db.raw
+      .query(
+        "UPDATE workflow_runs SET status = 'failed', error = ?, finished_at = ? WHERE status = 'running'",
+      )
+      .run(error, Date.now());
+    return result.changes;
+  }
+
   /** Removes the run record; artifacts are handled by the caller. */
   remove(id: string): WorkflowRun {
     const run = this.get(id);
@@ -178,6 +206,7 @@ function toRun(row: RunRow): WorkflowRun {
     output: row.output === null ? undefined : parseJson(row.output, null),
     error: row.error ?? undefined,
     cost: row.cost === null ? undefined : parseJson(row.cost, null),
+    checkpoint: row.checkpoint === null ? undefined : parseJson(row.checkpoint, null),
     startedAt: row.started_at,
     finishedAt: row.finished_at ?? undefined,
   };

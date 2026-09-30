@@ -27,6 +27,8 @@ export interface LlmCompletionRequest {
   maxTokens?: number;
   responseFormat?: "text" | "json";
   sessionId?: string;
+  /** Aborts the in-flight request when the owning run is cancelled. */
+  signal?: AbortSignal;
 }
 
 export interface LlmUsage {

@@ -21,6 +21,8 @@ export interface AgentContext {
   correlationId: string;
   bus: EventBus;
   logger: Logger;
+  /** Aborted when the owning run is cancelled; checked between LLM steps. */
+  signal?: AbortSignal;
 }
 
 export interface AgentToolInvocation {
@@ -108,6 +110,8 @@ export class Agent {
       let costUsd: number | undefined;
 
       for (let index = 0; index < this.maxSteps; index++) {
+        context.signal?.throwIfAborted();
+
         const completion = await this.llm.complete({
           messages,
           tools: this.toolList.map((tool) => ({
@@ -118,6 +122,7 @@ export class Agent {
           model: this.model,
           temperature: this.temperature,
           sessionId: correlationId,
+          signal: context.signal,
         });
 
         inputTokens = accumulate(inputTokens, completion.usage.inputTokens);

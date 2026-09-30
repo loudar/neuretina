@@ -2,8 +2,9 @@ import type { AppConfig } from "../config/env.ts";
 import { configStatus } from "../config/env.ts";
 import type { SettingsService } from "../config/settings.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
-import { ValidationError } from "../core/errors.ts";
+import { ValidationError, errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
+import type { Logger } from "../core/logger.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
@@ -23,6 +24,7 @@ import type { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 export interface CommandDeps {
   config: AppConfig;
   bus: EventBus;
+  logger: Logger;
   contexts: ContextStore;
   runs: WorkflowRunStore;
   runner: WorkflowRunner;
@@ -39,7 +41,7 @@ export interface CommandDeps {
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, statuses, settings, config } = deps;
+  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, scheduler, statuses, settings, config } = deps;
 
   router.register("config.get", () => ({
     integrations: configStatus(config),
@@ -236,6 +238,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const record = asRecord(payload);
     const withArtifacts = record.artifacts === true;
     const run = runs.remove(requireString(record, "id"));
+    statuses.removeByCorrelation(run.id);
 
     let removedArtifacts = 0;
     if (withArtifacts) {
@@ -260,6 +263,53 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       { source: "commands", correlationId: context.correlationId },
     );
     return { ok: true, runId: run.id, artifacts: removedArtifacts };
+  });
+
+  // Cancels an active run: the workflow stops at its next checkpoint, then
+  // the run and every artifact it produced so far are deleted. The response
+  // returns immediately; completion shows up as a `workflow.deleted` event.
+  router.register("workflow.run.cancel", (payload, context) => {
+    const id = requireString(asRecord(payload), "id");
+    const run = runs.get(id);
+
+    void runner
+      .cancel(id)
+      .then((cancelled) => {
+        if (!cancelled) {
+          // The run is not active (e.g. the server restarted before it was
+          // resumed): still settle the orphaned record before cleaning up.
+          if (runs.get(id).status !== "running") return;
+          runs.finish(id, { status: "cancelled", output: { cancelled: true } });
+        }
+
+        let removedArtifacts = 0;
+        for (let round = 0; round < 20; round++) {
+          const batch = artifacts.list({ correlationId: id, limit: 500 });
+          if (batch.length === 0) break;
+          for (const artifact of batch) {
+            artifacts.remove(artifact.id);
+            removedArtifacts += 1;
+            bus.publish(
+              "artifact.deleted",
+              { artifactId: artifact.id, kind: artifact.kind },
+              { source: "commands", correlationId: context.correlationId },
+            );
+          }
+        }
+
+        runs.remove(id);
+        statuses.removeByCorrelation(id);
+        bus.publish(
+          "workflow.deleted",
+          { correlationId: id, workflow: run.workflow, artifacts: removedArtifacts },
+          { source: "commands", correlationId: context.correlationId },
+        );
+      })
+      .catch((error) => {
+        logger.warn("cancelling the run failed", { runId: id, error: errorMessage(error) });
+      });
+
+    return { ok: true, runId: id, cancelling: true };
   });
 
   router.register("workflow.run", (payload, context) => {

@@ -6,6 +6,7 @@ import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
+import { StatusRepository } from "../src/domain/status/StatusRepository.ts";
 
 function db(): SqliteDatabase {
   return new SqliteDatabase(":memory:");
@@ -197,6 +198,49 @@ describe("WorkflowRunRepository", () => {
     expect(() => repo.remove(run.id)).toThrow(/not found/);
   });
 
+  test("fails every still-running run on boot", () => {
+    const repo = new WorkflowRunRepository(db());
+    const running = repo.create({
+      workflow: "briefing",
+      contextId: "morning-briefing",
+      trigger: "manual",
+    });
+    const done = repo.create({
+      workflow: "briefing",
+      contextId: "morning-briefing",
+      trigger: "manual",
+    });
+    repo.finish(done.id, { status: "succeeded" });
+
+    expect(repo.failRunning("Interrupted by restart")).toBe(1);
+    expect(repo.get(running.id)).toMatchObject({
+      status: "failed",
+      error: "Interrupted by restart",
+    });
+    expect(repo.get(done.id).status).toBe("succeeded");
+  });
+
+  test("stores and returns progress checkpoints", () => {
+    const repo = new WorkflowRunRepository(db());
+    const run = repo.create({
+      workflow: "briefing",
+      contextId: "morning-briefing",
+      trigger: "manual",
+    });
+    expect(run.checkpoint).toBeUndefined();
+    expect(repo.get(run.id).checkpoint).toBeUndefined();
+
+    const checkpoint = {
+      research: { notes: "Notes", sources: [], queries: ["t"], missingTopics: [] },
+      briefId: "brief-1",
+    };
+    repo.saveCheckpoint(run.id, checkpoint);
+
+    expect(repo.get(run.id).checkpoint).toEqual(checkpoint);
+    expect(repo.list()[0]?.checkpoint).toEqual(checkpoint);
+    expect(() => repo.saveCheckpoint("missing", {})).toThrow(/not found/);
+  });
+
   test("stores and returns the cost report", () => {
     const repo = new WorkflowRunRepository(db());
     const run = repo.create({
@@ -216,5 +260,46 @@ describe("WorkflowRunRepository", () => {
     const finished = repo.finish(run.id, { status: "succeeded", cost });
     expect(finished.cost).toEqual(cost);
     expect(repo.get(run.id).cost).toEqual(cost);
+  });
+});
+
+describe("StatusRepository", () => {
+  test("saves, updates, loads and removes entries", () => {
+    const repo = new StatusRepository(db());
+    repo.save({
+      id: "s1",
+      activityId: "a1",
+      correlationId: "run-1",
+      text: "Researching",
+      state: "running",
+      startedAt: 1,
+      updatedAt: 1,
+    });
+    repo.save({
+      id: "s1",
+      activityId: "a1",
+      correlationId: "run-1",
+      text: "Research complete",
+      state: "done",
+      costUsd: 0.01,
+      startedAt: 1,
+      updatedAt: 2,
+    });
+
+    expect(repo.load()).toEqual([
+      {
+        id: "s1",
+        activityId: "a1",
+        correlationId: "run-1",
+        text: "Research complete",
+        state: "done",
+        costUsd: 0.01,
+        startedAt: 1,
+        updatedAt: 2,
+      },
+    ]);
+
+    repo.removeByCorrelation("run-1");
+    expect(repo.load()).toHaveLength(0);
   });
 });
