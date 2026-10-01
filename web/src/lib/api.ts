@@ -42,6 +42,8 @@ export interface Brief {
   hasAudio: boolean;
   audioMime?: string;
   audioDurationMs?: number;
+  /** Timeline artifact composed of the brief's extracted events, when any. */
+  timelineArtifactId?: string;
 }
 
 export interface ArtifactInfo {

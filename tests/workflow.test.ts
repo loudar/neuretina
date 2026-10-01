@@ -4,6 +4,7 @@ import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.t
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
+import { EventRepository } from "../src/domain/events/EventRepository.ts";
 import { DeliveryService } from "../src/delivery/DeliveryService.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
@@ -54,13 +55,17 @@ interface SetupOptions {
   };
   /** Every stub completion reports this usage (for cost tracking tests). */
   llmUsage?: { inputTokens?: number; outputTokens?: number };
+  /** Enable event extraction and the timeline step. */
+  events?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
   const db = new SqliteDatabase(":memory:");
   const bus = new EventBus(new EventStore(db), log);
   const topics = new TopicRepository(db);
-  const briefs = new BriefRepository(new ArtifactRepository(db));
+  const artifacts = new ArtifactRepository(db);
+  const briefs = new BriefRepository(artifacts);
+  const events = new EventRepository(db);
   const compilerInputs: string[] = [];
   const dispatcherInputs: string[] = [];
   const llmRequests: LlmCompletionRequest[] = [];
@@ -68,6 +73,32 @@ function setup(options: SetupOptions = {}) {
 
   const respond = (request: LlmCompletionRequest): LlmCompletionResult => {
     const system = request.messages[0]?.content ?? "";
+
+    if (system.includes("extract dated events")) {
+      return completion(
+        JSON.stringify({
+          events: [
+            {
+              date: "2026-09-30",
+              time: "09:00",
+              title: "Rust 1.90 released",
+              description: "The Rust team shipped 1.90 with faster builds.",
+              entities: ["Rust", "Rust Foundation"],
+            },
+          ],
+        }),
+      );
+    }
+
+    if (system.includes("strict categorizer")) {
+      return completion(
+        JSON.stringify({ tags: [{ tag: "other", confidence: 0.9 }] }),
+      );
+    }
+
+    if (system.includes("Invent ONE short")) {
+      return completion(JSON.stringify({ tag: "developer-tools" }));
+    }
 
     if (system.includes("source upgrades")) {
       return completion(
@@ -191,13 +222,15 @@ function setup(options: SetupOptions = {}) {
     briefingChannel.id,
   );
   deliveryStore.attach(
-    { workflow: "briefing", step: "audio", output: "audio" },
+    { workflow: "briefing", step: "audio", output: "tts" },
     briefingChannel.id,
   );
 
   const workflow = new BriefingWorkflow({
     topics,
     briefs,
+    artifacts,
+    events,
     llm,
     webSearch: stubSearch("perplexity", "web", options.webResults ?? sampleResults),
     socialSearch: stubSearch("bluesky", "social", options.socialResults ?? [sampleResults[1]!]),
@@ -211,6 +244,7 @@ function setup(options: SetupOptions = {}) {
       searchDomains: [],
       language: "en",
       followups: options.followups ?? false,
+      events: options.events ?? false,
     },
   });
 
@@ -218,6 +252,8 @@ function setup(options: SetupOptions = {}) {
     workflow,
     topics,
     briefs,
+    artifacts,
+    events,
     bus,
     tts,
     sender,
@@ -765,8 +801,8 @@ describe("BriefingWorkflow", () => {
     expect(sender.sent[1]?.kind).toBe("voice");
 
     expect(checkpoints.at(-1)).toMatchObject({
-      steps: { brief: { brief: { briefId: output.briefId } } },
-      delivered: { "brief:brief": true, "audio:audio": true },
+      steps: { brief: { brief: { reference: output.briefId } } },
+      delivered: { "brief:brief": true, "audio:tts": true },
     });
   });
 
@@ -861,7 +897,7 @@ describe("BriefingWorkflow", () => {
       userChannel,
     );
     deliveryStore.attach(
-      { workflow: "user-1", step: "audio", output: "audio" },
+      { workflow: "user-1", step: "audio", output: "tts" },
       userChannel,
     );
 
@@ -889,6 +925,42 @@ describe("BriefingWorkflow", () => {
     // The brief is attributed to the workflow that was run, so consumers
     // (e.g. the re-send dialog) resolve that workflow's channels.
     expect(briefs.get(output.briefId!)?.workflow).toBe("user-1");
+  });
+
+  test("extracts events and attaches a timeline artifact to the brief", async () => {
+    const { workflow, topics, briefs, artifacts, events, bus, statuses } = setup({
+      events: true,
+    });
+    topics.add({ name: "Rust" });
+
+    const emitted: DomainEvent[] = [];
+    bus.subscribe("*", (event) => emitted.push(event));
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: false },
+      { correlationId: "c27", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+
+    // The extracted event is a row, with the tag invented by the decision step.
+    const stored = events.list();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.title).toBe("Rust 1.90 released");
+    expect(stored[0]?.date).toBe("2026-09-30");
+    expect(stored[0]?.tags).toEqual(["developer-tools"]);
+    expect(stored[0]?.entities).toEqual(["Rust", "Rust Foundation"]);
+    expect(stored[0]?.sourceBriefId).toBe(output.briefId);
+
+    // The timeline artifact sits under the brief and the brief points at it.
+    const brief = briefs.get(output.briefId!);
+    expect(brief.timelineArtifactId).toBeTruthy();
+    const timeline = artifacts.get(brief.timelineArtifactId!);
+    expect(timeline.kind).toBe("timeline");
+    expect(timeline.parentId).toBe(brief.artifactId);
+    expect(timeline.content).toContain("Rust 1.90 released");
+    expect(timeline.metadata.eventIds).toEqual([stored[0]?.id]);
+    expect(emitted.some((event) => event.topic === "artifact.created")).toBe(true);
   });
 });
 

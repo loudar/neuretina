@@ -336,6 +336,30 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     },
   },
   {
+    key: "DEFAULT_EVENT_EXTRACTION",
+    group: "Research defaults",
+    label: "Event extraction",
+    description:
+      "Extract dated events from each finished brief, deduplicate them against stored events and build a timeline artifact for the brief.",
+    kind: "boolean",
+    default: "true",
+    apply: (config, value) => {
+      config.defaults.events = toBool(value, true);
+    },
+  },
+  {
+    key: "EVENTS_TAG_MODEL",
+    group: "Research defaults",
+    label: "Event tag model",
+    description:
+      "Model used to pick event tags from the existing tag list (a small decision model works well). Empty uses the main model.",
+    kind: "string",
+    default: "",
+    apply: (config, value) => {
+      config.defaults.eventTagModel = value?.trim() || undefined;
+    },
+  },
+  {
     key: "DEFAULT_SEARCH_DOMAINS",
     group: "Research defaults",
     label: "Source allowlist",

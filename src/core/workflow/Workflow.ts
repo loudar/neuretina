@@ -5,6 +5,7 @@ import type { CostTracker } from "../cost/CostTracker.ts";
 import type { TriggerKind, WorkflowRun } from "../../domain/runs/WorkflowRunRepository.ts";
 import { NotFoundError } from "../errors.ts";
 import { describeWorkflow, type WorkflowDefinition, type WorkflowInfo } from "./definition.ts";
+import { portType } from "./ports.ts";
 
 export interface WorkflowContext {
   correlationId: string;
@@ -55,6 +56,21 @@ export class WorkflowRegistry {
 
   register<TInput, TOutput>(workflow: Workflow<TInput, TOutput>): void {
     this.workflows.set(workflow.definition.id, workflow as Workflow);
+    this.warnUnknownPortTypes(workflow.definition);
+  }
+
+  /** Ports must use registered types so composition rules keep working. */
+  private warnUnknownPortTypes(definition: WorkflowDefinition): void {
+    for (const step of definition.steps) {
+      for (const port of [...step.inputs, ...step.outputs]) {
+        if (portType(port.kind)) continue;
+        this.deps.logger.warn("unknown port type", {
+          workflow: definition.id,
+          step: step.id,
+          kind: port.kind,
+        });
+      }
+    }
   }
 
   /** Removes a workflow definition; nothing happens when it is unknown. */

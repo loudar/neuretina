@@ -1,5 +1,6 @@
 import type { TriggerKind } from "../../domain/runs/WorkflowRunRepository.ts";
 import type { DeliveryMessage } from "../../delivery/DeliveryService.ts";
+import { derivesFrom } from "./ports.ts";
 import type { WorkflowRunContext } from "./Workflow.ts";
 
 /**
@@ -12,14 +13,14 @@ export interface WorkflowTriggerBinding {
 }
 
 /**
- * A configurable workflow input. Inputs are generic: `kind` names what the
- * value is ("topics" today; artifacts, feeds or documents later), and the
- * editor/validation for a kind is registered by its consumer.
+ * A configurable workflow input. Inputs are generic: `kind` names the port
+ * type of the value ("topics" today; artifacts, feeds or documents later),
+ * and the editor/validation for a kind is registered by its consumer.
  */
 export interface WorkflowInputSpec {
   /** Stable key the configured value is stored under, e.g. "topics". */
   id: string;
-  /** Value kind; drives validation and the editor control. */
+  /** Port type id (see ports.ts); drives validation and the editor control. */
   kind: string;
   title: string;
   description?: string;
@@ -31,7 +32,10 @@ export interface WorkflowInputSpec {
 
 /** A value a step consumes, produced by workflow inputs or earlier steps. */
 export interface StepInputSpec {
-  /** Value kind, e.g. "topics", "brief". */
+  /**
+   * Accepted port type (see ports.ts). Any derivative of it satisfies the
+   * input: an input accepting "text" consumes a brief, a draft, an answer, …
+   */
   kind: string;
   title: string;
   description?: string;
@@ -44,7 +48,7 @@ export type OutputRenderer = (value: unknown) => DeliveryMessage | undefined;
 
 /** A value a step produces; deliverable outputs can be assigned channels. */
 export interface StepOutputSpec {
-  /** Value/artifact kind, e.g. "brief", "audio". */
+  /** Port type id of the produced value, e.g. "brief", "tts" (see ports.ts). */
   kind: string;
   title: string;
   description?: string;
@@ -217,6 +221,24 @@ export function deliveryTargets(definition: WorkflowDefinition): DeliveryTargetS
     }
   }
   return targets;
+}
+
+/**
+ * The most recent step output whose port type derives from `primitive` — the
+ * value a step declaring that input should consume. Steps run in order, so
+ * the last match wins.
+ */
+export function latestOutput(
+  outputs: ReadonlyMap<string, Record<string, unknown>>,
+  primitive: string,
+): { step: string; kind: string; value: unknown } | undefined {
+  let found: { step: string; kind: string; value: unknown } | undefined;
+  for (const [step, stepOutputs] of outputs) {
+    for (const [kind, value] of Object.entries(stepOutputs)) {
+      if (derivesFrom(kind, primitive)) found = { step, kind, value };
+    }
+  }
+  return found;
 }
 
 /** First deliverable output of a kind (e.g. the audio output), if any. */

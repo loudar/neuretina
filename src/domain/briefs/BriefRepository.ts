@@ -36,6 +36,8 @@ export interface Brief {
   audioMime?: string;
   audioDurationMs?: number;
   hasAudio: boolean;
+  /** Timeline artifact composed of the brief's extracted events, when any. */
+  timelineArtifactId?: string;
 }
 
 export interface BriefWithAudio extends Brief {
@@ -201,6 +203,7 @@ function toBrief(artifact: Artifact): Brief {
     audioMime: stringField(artifact.metadata, "audioMime"),
     audioDurationMs: numberField(artifact.metadata, "audioDurationMs"),
     hasAudio: Boolean(audioArtifactId),
+    timelineArtifactId: stringField(artifact.metadata, "timelineArtifactId"),
   };
 }
 

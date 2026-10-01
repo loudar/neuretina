@@ -551,10 +551,10 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       try {
         const summary = buildBriefMessage(brief.markdown, brief.sources);
         // The brief's workflow owns the routing: voice goes to the channels
-        // assigned to the audio output of that workflow.
+        // assigned to the TTS output of that workflow.
         const voiceTarget = deliveryTargetForKind(
           definitionOf(workflows, brief.workflow),
-          "audio",
+          "tts",
         );
         results = await deps.delivery.deliver({
           briefId: id,

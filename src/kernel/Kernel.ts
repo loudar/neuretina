@@ -10,7 +10,7 @@ import { StatusRepository } from "../domain/status/StatusRepository.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry, type Workflow } from "../core/workflow/Workflow.ts";
-import { deliveryTargets } from "../core/workflow/definition.ts";
+import { deliveryTargets, findStep } from "../core/workflow/definition.ts";
 import { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
@@ -22,6 +22,10 @@ import {
   DEFAULT_CONTEXT_NAME,
   type ContextStore,
 } from "../domain/contexts/ContextRepository.ts";
+import {
+  EventRepository,
+  type EventStore as TimelineEventStore,
+} from "../domain/events/EventRepository.ts";
 import { JobRepository, type JobStore } from "../domain/jobs/JobRepository.ts";
 import {
   WorkflowRunRepository,
@@ -77,6 +81,8 @@ export interface KernelStores {
   statuses?: StatusStore;
   deliveries?: DeliveryStore;
   userWorkflows?: UserWorkflowStore;
+  /** Dated events extracted from briefs (`events` is the event log). */
+  timelineEvents?: TimelineEventStore;
 }
 
 export interface KernelOverrides {
@@ -110,6 +116,8 @@ export interface Kernel {
   jobs: JobStore;
   deliveries: DeliveryStore;
   userWorkflows: UserWorkflowStore;
+  /** Dated events extracted from briefs. */
+  events: TimelineEventStore;
   settings: SettingsService;
   workflows: WorkflowRegistry;
   runner: WorkflowRunner;
@@ -138,7 +146,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     !overridden.jobs ||
     !overridden.kv ||
     !overridden.deliveries ||
-    !overridden.userWorkflows;
+    !overridden.userWorkflows ||
+    !overridden.timelineEvents;
   const db = needsSqlite ? new SqliteDatabase(config.dbPath) : null;
   const sqlite = (): SqliteDatabase => {
     if (!db) throw new Error("SQLite storage is not available (all stores were overridden)");
@@ -158,6 +167,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const kv = overridden.kv ?? new KeyValueRepository(sqlite());
   const deliveries = overridden.deliveries ?? new DeliveryRepository(sqlite());
   const userWorkflows = overridden.userWorkflows ?? new UserWorkflowRepository(sqlite());
+  const timelineEvents = overridden.timelineEvents ?? new EventRepository(sqlite());
 
   // Settings live in the database and are shadowed by the environment; the
   // boot-time config is the base that database overrides are layered onto.
@@ -284,6 +294,12 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     get followups() {
       return config.defaults.followups;
     },
+    get events() {
+      return config.defaults.events;
+    },
+    get eventTagModel() {
+      return config.defaults.eventTagModel;
+    },
   };
 
   const costPricing = {
@@ -301,6 +317,8 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   const briefing = new BriefingWorkflow({
     topics,
     briefs,
+    artifacts,
+    events: timelineEvents,
     statuses,
     defaults: researchDefaults,
     get llm() {
@@ -558,6 +576,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     jobs,
     deliveries,
     userWorkflows,
+    events: timelineEvents,
     settings,
     workflows,
     runner,
@@ -602,11 +621,10 @@ function normalizeLegacyAttachments(
   workflows: WorkflowRegistry,
   logger: Logger,
 ): void {
+  // Workflow-level rows from before step outputs: expand onto every target.
   const legacy = deliveries
     .attachments()
     .filter((attachment) => attachment.step === "" && attachment.output === "");
-  if (legacy.length === 0) return;
-
   for (const row of legacy) {
     deliveries.detach({ workflow: row.workflow, step: "", output: "" }, row.channelId);
 
@@ -623,10 +641,47 @@ function normalizeLegacyAttachments(
       );
     }
   }
+  if (legacy.length > 0) {
+    logger.info("expanded workflow delivery attachments onto step outputs", {
+      attachments: legacy.length,
+    });
+  }
 
-  logger.info("expanded workflow delivery attachments onto step outputs", {
-    attachments: legacy.length,
-  });
+  // Targets that no longer exist (e.g. a renamed output type) move to the
+  // step's deliverable output when that is unambiguous.
+  const stale = deliveries
+    .attachments()
+    .filter((attachment) => attachment.step !== "" && attachment.output !== "");
+  for (const row of stale) {
+    let step: ReturnType<typeof findStep> = undefined;
+    try {
+      step = findStep(workflows.get(row.workflow).definition, row.step);
+    } catch {
+      step = undefined;
+    }
+    if (step?.outputs.some((output) => output.kind === row.output && output.deliver)) continue;
+
+    deliveries.detach({ workflow: row.workflow, step: row.step, output: row.output }, row.channelId);
+    const deliverable = step?.outputs.filter((output) => output.deliver) ?? [];
+    if (deliverable.length === 1) {
+      deliveries.attach(
+        { workflow: row.workflow, step: row.step, output: deliverable[0]!.kind },
+        row.channelId,
+      );
+      logger.info("moved a stale delivery assignment to the step's output", {
+        workflow: row.workflow,
+        step: row.step,
+        from: row.output,
+        to: deliverable[0]!.kind,
+      });
+    } else if (deliverable.length > 1) {
+      logger.warn("dropped a stale delivery assignment with no clear target", {
+        workflow: row.workflow,
+        step: row.step,
+        output: row.output,
+      });
+    }
+  }
 }
 
 /**

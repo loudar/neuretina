@@ -10,12 +10,14 @@ import type { SearchProvider, SearchRecency } from "../capabilities/search/Searc
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { DeliveryMessage, DeliveryRouter } from "../delivery/DeliveryService.ts";
-import type {
-  StepContext,
-  StepResult,
-  WorkflowDefinition,
-  WorkflowInputSpec,
+import {
+  latestOutput,
+  type StepContext,
+  type StepResult,
+  type WorkflowDefinition,
+  type WorkflowInputSpec,
 } from "../core/workflow/definition.ts";
+import type { TextPortValue } from "../core/workflow/ports.ts";
 import { StepPipeline, type PipelineState } from "../core/workflow/StepPipeline.ts";
 import type { Workflow, WorkflowContext, WorkflowRunContext } from "../core/workflow/Workflow.ts";
 import { dedupeBy } from "../core/collections.ts";
@@ -25,12 +27,16 @@ import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import { audioExtension } from "../core/media.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
+import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import type { BriefSource, BriefStore, BriefWithAudio } from "../domain/briefs/BriefRepository.ts";
 import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
 import { DEFAULT_CONTEXT_ID } from "../domain/contexts/ContextRepository.ts";
+import type { EventStore, TimelineEvent } from "../domain/events/EventRepository.ts";
 import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
+import { EventExtractor } from "./EventExtraction.ts";
+import { renderTimelineMarkdown, selectTimelineEvents } from "./EventTimeline.ts";
 import { FollowupResearch } from "./FollowupResearch.ts";
 import { SourceUpgrades } from "./SourceUpgrades.ts";
 
@@ -52,6 +58,10 @@ export interface BriefingWorkflowInput {
 export interface BriefingWorkflowDeps {
   topics: TopicStore;
   briefs: BriefStore;
+  /** Generic artifact store, used for the timeline artifact. */
+  artifacts: ArtifactStore;
+  /** Dated events extracted from briefs. */
+  events: EventStore;
   llm: LlmProvider;
   webSearch: SearchProvider;
   socialSearch: SearchProvider;
@@ -68,6 +78,10 @@ export interface BriefingWorkflowDeps {
     language: string;
     /** Dispatch follow-up subagents after the first draft. */
     followups: boolean;
+    /** Extract dated events and build a timeline next to the brief. */
+    events: boolean;
+    /** Model for the tag decision step; defaults to the provider's model. */
+    eventTagModel?: string;
   };
 }
 
@@ -241,7 +255,12 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           description:
             "Plans follow-up questions from the draft and appends an Implications section.",
           inputs: [
-            { kind: "draft", title: "Draft", required: true },
+            {
+              kind: "text",
+              title: "Text",
+              description: "Any text output so far (the compiled draft).",
+              required: true,
+            },
             { kind: "research", title: "Research notes", required: false },
           ],
           outputs: [
@@ -260,8 +279,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           title: "Upgrade sources",
           description: "Replaces secondary coverage with primary sources where possible.",
           inputs: [
-            { kind: "draft", title: "Draft", required: true },
-            { kind: "implications", title: "Implications", required: false },
+            { kind: "text", title: "Text", required: true },
+            { kind: "sources", title: "Sources", required: false },
           ],
           outputs: [
             { kind: "draft", title: "Final draft", guaranteed: true },
@@ -275,7 +294,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           title: "Write brief",
           description: "Stores the compiled brief as an artifact.",
           inputs: [
-            { kind: "draft", title: "Final draft", required: true },
+            { kind: "text", title: "Text", required: true },
             { kind: "sources", title: "Sources", required: true },
           ],
           outputs: [
@@ -290,18 +309,66 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           run: this.briefStep.bind(this),
         },
         {
-          id: "audio",
-          type: "audio",
-          title: "Generate voice",
-          description: "Synthesizes the spoken version and stores it next to the brief.",
-          inputs: [{ kind: "brief", title: "Brief", required: true }],
+          id: "events",
+          type: "events",
+          title: "Extract events",
+          description:
+            "Turns the brief and its sources into dated events, deduplicating against the stored events.",
+          inputs: [
+            { kind: "text", title: "Text", required: true },
+            { kind: "sources", title: "Sources", required: false },
+          ],
           outputs: [
             {
-              kind: "audio",
-              title: "Voice message",
-              description: "The spoken brief; absent when speech generation fails.",
+              kind: "events",
+              title: "Events",
+              description: "New or updated events; absent when extraction is off or fails.",
               guaranteed: false,
-              deliver: (value) => this.renderAudio(value),
+            },
+          ],
+          run: this.eventsStep.bind(this),
+        },
+        {
+          id: "timeline",
+          type: "timeline",
+          title: "Build timeline",
+          description:
+            "Collects the related stored events and stores a timeline artifact next to the brief.",
+          inputs: [
+            { kind: "events", title: "Events", required: true },
+            { kind: "text", title: "Text", required: false },
+          ],
+          outputs: [
+            {
+              kind: "timeline",
+              title: "Timeline",
+              description: "The timeline artifact attached to the brief.",
+              guaranteed: false,
+            },
+          ],
+          run: this.timelineStep.bind(this),
+        },
+        {
+          id: "audio",
+          type: "tts",
+          title: "Generate voice",
+          description:
+            "Synthesizes any text output (the brief here) into a voice message.",
+          inputs: [
+            {
+              kind: "text",
+              title: "Text",
+              description: "Any text derivative; its narration is spoken when present.",
+              required: true,
+            },
+          ],
+          outputs: [
+            {
+              kind: "tts",
+              title: "Voice message",
+              description: "The spoken form of the text, with metadata about its source.",
+              guaranteed: false,
+              deliver: (value) => this.renderTts(value),
             },
           ],
           run: this.audioStep.bind(this),
@@ -350,17 +417,15 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       return outcome.halted as BriefingWorkflowOutput;
     }
 
-    const briefId = briefIdOf(outcome.outputs);
+    const briefId = briefReferenceOf(outcome.outputs);
     const brief = briefId ? this.deps.briefs.get(briefId) : undefined;
-    const audio = outcome.outputs.get("audio")?.audio as
-      | { bytes?: number }
-      | undefined;
+    const voice = outcome.outputs.get("audio")?.tts as { bytes?: number } | undefined;
     return {
       skipped: false,
       ...(briefId ? { briefId } : {}),
       topics: topicNames,
       sources: brief?.sources.length ?? 0,
-      ...(audio?.bytes !== undefined ? { audioBytes: audio.bytes } : {}),
+      ...(voice?.bytes !== undefined ? { audioBytes: voice.bytes } : {}),
       ...(outcome.delivered > 0 ? { deliveredChannels: outcome.delivered } : {}),
     };
   }
@@ -384,9 +449,9 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
   /** Renders the brief artifact as a text message for its assigned channels. */
   private renderBrief(value: unknown): DeliveryMessage | undefined {
-    const briefId = (value as { briefId?: string } | undefined)?.briefId;
-    if (!briefId) return undefined;
-    const brief = this.deps.briefs.get(briefId);
+    const reference = textReference(value);
+    if (!reference) return undefined;
+    const brief = this.deps.briefs.get(reference);
     const summary = buildBriefMessage(brief.markdown, brief.sources);
     return {
       kinds: ["text"],
@@ -398,10 +463,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   /** Renders the stored speech as a voice message for its assigned channels. */
-  private renderAudio(value: unknown): DeliveryMessage | undefined {
-    const briefId = (value as { briefId?: string } | undefined)?.briefId;
-    if (!briefId) return undefined;
-    const brief = this.deps.briefs.get(briefId, true);
+  private renderTts(value: unknown): DeliveryMessage | undefined {
+    const reference = textReference(value);
+    if (!reference) return undefined;
+    const brief = this.deps.briefs.get(reference, true);
     if (!brief.audio) return undefined;
     return {
       kinds: ["voice"],
@@ -499,7 +564,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     return {
       outputs: {
-        research: { notes: outcome.notes, sources: uniqueSources, queries, missingTopics },
+        research: {
+          text: outcome.notes,
+          metadata: { sources: uniqueSources, queries, missingTopics },
+        },
       },
     };
   }
@@ -536,7 +604,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   private async compileStep(ctx: StepContext): Promise<StepResult> {
-    const research = researchNotes(ctx);
+    const research = inputValue(ctx, "research") as TextPortValue | undefined;
     if (!research) return { outputs: {} };
     const topicNames = topicNamesOf(ctx);
     const { correlationId } = ctx.run;
@@ -547,14 +615,14 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     try {
       compileSpan?.update("Waiting for the compiler model");
       const draft = await this.compile(
-        { topics: topicNames, notes: research.notes, sources: research.sources },
+        { topics: topicNames, notes: research.text, sources: sourcesOf(research) },
         ctx.run,
       );
       if (draft.usage) {
         compileSpan?.addCost(ctx.run.cost?.addLlm("Compilation", draft.usage) ?? 0);
       }
       compileSpan?.done("Brief compiled");
-      return { outputs: { draft: { markdown: draft.markdown, narration: draft.narration } } };
+      return { outputs: { draft: { text: draft.markdown, narration: draft.narration } } };
     } catch (error) {
       compileSpan?.failed("Compilation failed");
       throw error;
@@ -568,14 +636,15 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
    */
   private async followupsStep(ctx: StepContext): Promise<StepResult> {
     if (!this.deps.defaults.followups) return { outputs: {} };
-    const draft = compiledDraft(ctx);
-    const research = researchNotes(ctx);
+    const draft = inputValue(ctx, "text") as TextPortValue | undefined;
+    if (!draft) return { outputs: {} };
+    const research = inputValue(ctx, "research") as TextPortValue | undefined;
     const contextId = ctx.run.contextId ?? DEFAULT_CONTEXT_ID;
 
     const deeper = await this.researchFollowups(
       topicNamesOf(ctx),
-      draft.markdown,
-      research?.sources ?? [],
+      draft.text,
+      research ? sourcesOf(research) : [],
       contextId,
       ctx.run,
     );
@@ -583,7 +652,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     return {
       outputs: {
-        implications: { draft: applyImplications(draft, deeper), sources: deeper.sources },
+        implications: {
+          ...applyImplications(draft, deeper),
+          metadata: { sources: deeper.sources },
+        },
       },
     };
   }
@@ -593,7 +665,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
    * instead of coverage about it. A failed pass keeps the draft as it is.
    */
   private async sourcesStep(ctx: StepContext): Promise<StepResult> {
-    const draft = draftBeforeSources(ctx);
+    const draft = inputValue(ctx, "text") as TextPortValue | undefined;
+    if (!draft) return { outputs: {} };
     const sources = sourcesAfterResearch(ctx);
     if (!this.deps.defaults.followups) {
       return { outputs: { draft, sources } };
@@ -601,7 +674,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     const upgraded = await this.researchPrimarySources(
       topicNamesOf(ctx),
-      draft.markdown,
+      draft.text,
       sources,
       ctx.run,
     );
@@ -610,7 +683,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     return {
       outputs: {
         draft: {
-          markdown: upgraded.markdown,
+          text: upgraded.markdown,
           narration: sanitizeNarration(stripMarkdown(upgraded.markdown)),
         },
         sources: upgraded.sources,
@@ -620,7 +693,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
   /** Stores the final draft and its sources as the brief artifact. */
   private async briefStep(ctx: StepContext): Promise<StepResult> {
-    const draft = finalDraft(ctx);
+    const draft = inputValue(ctx, "text") as TextPortValue | undefined;
+    if (!draft) return { outputs: {} };
     const sources = finalSources(ctx);
     const { bus, correlationId } = ctx.run;
     const contextId = ctx.run.contextId ?? DEFAULT_CONTEXT_ID;
@@ -632,8 +706,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       workflow: workflowId,
       contextId,
       topics: topicNames,
-      markdown: draft.markdown,
-      narration: draft.narration,
+      markdown: draft.text,
+      narration: draft.narration ?? sanitizeNarration(stripMarkdown(draft.text)),
       sources,
     });
 
@@ -655,36 +729,180 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         artifactId: brief.artifactId,
         topics: topicNames,
         sources: sources.length,
-        characters: draft.markdown.length,
+        characters: draft.text.length,
       },
       { source: `workflow:${this.definition.id}`, correlationId },
     );
     ctx.run.logger.info("brief generated", {
       correlationId,
       briefId: brief.id,
-      characters: draft.markdown.length,
+      characters: draft.text.length,
     });
 
-    return { outputs: { brief: { briefId: brief.id } } };
+    return {
+      outputs: {
+        brief: { text: brief.markdown, narration: brief.narration, reference: brief.id },
+      },
+    };
   }
 
   /**
-   * Synthesizes the spoken version. Speech failures are not fatal: the step
-   * produces no audio output and the brief is delivered as text only.
+   * The event extraction action: reads the finished brief and its sources,
+   * suggests dated events, reviews potential duplicates and upserts them.
+   * Failures are swallowed — a missing timeline must never lose the brief.
+   */
+  private async eventsStep(ctx: StepContext): Promise<StepResult> {
+    if (!this.deps.defaults.events) return { outputs: {} };
+    const text = inputValue(ctx, "text") as TextPortValue | undefined;
+    if (!text) return { outputs: {} };
+    const { correlationId, logger } = ctx.run;
+
+    const span = this.deps.statuses?.begin(`${correlationId}:events`, "Extracting events", {
+      correlationId,
+    });
+    try {
+      const extractor = new EventExtractor({
+        llm: this.deps.llm,
+        events: this.deps.events,
+        logger: logger.child("events"),
+        cost: ctx.run.cost,
+        sessionId: correlationId,
+        signal: ctx.run.signal,
+        ...(this.deps.defaults.eventTagModel
+          ? { tagModel: this.deps.defaults.eventTagModel }
+          : {}),
+      });
+      const result = await extractor.extract({
+        briefId: text.reference,
+        brief: text.text,
+        sources: finalSources(ctx),
+      });
+      if (result.events.length === 0) {
+        span?.done("No dated events found");
+        return { outputs: {} };
+      }
+      span?.done(
+        `Events ready (${result.events.length} event(s)${
+          result.newTags.length > 0 ? `, ${result.newTags.length} new tag(s)` : ""
+        })`,
+      );
+      return {
+        outputs: {
+          events: { ids: result.events.map((event) => event.id), newTags: result.newTags },
+        },
+      };
+    } catch (error) {
+      span?.failed(`Event extraction failed (${errorMessage(error)})`);
+      logger.warn("event extraction failed; keeping the brief", {
+        error: errorMessage(error),
+      });
+      return { outputs: {} };
+    }
+  }
+
+  /**
+   * The timeline action: picks the related stored events for the freshly
+   * extracted ones, renders them and stores a timeline artifact under the
+   * brief (the brief's metadata points at it).
+   */
+  private async timelineStep(ctx: StepContext): Promise<StepResult> {
+    const eventsOutput = ctx.outputs.get("events")?.events as { ids?: string[] } | undefined;
+    const briefId = textReference(inputValue(ctx, "text"));
+    if (!eventsOutput?.ids?.length || !briefId) return { outputs: {} };
+    const { bus, correlationId, logger } = ctx.run;
+    const workflowId = ctx.run.run?.workflow ?? this.definition.id;
+
+    try {
+      const brief = this.deps.briefs.get(briefId);
+      const fresh = eventsOutput.ids
+        .map((id) => {
+          try {
+            return this.deps.events.get(id);
+          } catch {
+            return undefined;
+          }
+        })
+        .filter((event): event is TimelineEvent => event !== undefined);
+      if (fresh.length === 0) return { outputs: {} };
+
+      const selected = selectTimelineEvents(fresh, this.deps.events.list({ limit: 500 }));
+      const markdown = renderTimelineMarkdown(selected);
+      const artifact = this.deps.artifacts.create({
+        kind: "timeline",
+        name: `Timeline · ${selected.length} event(s)`,
+        contentType: "text/markdown",
+        content: markdown,
+        metadata: {
+          eventIds: selected.map((event) => event.id),
+          from: selected.at(-1)?.date,
+          to: selected[0]?.date,
+          count: selected.length,
+          briefId,
+        },
+        parentId: brief.artifactId,
+        workflow: workflowId,
+        correlationId,
+        contextId: ctx.run.contextId ?? DEFAULT_CONTEXT_ID,
+      });
+      this.deps.artifacts.updateMetadata(brief.artifactId, { timelineArtifactId: artifact.id });
+
+      bus.publish(
+        "artifact.created",
+        {
+          artifactId: artifact.id,
+          kind: "timeline",
+          workflow: workflowId,
+          parentId: brief.artifactId,
+          correlationId,
+        },
+        { source: `workflow:${this.definition.id}`, correlationId },
+      );
+      logger.info("timeline built", { artifactId: artifact.id, events: selected.length });
+
+      return {
+        outputs: {
+          timeline: {
+            text: markdown,
+            reference: artifact.id,
+            metadata: { eventIds: selected.map((event) => event.id), count: selected.length },
+          },
+        },
+      };
+    } catch (error) {
+      logger.warn("timeline build failed; keeping the brief", {
+        error: errorMessage(error),
+      });
+      return { outputs: {} };
+    }
+  }
+
+  /**
+   * The TTS action: synthesizes the spoken form of any text output (here the
+   * brief). Speech failures are not fatal — the step produces no voice message
+   * and the text is delivered as is. The audio is stored next to the text it
+   * was spoken from, so the output can reference its source.
    */
   private async audioStep(ctx: StepContext): Promise<StepResult> {
     if (ctx.options.generateAudio === false) return { outputs: {} };
-    const briefId = (ctx.outputs.get("brief")?.brief as { briefId?: string } | undefined)
-      ?.briefId;
-    if (!briefId) return { outputs: {} };
+    const text = inputValue(ctx, "text") as TextPortValue | undefined;
+    if (!text) return { outputs: {} };
+    // Without a stored artifact there is nowhere to keep the audio.
+    const reference = text.reference;
+    if (!reference) return { outputs: {} };
 
     const { bus, correlationId } = ctx.run;
     const workflowId = ctx.run.run?.workflow ?? this.definition.id;
     ctx.run.signal?.throwIfAborted();
 
     // A resumed run may already have stored audio; reuse it instead of
-    // synthesizing (and paying for) the same speech twice.
-    const stored = this.deps.briefs.get(briefId, true);
+    // synthesizing (and paying for) the same speech twice. The stored brief
+    // also supplies the narration when the checkpoint only kept a reference.
+    const stored = this.deps.briefs.get(reference, true);
+    const spoken =
+      text.narration ??
+      (text.text ? sanitizeNarration(stripMarkdown(text.text)) : stored.narration);
+    if (!spoken) return { outputs: {} };
+
     let speech: SpeechAudio | undefined;
 
     if (stored.hasAudio && stored.audio) {
@@ -700,7 +918,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       });
       try {
         speechSpan?.update("Waiting for the local TTS server");
-        speech = await this.deps.tts.synthesize({ text: stored.narration });
+        speech = await this.deps.tts.synthesize({ text: spoken });
         speechSpan?.done(
           `Speech ready (${Math.round(speech.data.byteLength / 1024)} KB${
             speech.durationMs ? `, ${Math.round(speech.durationMs / 1000)}s` : ""
@@ -722,7 +940,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     if (!stored.hasAudio) {
       const audioArtifactId = this.deps.briefs.attachAudio(
-        briefId,
+        reference,
         speech.data,
         speech.mimeType,
         speech.durationMs,
@@ -734,7 +952,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           artifactId: audioArtifactId,
           kind: "audio",
           workflow: workflowId,
-          parentId: briefId,
+          parentId: reference,
           correlationId,
         },
         { source: `workflow:${this.definition.id}`, correlationId },
@@ -743,10 +961,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         "tts.synthesized",
         {
           correlationId,
-          briefId,
-          artifactId: briefId,
+          briefId: reference,
+          artifactId: reference,
           audioArtifactId,
-          characters: stored.narration.length,
+          characters: spoken.length,
           bytes: speech.data.byteLength,
           durationMs: speech.durationMs ?? 0,
         },
@@ -757,10 +975,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     return {
       outputs: {
-        audio: {
-          briefId,
-          bytes: speech.data.byteLength,
+        tts: {
+          reference,
+          source: reference,
+          text: spoken,
+          mimeType: speech.mimeType,
           durationMs: speech.durationMs ?? 0,
+          bytes: speech.data.byteLength,
         },
       },
     };
@@ -1003,32 +1224,28 @@ function topicNamesOf(ctx: StepContext): string[] {
   return (ctx.inputs.topics as Topic[]).map((topic) => topic.name);
 }
 
-function researchNotes(ctx: StepContext): ResearchNotes | undefined {
-  return ctx.outputs.get("research")?.research as ResearchNotes | undefined;
+/** Resolves a declared step input to the latest output that satisfies it. */
+function inputValue(ctx: StepContext, accepted: string): unknown {
+  return latestOutput(ctx.outputs, accepted)?.value;
 }
 
-function compiledDraft(ctx: StepContext): Draft {
-  const compiled = ctx.outputs.get("compile")?.draft as Draft | undefined;
-  if (!compiled) throw new Error("Briefing pipeline is missing the compiled draft");
-  return compiled;
+/** The stored artifact a text-derived value belongs to, if any. */
+function textReference(value: unknown): string | undefined {
+  const reference = (value as { reference?: unknown } | undefined)?.reference;
+  return typeof reference === "string" && reference ? reference : undefined;
 }
 
-function draftBeforeSources(ctx: StepContext): Draft {
-  const implications = ctx.outputs.get("followups")?.implications as
-    | { draft?: Draft }
-    | undefined;
-  return implications?.draft ?? compiledDraft(ctx);
+/** Sources carried as metadata by a research/implications text value. */
+function sourcesOf(value: TextPortValue | undefined): BriefSource[] {
+  const sources = value?.metadata?.sources;
+  return Array.isArray(sources) ? (sources as BriefSource[]) : [];
 }
 
-function finalDraft(ctx: StepContext): Draft {
-  return (ctx.outputs.get("sources")?.draft as Draft | undefined) ?? draftBeforeSources(ctx);
-}
-
+/** The latest sources produced or carried by the text pipeline. */
 function sourcesAfterResearch(ctx: StepContext): BriefSource[] {
-  const implications = ctx.outputs.get("followups")?.implications as
-    | { sources?: BriefSource[] }
-    | undefined;
-  return implications?.sources ?? researchNotes(ctx)?.sources ?? [];
+  const latest = sourcesOf(inputValue(ctx, "text") as TextPortValue | undefined);
+  if (latest.length > 0) return latest;
+  return sourcesOf(inputValue(ctx, "research") as TextPortValue | undefined);
 }
 
 function finalSources(ctx: StepContext): BriefSource[] {
@@ -1038,14 +1255,13 @@ function finalSources(ctx: StepContext): BriefSource[] {
   );
 }
 
-function applyImplications(draft: Draft, deeper: { section: string }): Draft {
-  const markdown = `${draft.markdown.trimEnd()}\n\n## Implications\n\n${deeper.section.trim()}`;
-  return { markdown, narration: sanitizeNarration(stripMarkdown(markdown)) };
+function applyImplications(draft: TextPortValue, deeper: { section: string }): TextPortValue {
+  const text = `${draft.text.trimEnd()}\n\n## Implications\n\n${deeper.section.trim()}`;
+  return { text, narration: sanitizeNarration(stripMarkdown(text)) };
 }
 
-function briefIdOf(outputs: Map<string, Record<string, unknown>>): string | undefined {
-  const brief = outputs.get("brief")?.brief as { briefId?: string } | undefined;
-  return brief?.briefId;
+function briefReferenceOf(outputs: Map<string, Record<string, unknown>>): string | undefined {
+  return textReference(outputs.get("brief")?.brief);
 }
 
 /**
@@ -1059,45 +1275,60 @@ function migrateResume(resume: unknown): PipelineState | undefined {
   const progress = resume as BriefingProgress;
   const state: PipelineState = { steps: {}, delivered: {} };
 
-  if (progress.research) state.steps.research = { research: progress.research };
-  if (progress.compiled) state.steps.compile = { draft: progress.compiled };
+  const researchValue = (research: ResearchNotes): TextPortValue => ({
+    text: research.notes,
+    metadata: {
+      sources: research.sources,
+      queries: research.queries,
+      missingTopics: research.missingTopics,
+    },
+  });
+  const draftValue = (draft: Draft): TextPortValue => ({
+    text: draft.markdown,
+    narration: draft.narration,
+  });
+
+  if (progress.research) state.steps.research = { research: researchValue(progress.research) };
+  const compiledValue = progress.compiled ? draftValue(progress.compiled) : undefined;
+  if (compiledValue) state.steps.compile = { draft: compiledValue };
 
   const withImplications =
-    progress.compiled && progress.implications
-      ? applyImplications(progress.compiled, progress.implications)
-      : progress.compiled;
+    compiledValue && progress.implications
+      ? {
+          ...applyImplications(compiledValue, progress.implications),
+          metadata: { sources: progress.implications.sources },
+        }
+      : compiledValue;
 
   if (progress.implications !== undefined) {
-    state.steps.followups = progress.implications
-      ? { implications: { draft: withImplications, sources: progress.implications.sources } }
-      : {};
+    state.steps.followups = progress.implications ? { implications: withImplications } : {};
   }
 
-  if (progress.upgraded !== undefined && progress.compiled) {
+  if (progress.upgraded !== undefined && compiledValue) {
     const draft = progress.upgraded
       ? {
-          markdown: progress.upgraded.markdown,
+          text: progress.upgraded.markdown,
           narration: sanitizeNarration(stripMarkdown(progress.upgraded.markdown)),
         }
-      : withImplications!;
+      : withImplications ?? compiledValue;
     state.steps.sources = {
       draft,
-      sources: progress.upgraded ? progress.upgraded.sources : sourcesOf(progress),
+      sources: progress.upgraded ? progress.upgraded.sources : progressSources(progress),
     };
   }
 
-  if (progress.briefId) state.steps.brief = { brief: { briefId: progress.briefId } };
+  if (progress.briefId) state.steps.brief = { brief: { reference: progress.briefId } };
 
   if (progress.delivered) {
     state.steps.audio ??= {};
     state.delivered["brief:brief"] = true;
-    state.delivered["audio:audio"] = true;
+    state.delivered["audio:tts"] = true;
   }
 
   return state;
 }
 
-function sourcesOf(progress: BriefingProgress): BriefSource[] {
+function progressSources(progress: BriefingProgress): BriefSource[] {
   return progress.implications?.sources ?? progress.research?.sources ?? [];
 }
 

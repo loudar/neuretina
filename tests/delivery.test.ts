@@ -68,7 +68,7 @@ describe("DeliveryRepository", () => {
     const first = repo.createChannel({ type: "matrix", name: "Matrix" });
     const second = repo.createChannel({ type: "email", name: "Mail" });
     const briefText = { workflow: "briefing", step: "brief", output: "brief" };
-    const voice = { workflow: "briefing", step: "audio", output: "audio" };
+    const voice = { workflow: "briefing", step: "audio", output: "tts" };
     const answer = { workflow: "qa", step: "answer", output: "answer" };
 
     repo.attach(briefText, first.id);
@@ -102,7 +102,7 @@ describe("DeliveryRepository", () => {
 
     repo.attach({ workflow: "briefing", step: "brief", output: "brief" }, first.id);
     repo.attach({ workflow: "user-1", step: "brief", output: "brief" }, first.id);
-    repo.attach({ workflow: "user-1", step: "audio", output: "audio" }, second.id);
+    repo.attach({ workflow: "user-1", step: "audio", output: "tts" }, second.id);
 
     repo.detachWorkflow("user-1");
     expect(repo.attachments()).toEqual([
@@ -395,7 +395,7 @@ describe("DeliveryService", () => {
     store.attach(target, channel.id);
 
     expect(service.channelsFor(target)).toEqual([channel.id]);
-    expect(service.channelsFor({ ...target, step: "audio", output: "audio" })).toEqual([]);
+    expect(service.channelsFor({ ...target, step: "audio", output: "tts" })).toEqual([]);
 
     const events: DomainEvent[] = [];
     bus.subscribe("delivery.*", (event) => events.push(event));
@@ -522,7 +522,7 @@ describe("DeliveryService", () => {
   test("honors the kinds filter (voice only)", async () => {
     const { service, store, sender } = setupDelivery();
     const channel = store.createChannel({ type: "matrix", name: "Matrix" });
-    store.attach({ workflow: "briefing", step: "audio", output: "audio" }, channel.id);
+    store.attach({ workflow: "briefing", step: "audio", output: "tts" }, channel.id);
 
     const results = await service.deliver({
       briefId: "b",

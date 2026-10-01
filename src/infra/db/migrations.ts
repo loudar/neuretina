@@ -273,6 +273,28 @@ export const migrations: Migration[] = [
       ALTER TABLE user_workflows DROP COLUMN topics;
     `,
   },
+  {
+    // Dated events extracted from briefs (the `events` table is the event
+    // log). Events are rows, not artifacts: a timeline artifact is composed
+    // of a set of them.
+    id: 16,
+    name: "timeline_events",
+    sql: `
+      CREATE TABLE IF NOT EXISTS timeline_events (
+        id              TEXT PRIMARY KEY,
+        date            TEXT NOT NULL,
+        time            TEXT,
+        entities        TEXT NOT NULL DEFAULT '[]',
+        tags            TEXT NOT NULL DEFAULT '[]',
+        title           TEXT NOT NULL,
+        description     TEXT NOT NULL DEFAULT '',
+        source_brief_id TEXT,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_timeline_events_date ON timeline_events (date);
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

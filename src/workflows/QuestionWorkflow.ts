@@ -115,19 +115,18 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
     });
     if (outcome.halted !== undefined) return outcome.halted as QuestionWorkflowOutput;
 
-    const answer = outcome.outputs.get("answer")?.answer;
+    const answer = (outcome.outputs.get("answer")?.answer as { text?: string } | undefined)?.text;
     return {
-      answer:
-        typeof answer === "string" && answer
-          ? answer
-          : "I couldn't find a good answer for that.",
+      answer: answer || "I couldn't find a good answer for that.",
     };
   }
 
   private async answerStep(ctx: StepContext): Promise<StepResult> {
     const contextId = ctx.run.contextId ?? DEFAULT_CONTEXT_ID;
     const question = String(ctx.inputs.question ?? "").trim();
-    if (!question) return { outputs: { answer: "I couldn't find a good answer for that." } };
+    if (!question) {
+      return { outputs: { answer: { text: "I couldn't find a good answer for that." } } };
+    }
 
     const agent = this.createAgent(contextId);
     const status = ctx.run.statuses?.begin(
@@ -151,7 +150,7 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
         sanitizeNarration(stripMarkdown(result.text)).trim() ||
         "I couldn't find a good answer for that.";
       status?.done("Answered");
-      return { outputs: { answer } };
+      return { outputs: { answer: { text: answer } } };
     } catch (error) {
       status?.failed("Answering failed");
       throw error;

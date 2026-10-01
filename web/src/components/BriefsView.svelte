@@ -19,6 +19,7 @@
   let briefs = $state<Brief[]>([]);
   let selected = $state<Brief | null>(null);
   let audioUrl = $state<string | null>(null);
+  let timelineMarkdown = $state<string | null>(null);
   let busy = $state(false);
   let resending = $state(false);
   let confirmingDelete = $state(false);
@@ -61,11 +62,17 @@
       if (briefId !== id) return;
       selected = brief;
       audioUrl = null;
-      if (brief.hasAudio) {
-        const audio = await commands.briefs.audio(id);
-        if (briefId !== id) return;
-        audioUrl = audio?.dataUrl ?? null;
-      }
+      timelineMarkdown = null;
+
+      const [audio, timeline] = await Promise.all([
+        brief.hasAudio ? commands.briefs.audio(id) : Promise.resolve(null),
+        brief.timelineArtifactId
+          ? commands.artifacts.content(brief.timelineArtifactId)
+          : Promise.resolve(null),
+      ]);
+      if (briefId !== id) return;
+      audioUrl = audio?.dataUrl ?? null;
+      timelineMarkdown = timeline?.content ?? null;
     } catch (error) {
       reportError(error);
     }
@@ -276,6 +283,12 @@
 
   {#if selected}
     <div class="brief-body">
+      {#if timelineMarkdown !== null}
+        <div class="timeline">
+          <MarkdownView markdown={timelineMarkdown} controls={false} />
+        </div>
+      {/if}
+
       {#if audioUrl}
         <audio controls src={audioUrl}></audio>
       {:else if selected.hasAudio}
@@ -378,6 +391,12 @@
     width: 100%;
     max-width: 800px;
     margin-inline: auto;
+  }
+
+  .timeline {
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
   .brief-row {

@@ -6,6 +6,7 @@ import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.t
 import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
 import { ContextRepository } from "../src/domain/contexts/ContextRepository.ts";
 import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
+import { EventRepository } from "../src/domain/events/EventRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
@@ -28,6 +29,7 @@ describe("kernel storage overrides", () => {
       runs: new WorkflowRunRepository(memory),
       deliveries: new DeliveryRepository(memory),
       userWorkflows: new UserWorkflowRepository(memory),
+      timelineEvents: new EventRepository(memory),
     };
 
     const kernel = await createKernel({ config: testConfig(), stores });

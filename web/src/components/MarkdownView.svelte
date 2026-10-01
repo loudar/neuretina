@@ -11,9 +11,11 @@
     /** Optional controlled source filter (the briefs view keeps it in the URL). */
     filter?: string;
     onfilter?: (value: string) => void;
+    /** Hides the reading-size controls and source list (e.g. a timeline). */
+    controls?: boolean;
   }
 
-  let { markdown, sources = [], filter, onfilter }: Props = $props();
+  let { markdown, sources = [], filter, onfilter, controls = true }: Props = $props();
 
   const html = $derived(renderCitations(markdownToHtml(markdown), sources));
 
@@ -26,24 +28,28 @@
 
 <!-- Reading controls live here so brief and artifact details stay in sync. -->
 <div class="reading" style:--markdown-font-size={readingPrefs.css}>
-  <span class="reading-sizes" role="group" aria-label="Reading size">
-    {#each READING_SIZES as size (size)}
-      <button
-        type="button"
-        class="aa {size}"
-        class:active={readingPrefs.size === size}
-        aria-pressed={readingPrefs.size === size}
-        title={sizeTitle(size)}
-        onclick={() => readingPrefs.setSize(size)}
-      >
-        aA
-      </button>
-    {/each}
-  </span>
+  {#if controls}
+    <span class="reading-sizes" role="group" aria-label="Reading size">
+      {#each READING_SIZES as size (size)}
+        <button
+          type="button"
+          class="aa {size}"
+          class:active={readingPrefs.size === size}
+          aria-pressed={readingPrefs.size === size}
+          title={sizeTitle(size)}
+          onclick={() => readingPrefs.setSize(size)}
+        >
+          aA
+        </button>
+      {/each}
+    </span>
+  {/if}
 
   <div class="markdown">{@html html}</div>
 
-  <SourcesList {sources} {filter} {onfilter} />
+  {#if controls}
+    <SourcesList {sources} {filter} {onfilter} />
+  {/if}
 </div>
 
 <style>

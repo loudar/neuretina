@@ -178,6 +178,8 @@ describe("user workflows through the gateway", () => {
         "followups",
         "sources",
         "brief",
+        "events",
+        "timeline",
         "audio",
       ]);
       expect(

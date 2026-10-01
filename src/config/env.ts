@@ -51,6 +51,10 @@ export interface AppConfig {
     searchDomains: string[];
     /** Dispatch follow-up subagents after the first draft. */
     followups: boolean;
+    /** Extract dated events from finished briefs and build a timeline. */
+    events: boolean;
+    /** Model for the tag decision step; empty uses the main LLM model. */
+    eventTagModel?: string;
     briefLanguage: string;
   };
   /** Price table for metered providers; 0 means unknown (usage is still recorded). */
@@ -168,6 +172,8 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       searchResultsPerProvider: num(env, "DEFAULT_SEARCH_RESULTS", 6),
       searchDomains: parseSearchDomains(env),
       followups: bool(env, "DEFAULT_FOLLOWUP_RESEARCH", true),
+      events: bool(env, "DEFAULT_EVENT_EXTRACTION", true),
+      eventTagModel: str(env, "EVENTS_TAG_MODEL", "") || undefined,
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
     costs: {
