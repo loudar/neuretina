@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { Chip, Icon, NavigationRail, NavigationRailItem, Snackbar } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
@@ -102,20 +102,26 @@
   );
 
   // The backend rejects every data call until the site is unlocked, so the
-  // feeds only run while a session exists.
+  // feeds only run while a session exists. The calls are untracked: starting
+  // the event stream reads its cursor state, and tracking that would restart
+  // both feeds on every event batch.
   $effect(() => {
-    if (authState.loading || authState.locked) {
-      eventStream.stop();
-      statusFeed.stop();
-      return;
-    }
-    eventStream.start();
-    statusFeed.start();
-    void configState.load();
-    return () => {
-      eventStream.stop();
-      statusFeed.stop();
-    };
+    const locked = authState.loading || authState.locked;
+    untrack(() => {
+      if (locked) {
+        eventStream.stop();
+        statusFeed.stop();
+        return;
+      }
+      eventStream.start();
+      statusFeed.start();
+      void configState.load();
+    });
+    return () =>
+      untrack(() => {
+        eventStream.stop();
+        statusFeed.stop();
+      });
   });
 
   onMount(() => {
