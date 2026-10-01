@@ -389,7 +389,7 @@ function normalizeTag(value: string): string | undefined {
   return tag.length >= 2 ? tag : undefined;
 }
 
-const SUGGEST_PROMPT = `You extract dated events from a morning briefing and its sources.
+const SUGGEST_PROMPT = `You extract dated events from a briefing and its sources.
 
 An event is anything learned from the material that is attributable to a specific calendar date: a release, a deal, a ruling, an earnings report, a statement, a market move. Skip facts that carry no date.
 

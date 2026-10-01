@@ -37,7 +37,7 @@ export const migrations: Migration[] = [
         updated_at  INTEGER NOT NULL
       );
       INSERT OR IGNORE INTO contexts (id, name, description, settings, created_at, updated_at)
-      VALUES ('morning-briefing', 'Morning briefing', NULL, '{}', 0, 0);
+      VALUES ('default', 'Default', NULL, '{}', 0, 0);
     `,
   },
   {
@@ -49,7 +49,7 @@ export const migrations: Migration[] = [
         name        TEXT NOT NULL UNIQUE,
         description TEXT,
         muted       INTEGER NOT NULL DEFAULT 0,
-        context_id  TEXT NOT NULL DEFAULT 'morning-briefing',
+        context_id  TEXT NOT NULL DEFAULT 'default',
         created_at  INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_topics_context ON topics (context_id);
@@ -65,7 +65,7 @@ export const migrations: Migration[] = [
         cron         TEXT NOT NULL,
         timezone     TEXT,
         workflow     TEXT NOT NULL,
-        context_id   TEXT NOT NULL DEFAULT 'morning-briefing',
+        context_id   TEXT NOT NULL DEFAULT 'default',
         input        TEXT NOT NULL DEFAULT '{}',
         enabled      INTEGER NOT NULL DEFAULT 1,
         created_at   INTEGER NOT NULL,
@@ -102,7 +102,7 @@ export const migrations: Migration[] = [
         parent_id      TEXT,
         workflow       TEXT,
         correlation_id TEXT,
-        context_id     TEXT NOT NULL DEFAULT 'morning-briefing',
+        context_id     TEXT NOT NULL DEFAULT 'default',
         created_at     INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_artifacts_kind_created ON artifacts (kind, created_at DESC);
@@ -306,6 +306,19 @@ export const migrations: Migration[] = [
         display_name TEXT,
         created_at   INTEGER NOT NULL
       );
+    `,
+  },
+  {
+    // Workflows are no longer tied to a morning brief, so the shipped context
+    // becomes a plain default. Renames the row and every reference to it.
+    id: 18,
+    name: "default_context",
+    sql: `
+      UPDATE contexts SET id = 'default', name = 'Default' WHERE id = 'morning-briefing';
+      UPDATE topics SET context_id = 'default' WHERE context_id = 'morning-briefing';
+      UPDATE scheduled_jobs SET context_id = 'default' WHERE context_id = 'morning-briefing';
+      UPDATE artifacts SET context_id = 'default' WHERE context_id = 'morning-briefing';
+      UPDATE workflow_runs SET context_id = 'default' WHERE context_id = 'morning-briefing';
     `,
   },
 ];

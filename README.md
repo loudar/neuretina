@@ -1,7 +1,7 @@
 # Neuretina
 
 A modular, event-driven TypeScript service that periodically researches topics you care about,
-compiles a neutral morning brief, turns it into speech, and delivers it as a voice message.
+compiles a neutral brief, turns it into speech, and delivers it as a voice message.
 
 Built on **Bun** (runtime, SQLite, HTTP server, cron), **TypeScript 7**, **Svelte 5**, and an
 event bus that every subsystem publishes to from the ground up.
@@ -127,7 +127,7 @@ Workflows are **code-registered** definitions (`src/workflows`, registered in
 stores definitions; execution lives in `WorkflowRunner`.
 
 - **Contexts** are named scopes that own topics, scheduled jobs, workflow runs and artifacts (all
-  carry a `context_id`). The first context is `morning-briefing`; the briefing workflow and the
+  carry a `context_id`). The first context is `default`; the briefing workflow and the
   seeded job live there. `context.list` returns each context with its topic/job/run/artifact counts.
 - **Workflow runs** are persisted in `workflow_runs`: id (= the run's correlation id, which every
   event, status entry and artifact references), workflow, context, trigger kind, trigger detail,
@@ -482,9 +482,9 @@ the Workflows tab.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
   an event.
-- On first boot a `morning-brief` job is seeded with `DEFAULT_BRIEF_CRON` (default daily 07:00).
-  Edit it in the UI, or create additional tasks — any registered workflow can be scheduled
-  (currently `briefing`).
+- On first boot a default job for the first registered workflow is seeded with `DEFAULT_BRIEF_CRON`
+  (default daily 07:00). Edit it in the UI, or create additional tasks — any registered workflow
+  can be scheduled (currently `briefing`).
 - Workflows accept an input object, e.g. `{"topics": ["Rust"], "deliver": false}` for a
   research-only run.
 

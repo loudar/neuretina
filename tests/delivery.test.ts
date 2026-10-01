@@ -453,7 +453,7 @@ describe("DeliveryService", () => {
       service.deliver({ briefId: "b", channels: [disabled.id], summary: "s" }),
     ).rejects.toThrow(/disabled/);
 
-    // No enabled channels attached to "briefing": nothing to do.
+    // No workflow, target or channels: nothing to do.
     expect(await service.deliver({ briefId: "b", summary: "s" })).toEqual([]);
   });
 
@@ -479,6 +479,7 @@ describe("DeliveryService", () => {
 
     const results = await service.deliver({
       briefId: "b1",
+      workflow: "briefing",
       summary: "s",
       audio: new Uint8Array([1]),
     });
@@ -511,7 +512,7 @@ describe("DeliveryService", () => {
     const channel = store.createChannel({ type: "matrix", name: "Broken" });
     store.attach({ workflow: "briefing", step: "brief", output: "brief" }, channel.id);
 
-    const results = await service.deliver({ briefId: "b", summary: "s" });
+    const results = await service.deliver({ briefId: "b", workflow: "briefing", summary: "s" });
 
     expect(results).toEqual([
       { channelId: channel.id, status: "failed", error: "channel config needs a homeserverUrl" },
@@ -526,6 +527,7 @@ describe("DeliveryService", () => {
 
     const results = await service.deliver({
       briefId: "b",
+      workflow: "briefing",
       kinds: ["voice"],
       summary: "s",
       audio: new Uint8Array([1]),
@@ -534,7 +536,7 @@ describe("DeliveryService", () => {
     expect(results).toEqual([{ channelId: channel.id, status: "sent", eventId: "evt-1" }]);
     expect(sender.sent.map((entry) => entry.kind)).toEqual(["voice"]);
     expect(sender.sent[0]?.text).toBe("s");
-    expect(sender.sent[0]?.caption).toContain("Morning brief");
+    expect(sender.sent[0]?.caption).toContain("Brief");
   });
 
   test("uses the channels attached to the workflow being delivered", async () => {

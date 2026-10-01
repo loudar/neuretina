@@ -3,6 +3,7 @@ import { errorMessage, ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import { audioExtension } from "../core/media.ts";
+import { slugify } from "../core/text.ts";
 import type { DeliveryChannelSender } from "../capabilities/delivery/DeliveryChannel.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 import type {
@@ -25,6 +26,8 @@ export interface DeliveryMessage {
   reference?: string;
   /** Passes to run; defaults to text, plus voice when audio is present. */
   kinds?: DeliveryKind[];
+  /** Human label for the voice message's filename and caption. */
+  title?: string;
   /** Plain-text summary (the compiled brief with source links). */
   summary: string;
   /** Pre-rendered HTML for channels that support it (Matrix, email). */
@@ -41,17 +44,16 @@ export interface DeliverInput {
   runId?: string;
   /**
    * Step output whose assigned channels receive the message. Explicit
-   * `channels` win over it; without either, every channel assigned to the
-   * workflow (default: the briefing workflow) receives the message.
+   * `channels` win over it; without either, every channel assigned to
+   * `workflow` receives the message.
    */
   target?: DeliveryTarget;
-  /**
-   * Workflow fallback for callers that have no step target (re-sends);
-   * defaults to the briefing workflow.
-   */
+  /** Workflow fallback for callers that have no step target (re-sends). */
   workflow?: string;
   /** Explicit channel ids; overrides target/workflow resolution. */
   channels?: string[];
+  /** Human label for the voice message's filename and caption. */
+  title?: string;
   /** Which passes to run; defaults to text + voice. */
   kinds?: DeliveryKind[];
   /** Plain-text summary (the compiled brief with source links). */
@@ -88,8 +90,6 @@ export interface DeliveryRouter {
   /** Enabled channel ids assigned anywhere in a workflow. */
   workflowChannels(workflow: string): string[];
 }
-
-const BRIEFING_WORKFLOW = "briefing";
 
 interface PassResult {
   status: "sent" | "failed";
@@ -168,7 +168,9 @@ export class DeliveryService implements DeliveryRouter {
 
     const ids = input.target
       ? this.channelsFor(input.target)
-      : this.workflowChannels(input.workflow ?? BRIEFING_WORKFLOW);
+      : input.workflow
+        ? this.workflowChannels(input.workflow)
+        : [];
     const byId = new Map(this.deps.store.channels().map((channel) => [channel.id, channel]));
     return ids
       .map((id) => byId.get(id))
@@ -200,8 +202,8 @@ export class DeliveryService implements DeliveryRouter {
             sender.sendVoice({
               audio: input.audio!,
               mimeType: mime,
-              filename: `morning-brief-${isoDate()}.${audioExtension(mime)}`,
-              caption: `Morning brief – ${isoDate()}`,
+              filename: `${slugify(input.title ?? "brief")}-${isoDate()}.${audioExtension(mime)}`,
+              caption: `${input.title ?? "Brief"} – ${isoDate()}`,
               text: input.narration ?? input.summary,
             }),
           ),

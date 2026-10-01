@@ -2,9 +2,9 @@ import { NotFoundError } from "../../core/errors.ts";
 import { parseJsonObject } from "../../core/json.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
-/** The context the engine ships with; owns the briefing topics/jobs/artifacts. */
-export const DEFAULT_CONTEXT_ID = "morning-briefing";
-export const DEFAULT_CONTEXT_NAME = "Morning briefing";
+/** The context the engine ships with; owns the default topics/jobs/artifacts. */
+export const DEFAULT_CONTEXT_ID = "default";
+export const DEFAULT_CONTEXT_NAME = "Default";
 
 /**
  * A named scope a workflow runs in: it owns topics, scheduled jobs and the

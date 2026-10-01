@@ -36,3 +36,14 @@ export function textSimilarity(a: string, b: string): number {
 export function wordCount(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
+
+/** Filesystem/URL-friendly slug; falls back to "untitled" when nothing is left. */
+export function slugify(text: string, maxLength = 48): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maxLength)
+    .replace(/-+$/g, "");
+  return slug || "untitled";
+}

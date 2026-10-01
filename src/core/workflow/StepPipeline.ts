@@ -283,6 +283,7 @@ export class StepPipeline {
       runId: context.correlationId,
       channels,
       kinds: message.kinds,
+      title: message.title,
       summary: message.summary,
       html: message.html,
       narration: message.narration,

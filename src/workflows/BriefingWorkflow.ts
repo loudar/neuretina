@@ -165,7 +165,7 @@ Finish with a single JSON object and nothing else:
 {"found": true|false, "notes": "<compact notes with attributions, or an explanation of what you searched and why nothing relevant came back>", "missingTopics": ["<topics that produced no relevant material>"]}
 Set "found" to false when nothing relevant to any topic came back.`;
 
-const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral morning briefing. You receive research notes covering several topics (they may overlap) and compile ONE short, conversational brief.
+const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral briefing. You receive research notes covering several topics (they may overlap) and compile ONE short, conversational brief.
 
 Spoken delivery — this text is read aloud by a text-to-speech model, sentence by sentence. Write for the ear:
 - Complete, speakable sentences with a natural rhythm. Avoid fragments, stacked parentheticals, slashes, and symbol-heavy shorthand.
@@ -222,7 +222,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   constructor(private readonly deps: BriefingWorkflowDeps) {
     this.definition = {
       id: "briefing",
-      title: "Morning briefing",
+      title: "Briefing",
       description:
         "Researches all configured topics (web + social), compiles a neutral brief, generates audio and delivers it.",
       contextId: DEFAULT_CONTEXT_ID,
@@ -467,13 +467,14 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const reference = textReference(value);
     if (!reference) return undefined;
     const brief = this.deps.briefs.get(reference);
-      const summary = buildBriefMessage(brief.markdown, brief.sources, {
-        appUrl: this.deps.appUrl,
-        briefId: brief.id,
-      });
+    const summary = buildBriefMessage(brief.markdown, brief.sources, {
+      appUrl: this.deps.appUrl,
+      briefId: brief.id,
+    });
     return {
       kinds: ["text"],
       reference: brief.id,
+      title: brief.topics.join(", "),
       summary,
       html: markdownToHtml(summary),
       narration: brief.narration,
@@ -489,6 +490,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     return {
       kinds: ["voice"],
       reference: brief.id,
+      title: brief.topics.join(", "),
       summary: brief.narration,
       narration: brief.narration,
       audio: brief.audio,

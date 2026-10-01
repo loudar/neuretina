@@ -29,9 +29,9 @@ import DataList from "./DataList.svelte";
   let confirmingDelete = $state(false);
   let deleting = $state(false);
 
-  let name = $state("morning-brief");
+  let name = $state("");
   let cron = $state("0 7 * * *");
-  let workflow = $state("briefing");
+  let workflow = $state("");
   let voiceEnabled = $state(true);
   let defaultCronApplied = false;
 
@@ -188,7 +188,7 @@ import DataList from "./DataList.svelte";
         />
         <span class="toggle-label">Voice</span>
       </label>
-      <Button variant="filled" iconType="left" onclick={create} disabled={busy}>
+      <Button variant="filled" iconType="left" onclick={create} disabled={busy || name.trim() === ""}>
         <Icon icon={iconAdd} /> Add task
       </Button>
     </div>

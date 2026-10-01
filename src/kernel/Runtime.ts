@@ -11,7 +11,7 @@ import { StatusRepository } from "../domain/status/StatusRepository.ts";
 import { StatusService } from "../status/StatusService.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import { WorkflowRegistry, type Workflow } from "../core/workflow/Workflow.ts";
-import { deliveryTargets, findStep } from "../core/workflow/definition.ts";
+import { deliveryTargets, findStep, type WorkflowInfo } from "../core/workflow/definition.ts";
 import { WorkflowRunner } from "../core/workflow/WorkflowRunner.ts";
 import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import type { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
@@ -448,7 +448,7 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     defaultTimezone: config.timezone,
   });
 
-  seedDefaultJobIfEmpty(jobs, config, logger);
+  seedDefaultJobIfEmpty(jobs, config, logger, workflows.list()[0]);
   scheduler.reload();
 
   const commands = new CommandRouter({ bus, logger: logger.child("commands") });
@@ -619,14 +619,19 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
   };
 }
 
-function seedDefaultJobIfEmpty(jobs: JobStore, config: AppConfig, logger: Logger): void {
-  if (jobs.count() > 0) return;
+function seedDefaultJobIfEmpty(
+  jobs: JobStore,
+  config: AppConfig,
+  logger: Logger,
+  workflow: WorkflowInfo | undefined,
+): void {
+  if (!workflow || jobs.count() > 0) return;
 
   const job = jobs.create({
-    name: "morning-brief",
+    name: workflow.title,
     cron: config.defaults.briefCron,
     timezone: config.timezone,
-    workflow: "briefing",
+    workflow: workflow.id,
     contextId: DEFAULT_CONTEXT_ID,
     input: {},
     enabled: true,

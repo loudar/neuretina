@@ -523,6 +523,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
               }
             : {}),
           kinds: ["voice"],
+          title: brief.topics.join(", "),
           summary,
           html: markdownToHtml(summary),
           narration: brief.narration,
@@ -569,6 +570,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       briefId: id,
       runId: context.correlationId,
       channels,
+      title: brief.topics.join(", "),
       summary: text,
       html: markdownToHtml(text),
       narration: brief.narration,

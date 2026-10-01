@@ -49,7 +49,7 @@ describe("kernel storage overrides", () => {
       });
       expect(stores.briefs.get(brief.id).markdown).toBe("# Rust");
 
-      expect(stores.jobs.count()).toBe(1); // the seeded morning-brief job
+      expect(stores.jobs.count()).toBe(1); // the seeded default job
     } finally {
       await kernel.shutdown();
     }
