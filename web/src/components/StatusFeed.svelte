@@ -1,5 +1,5 @@
-  import { formatTime } from "../lib/format";
 <script lang="ts">
+  import { formatTime } from "../lib/format";
   import { Card, Chip, Icon } from "m3-svelte";
   import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
   import iconError from "@ktibow/iconset-material-symbols/error";

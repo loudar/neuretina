@@ -1,5 +1,5 @@
-  import { formatTime } from "../lib/format";
 <script lang="ts">
+  import { formatTime } from "../lib/format";
   import { Button, TextFieldOutlined } from "m3-svelte";
   import { eventStream } from "../lib/events.svelte";
   import type { DomainEvent } from "../lib/api";
