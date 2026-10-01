@@ -40,6 +40,18 @@ import type {
 import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 import { DataTransfer } from "./dataTransfer.ts";
+import {
+  asOptionalRecord,
+  asRecord,
+  clampNumber,
+  optionalString,
+  publish,
+  publishDeliveryUpdated,
+  publishUserWorkflowChanged,
+  removeRunArtifacts,
+  requireString,
+  requireStringArray,
+} from "./helpers.ts";
 
 export interface CommandDeps {
   config: AppConfig;
@@ -129,11 +141,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       description: optionalString(record, "description"),
       contextId: optionalString(record, "contextId"),
     });
-    bus.publish(
-      "topic.created",
-      { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "topic.created", { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted }, context);
     return topic;
   });
 
@@ -157,21 +165,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     }
 
     const topic = topics.update(id, patch);
-    bus.publish(
-      "topic.updated",
-      { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "topic.updated", { id: topic.id, name: topic.name, description: topic.description, muted: topic.muted }, context);
     return topic;
   });
 
   router.register("topic.delete", (payload, context) => {
     const topic = topics.remove(requireString(asRecord(payload), "id"));
-    bus.publish(
-      "topic.deleted",
-      { id: topic.id, name: topic.name },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "topic.deleted", { id: topic.id, name: topic.name }, context);
     return { ok: true };
   });
 
@@ -195,11 +195,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
     const job = jobs.create(input);
     scheduler.register(job);
-    bus.publish(
-      "job.created",
-      { id: job.id, name: job.name, cron: job.cron, workflow: job.workflow },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "job.created", { id: job.id, name: job.name, cron: job.cron, workflow: job.workflow }, context);
     return job;
   });
 
@@ -222,22 +218,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const job = jobs.update(id, patch);
     if (job.enabled) scheduler.register(job);
     else scheduler.unregister(job.id);
-    bus.publish(
-      "job.updated",
-      { id: job.id, name: job.name },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "job.updated", { id: job.id, name: job.name }, context);
     return job;
   });
 
   router.register("job.delete", (payload, context) => {
     const job = jobs.remove(requireString(asRecord(payload), "id"));
     scheduler.unregister(job.id);
-    bus.publish(
-      "job.deleted",
-      { id: job.id, name: job.name },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "job.deleted", { id: job.id, name: job.name }, context);
     return { ok: true };
   });
 
@@ -294,28 +282,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const run = runs.remove(requireString(record, "id"));
     statuses.removeByCorrelation(run.id);
 
-    let removedArtifacts = 0;
-    if (withArtifacts) {
-      for (let round = 0; round < 20; round++) {
-        const batch = artifacts.list({ correlationId: run.id, limit: 500 });
-        if (batch.length === 0) break;
-        for (const artifact of batch) {
-          artifacts.remove(artifact.id);
-          removedArtifacts += 1;
-          bus.publish(
-            "artifact.deleted",
-            { artifactId: artifact.id, kind: artifact.kind },
-            { source: "commands", correlationId: context.correlationId },
-          );
-        }
-      }
-    }
+    const removedArtifacts = withArtifacts
+      ? removeRunArtifacts({ artifacts, bus }, run.id, context)
+      : 0;
 
-    bus.publish(
-      "workflow.deleted",
-      { correlationId: run.id, workflow: run.workflow, artifacts: removedArtifacts },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "workflow.deleted", { correlationId: run.id, workflow: run.workflow, artifacts: removedArtifacts }, context);
     return { ok: true, runId: run.id, artifacts: removedArtifacts };
   });
 
@@ -336,28 +307,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
           runs.finish(id, { status: "cancelled", output: { cancelled: true } });
         }
 
-        let removedArtifacts = 0;
-        for (let round = 0; round < 20; round++) {
-          const batch = artifacts.list({ correlationId: id, limit: 500 });
-          if (batch.length === 0) break;
-          for (const artifact of batch) {
-            artifacts.remove(artifact.id);
-            removedArtifacts += 1;
-            bus.publish(
-              "artifact.deleted",
-              { artifactId: artifact.id, kind: artifact.kind },
-              { source: "commands", correlationId: context.correlationId },
-            );
-          }
-        }
+        const removedArtifacts = removeRunArtifacts({ artifacts, bus }, id, context);
 
         runs.remove(id);
         statuses.removeByCorrelation(id);
-        bus.publish(
-          "workflow.deleted",
-          { correlationId: id, workflow: run.workflow, artifacts: removedArtifacts },
-          { source: "commands", correlationId: context.correlationId },
-        );
+        publish(bus, "workflow.deleted", { correlationId: id, workflow: run.workflow, artifacts: removedArtifacts }, context);
       })
       .catch((error) => {
         logger.warn("cancelling the run failed", { runId: id, error: errorMessage(error) });
@@ -484,16 +438,8 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   router.register("brief.delete", (payload, context) => {
     const id = requireString(asRecord(payload), "id");
     const brief = briefs.remove(id);
-    bus.publish(
-      "artifact.deleted",
-      { artifactId: brief.artifactId, kind: "brief" },
-      { source: "commands", correlationId: context.correlationId },
-    );
-    bus.publish(
-      "brief.deleted",
-      { correlationId: context.correlationId, briefId: brief.id },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "artifact.deleted", { artifactId: brief.artifactId, kind: "brief" }, context);
+    publish(bus, "brief.deleted", { correlationId: context.correlationId, briefId: brief.id }, context);
     return { ok: true, briefId: brief.id };
   });
 
@@ -529,19 +475,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
             speech.durationMs ? `, ${Math.round(speech.durationMs / 1000)}s` : ""
           })`,
         );
-        bus.publish(
-          "artifact.created",
-          {
+        publish(bus, "artifact.created", {
             artifactId: audioArtifactId,
             kind: "audio",
             parentId: brief.artifactId,
             correlationId: context.correlationId,
-          },
-          { source: "commands", correlationId: context.correlationId },
-        );
-        bus.publish(
-          "tts.synthesized",
-          {
+          }, context);
+        publish(bus, "tts.synthesized", {
             correlationId: context.correlationId,
             briefId: id,
             artifactId: brief.artifactId,
@@ -549,9 +489,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
             characters: brief.narration.length,
             bytes: speech.data.byteLength,
             durationMs: speech.durationMs ?? 0,
-          },
-          { source: "commands", correlationId: context.correlationId },
-        );
+          }, context);
       } catch (error) {
         status.failed("Speech generation failed");
         throw error;
@@ -791,11 +729,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("artifact.delete", (payload, context) => {
     const artifact = artifacts.remove(requireString(asRecord(payload), "id"));
-    bus.publish(
-      "artifact.deleted",
-      { artifactId: artifact.id, kind: artifact.kind },
-      { source: "commands", correlationId: context.correlationId },
-    );
+    publish(bus, "artifact.deleted", { artifactId: artifact.id, kind: artifact.kind }, context);
     return { ok: true, artifactId: artifact.id, kind: artifact.kind };
   });
 
@@ -888,65 +822,12 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   for (const type of READ_ONLY_TYPES) router.markQuiet(type);
 }
 
-function asRecord(payload: unknown): Record<string, unknown> {
-  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-    return payload as Record<string, unknown>;
-  }
-  return {};
-}
 
-function asOptionalRecord(
-  record: Record<string, unknown>,
-  key: string,
-): Record<string, unknown> | undefined {
-  const value = record[key];
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ValidationError(`"${key}" must be an object`);
-  }
-  return value as Record<string, unknown>;
-}
 
-function requireString(record: Record<string, unknown>, key: string): string {
-  const value = record[key];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new ValidationError(`"${key}" must be a non-empty string`);
-  }
-  return value.trim();
-}
 
-function optionalString(record: Record<string, unknown>, key: string): string | undefined {
-  const value = record[key];
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string") throw new ValidationError(`"${key}" must be a string`);
-  return value.trim() || undefined;
-}
 
-function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-  return Math.min(Math.max(Math.floor(value), min), max);
-}
 
-function publishDeliveryUpdated(
-  bus: EventBus,
-  action: "create" | "update" | "delete" | "attach" | "detach",
-  correlationId?: string,
-): void {
-  bus.publish("delivery.updated", { action }, { source: "commands", correlationId });
-}
 
-function publishUserWorkflowChanged(
-  bus: EventBus,
-  action: "create" | "update" | "delete",
-  workflowId: string,
-  correlationId?: string,
-): void {
-  bus.publish(
-    "workflow.user.changed",
-    { action, workflowId },
-    { source: "commands", correlationId },
-  );
-}
 
 function toUserWorkflowInfo(workflow: UserWorkflow): {
   id: string;
@@ -1002,18 +883,6 @@ function validateWorkflowInputs(
   return result;
 }
 
-/** Array of non-empty strings, used by the kind-specific input checks. */
-function requireStringArray(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new ValidationError(`"${field}" must be an array`);
-  }
-  return value.map((entry, index) => {
-    if (typeof entry !== "string" || !entry.trim()) {
-      throw new ValidationError(`"${field}[${index}]" must be a non-empty string`);
-    }
-    return entry.trim();
-  });
-}
 
 /** Validates a (workflow, step, output) channel-assignment target. */
 function requireDeliveryTarget(
