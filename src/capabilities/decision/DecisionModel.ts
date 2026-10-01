@@ -42,4 +42,9 @@ export class DecisionModelRegistry {
   list(): DecisionModel[] {
     return [...this.models.values()];
   }
+
+  /** Drops every registration; used when a settings change rebuilds them. */
+  clear(): void {
+    this.models.clear();
+  }
 }

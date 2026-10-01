@@ -13,9 +13,9 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
    └─> workflow runner: persists a run, dispatches triggers ──────────┘
         briefing workflow                          qa workflow
           research agent (code mode: writes one program per run)
-            └─ run_code ─┬─ web_search      → Perplexity Search API
-                         ├─ finance         → Perplexity Agent API
-                         ├─ bluesky_search  → AT Protocol searchPosts
+            └─ run_code ─┬─ search.*       → Perplexity / Exa
+                         ├─ finance.*      → Perplexity / Yahoo Finance
+                         ├─ search.bluesky  → AT Protocol searchPosts
                          └─ past_briefs     → SQLite brief history
           compiler LLM → neutral markdown brief + spoken narration
           follow-up subagents → implications/context → recompile
@@ -34,7 +34,7 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
 | --- | --- | --- |
 | Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, workflow runner, trigger dispatcher, logger, errors |
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
-| Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity, Bluesky, local Qwen3-TTS, Matrix; the ElevenLabs module is kept but unused) |
+| Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity/Exa web search, Perplexity/Yahoo finance data, Bluesky, local Qwen3-TTS, Matrix; the ElevenLabs module is kept but unused) |
 | Domain | `src/domain` | SQLite repositories: contexts, workflow runs, generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` (research → compile → TTS → delivery) and `QuestionWorkflow` (Matrix follow-up answers) |
@@ -53,15 +53,15 @@ Everything the engine depends on externally sits behind a small interface, and
 | Capability | Interface | Default implementation |
 | --- | --- | --- |
 | LLM text generation | `LlmProvider` (`src/capabilities/llm`) | `OpenAiCompatibleLlmProvider` (OpenCode Go) |
-| Web search | `SearchProvider` (`src/capabilities/search`) | `PerplexitySearchProvider` |
+| Web search | `SearchProvider` (`src/capabilities/search`) | `PerplexitySearchProvider`, `ExaSearchProvider` |
 | Social search | `SearchProvider` | `BlueskySearchProvider` |
-| Financial data | `FinanceProvider` (`src/capabilities/finance`) | `PerplexityFinanceProvider` |
+| Financial data | `FinanceProvider` (`src/capabilities/finance`) | `PerplexityFinanceProvider`, `YahooFinanceProvider` |
 | Speech | `TextToSpeechProvider` (`src/capabilities/tts`) | `QwenTtsProvider` (local server) |
 | Messaging | `MessagingProvider` (`src/capabilities/messaging`) | `MatrixMessagingProvider` |
 | Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `BriefStore`, `JobStore`, `KeyValueStore`, `ContextStore`, `WorkflowRunStore` | SQLite repositories (`src/domain`, `src/core/events`) |
 
-`createKernel()` accepts overrides for every provider (`llm`, `webSearch`, `socialSearch`,
-`finance`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, briefs, jobs,
+`createKernel()` accepts overrides for every provider (`llm`, `searchProviders`, `socialSearch`,
+`financeProviders`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, briefs, jobs,
 kv, contexts, runs }`) — override all stores and the kernel never opens SQLite (`kernel.db` is
 `null`). No consumer imports a concrete provider or database: workflows, agents, tools and command
 handlers only know the interfaces. Providers may implement an optional `verify()` (checked with
@@ -72,8 +72,8 @@ HTTP details.
 
 The researcher does not call search tools one by one. It gets a single `run_code` tool and writes one
 small JavaScript program per run. The program executes in a sandboxed Bun subprocess where the tools
-are exposed as async functions — `perplexity_search`, `bluesky_search`, `perplexity_finance`,
-`past_briefs`, `past_brief` — and reaches the engine's real providers over a stdio bridge. Only the
+are exposed as async functions — `search.perplexity`, `search.exa`, `search.bluesky`,
+`finance.perplexity`, `finance.yahoo`, `past_briefs`, `past_brief` — and reaches the engine's real providers over a stdio bridge. Only the
 program's return value and captured `console.log` output come back to the model, so searches run in
 parallel with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact
 findings enter the model context. Tool calls never throw: a failed provider call resolves to
@@ -178,8 +178,9 @@ bun test
 
 ## Integrations setup
 
-LLM, web-search and Bluesky credentials are **per-user settings** (Settings in the UI) and cannot
-be set through the deployment environment; the notes below say what to obtain and where to paste it.
+LLM, web-search, finance and Bluesky credentials are **per-user settings** (Settings in the UI) and
+cannot be set through the deployment environment; the notes below say what to obtain and where to
+paste it.
 
 ### LLM (OpenAI-compatible)
 
@@ -192,37 +193,75 @@ be set through the deployment environment; the notes below say what to obtain an
   endpoints only get the user agent.
 - `bun run check:llm` sends one tiny completion to verify the key/endpoint end-to-end.
 
+### Decision models (Jev / Clef)
+
+The engine uses a **decision model** where a step needs one calibrated choice instead of generated
+text — today the event tag step of the briefing pipeline (pick an existing tag, or ask for a new
+one). Besides the built-in local Laya model, hosted connections are configured in
+**Settings → Decision models**:
+
+- **Add connection** offers the two providers that share the Jev/SystemOne API:
+  - **TypeSafe (Jev)** — endpoint `https://api.typesafe.ai/v1/systemone`, model `jev-latest`,
+    authenticate with a TypeSafe API key.
+  - **Cloudflare (Clef)** — the account's Workers AI run endpoint
+    (`…/accounts/<account>/ai/run/@cf/cloudflare/clef`), model `clef` or `clef-flash`,
+    authenticate with a Workers AI API token.
+  Any other server speaking the same state-plus-typed-questions API works too (edit the endpoint).
+- **Active model** is the one setting that picks which configured connection decides. Options are
+  labelled `{provider} - {model name}` (e.g. `TypeSafe - jev-latest`). Empty uses the local Laya
+  model when available, otherwise the LLM categorizer; an unavailable or failing model always falls
+  back the same way, so a dead endpoint never breaks a run.
+- **Test** sends one cheap yes/no question through the connection (`decision.model.verify`) and
+  reports the provider's answer or its error inline.
+- Connections (including API keys) are stored as user settings, so **export/import configuration**
+  carries them to another installation. Laya itself stays configured through the `LAYA_*`
+  environment variables.
+
 ### Web search (Perplexity, Exa)
 
-- Perplexity: create an API key and paste it in **Settings → Web search & finance (Perplexity)**.
-- Exa: paste a key in **Settings → Web search (Exa)** to add a second, independent index. When both
-  are configured the researcher gets `search.perplexity` and `search.exa` as separate tools; Bluesky
-  is always available as `search.bluesky`.
-- **Web search:** the agent calls `POST https://api.perplexity.ai/search` and receives raw ranked
-  results (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop. Searches are limited to
-  the last 3 days (`DEFAULT_SEARCH_RECENCY`, one of `hour`/`day`/`3days`/`week`/`month`/`year`; the
-  3-day window uses Perplexity's publication-date filter) and to English
+- **Settings → Web search** manages the web-search connections: **Add connection** offers
+  **Perplexity** (`https://api.perplexity.ai`) and **Exa** (`https://api.exa.ai`), each with its own
+  API key. One connection per provider; every configured provider becomes its own
+  `search.<provider>` tool (`search.perplexity`, `search.exa`), so the researcher can cross-check
+  both indexes in one program. **Test** runs a cheap probe query through the connection.
+- Perplexity: create an API key at https://perplexity.ai and paste it into the connection.
+- Exa: request a key at https://exa.ai; Exa's neural/keyword index is independent of Perplexity's.
+- **Web search:** the agent calls `POST {baseUrl}/search` and receives raw ranked results
+  (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop. Searches are limited to the last
+  3 days (`DEFAULT_SEARCH_RECENCY`, one of `hour`/`day`/`3days`/`week`/`month`/`year`; the 3-day
+  window uses Perplexity's publication-date filter) and to English
   (`DEFAULT_BRIEF_LANGUAGE` → `search_language_filter`).
-- **Reputable-source filter:** web searches send Perplexity's `search_domain_filter` allowlist, so
+- **Reputable-source filter:** Perplexity searches send its `search_domain_filter` allowlist, so
   results come from Wikipedia, major wires and outlets with strong correction records, quality
   tech/science press and `.gov` primary sources. Root domains match their subdomains and `.gov`
-  matches the whole TLD. Tune it with `DEFAULT_SEARCH_DOMAINS` (comma-separated, max 20) or set it
-  to `off` to search the whole web; the researcher can also pass `scope: "open"` per query when a
-  topic needs an official or niche page (release notes, docs).
-- **Finance lookups:** when a topic touches a public company, an ETF or the markets, the researcher
-  can call the `perplexity_finance` tool. It uses Perplexity's Agent API
-  (`POST https://api.perplexity.ai/v1/agent`) with the `finance_search` tool, which returns a
-  synthesized answer plus structured data — quotes, financial statements, earnings, guidance,
-  analyst estimates, ownership — with citation-ready `perplexity.ai/finance/…` source links that
-  flow into the brief's source list.
-- `finance_search` runs on a Perplexity-hosted model. `PERPLEXITY_FINANCE_MODEL` defaults to
-  `perplexity/glm-5.3-flash` — the best open-weight model on Vals AI Finance Agent v2 (57.9%,
-  ahead of DeepSeek V4 Pro 0813 at 50.4%, Kimi K3 at 54.4% and MiniMax M3 at 48.3%) and the
-  cheapest capable option. The research agent and compiler keep running on `LLM_MODEL`
-  (`deepseek-v4.1-flash`).
-- `finance_search` is a beta, per-invocation billed tool (see Perplexity's docs) and must be
-  enabled for your key; if a lookup fails the researcher continues with web/social results and the
-  error is visible in the activity feed.
+  matches the whole TLD. Exa connections take the same allowlist as exact `includeDomains` entries
+  (TLDs and paths cannot be expressed there and are dropped). Tune it with `DEFAULT_SEARCH_DOMAINS`
+  (comma-separated, max 20) or set it to `off` to search the whole web; the researcher can also
+  pass `scope: "open"` per query when a topic needs an official or niche page (release notes, docs).
+- Bluesky is always available as `search.bluesky`.
+- Connections (including API keys) are stored as user settings, so **export/import configuration**
+  carries them to another installation.
+
+### Finance data (Perplexity, Yahoo Finance)
+
+- **Settings → Finance data** manages the finance connections: **Add connection** offers
+  **Perplexity** (`https://api.perplexity.ai`, Agent API model `perplexity/glm-5.3-flash`) and
+  **Yahoo Finance** (`https://query1.finance.yahoo.com`, no API key). One connection per provider;
+  every configured provider becomes its own `finance.<provider>` tool (`finance.perplexity`,
+  `finance.yahoo`). **Test** runs one live lookup.
+- **Perplexity** uses the Agent API (`POST {baseUrl}/v1/agent`) with the `finance_search` tool,
+  which returns a synthesized answer plus structured data — quotes, financial statements, earnings,
+  guidance, analyst estimates, ownership — with citation-ready `perplexity.ai/finance/…` source
+  links that flow into the brief's source list. The default model `perplexity/glm-5.3-flash` is the
+  best open-weight model on Vals AI Finance Agent v2 (57.9%, ahead of DeepSeek V4 Pro 0813 at
+  50.4%, Kimi K3 at 54.4% and MiniMax M3 at 48.3%) and the cheapest capable option. The research
+  agent and compiler keep running on `LLM_MODEL` (`deepseek-v4.1-flash`).
+- **Yahoo Finance** is keyless: the public search endpoint resolves tickers from the question and
+  the public chart endpoint returns price, change, day and 52-week ranges, volume and the quote
+  timestamp; sources link to `finance.yahoo.com/quote/<ticker>`.
+- Perplexity finance lookups are a beta, per-invocation billed tool (see Perplexity's docs) and
+  must be enabled for your key; if a lookup fails the researcher continues with web/social results
+  and the error is visible in the activity feed.
 
 ### Speech (Qwen3-TTS or ElevenLabs)
 
@@ -434,8 +473,8 @@ the Workflows tab.
   the details pane — muted topics are excluded from every briefing until unmuted. One LLM-planned
   research run covers all topics at once (they may overlap), the compiler merges everything into a
   single brief, and the researcher can pull concrete market numbers (quotes, revenue, margins,
-  guidance, estimates) through Perplexity finance lookups when a topic involves a public company
-  or the markets.
+  guidance, estimates) through the finance tools (Perplexity's Agent API, or keyless Yahoo Finance
+  quotes) when a topic involves a public company or the markets.
 - **Delivery is two messages by default:** the compiled summary as a formatted text message
   (markdown rendered to Matrix `formatted_body`) followed by the voice message. The summary is
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
@@ -477,12 +516,11 @@ the Workflows tab.
   finds one it replaces the matching entry in the source list (citation numbers stay stable) and may
   adjust the claim's wording to match the primary source more precisely. Source counts and the word
   budget are capped, and a failed or fruitless pass always keeps the draft as it is.
-- **Cost tracking:** every workflow step reports what it spent. LLM completions contribute their
-  token usage (priced with `LLM_PRICE_INPUT_PER_M` / `LLM_PRICE_OUTPUT_PER_M`, defaulting to the
-  OpenCode Zen DeepSeek V4.1 Flash rates), every Perplexity search request is counted at
-  `PERPLEXITY_PRICE_PER_SEARCH` (default 0.005), and finance lookups use the exact cost Perplexity's
-  Agent API reports. The per-step breakdown is stored on the run, and the run activity feed shows
-  each task's cost sum (unpriced usage counts as $0.00).
+- **Cost tracking:** every workflow step reports what it spent. Costs are never configured: a line
+  is priced only when the provider reports an exact cost with the response (Perplexity search and
+  finance do; Exa, Yahoo Finance and Bluesky do not), otherwise the usage is recorded as unpriced.
+  The per-step breakdown is stored on the run, and the run activity feed shows each task's cost sum
+  (unpriced usage counts as $0.00).
 - Disable both post-draft passes with `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as
@@ -574,10 +612,10 @@ integration. The results are logged and shown in the activity feed; with `STARTU
 (default **off**) a summary is also sent as a text message to the Matrix room:
 
 - `llm` — `GET /models` on the LLM endpoint (no tokens spent)
-- `perplexity` — one `search_type: "fast"` probe query
+- `web-search` — the first configured web-search connection: a cheap probe query where the
+  provider supports one, otherwise a single live search
 - `bluesky` — a real `searchPosts` call through the PDS (skipped in public mode)
 - `tts` — the local Qwen3-TTS server answers on `{QWEN_TTS_BASE_URL}/models`
-- `web-search` — one result through the configured search provider
 - `matrix` — active pre-flight against the first enabled matrix delivery channel: resolves
   credentials (login if needed), `whoami`, and confirms the bot is **joined to the target room**;
   skipped when no matrix channel exists
@@ -611,9 +649,9 @@ channel and scheduler all come from that per-user runtime, so one account can ne
 data. Today the shared `AUTH_GLOBAL_PASSWORD` logs in as the admin; per-user auth methods (OIDC)
 will resolve other accounts into the same runtime mechanism.
 
-Provider credentials (LLM, search, Bluesky) are user-owned settings and are ignored if set in the
-deployment environment. Other defaults (`TZ`, cron, search window, TTS endpoint, …) remain
-deployment-level and can still be overridden per account in the UI.
+Provider credentials (LLM, web search, finance, Bluesky) are user-owned settings and are ignored if
+set in the deployment environment. Other defaults (`TZ`, cron, search window, TTS endpoint, …)
+remain deployment-level and can still be overridden per account in the UI.
 
 ## Authentication
 

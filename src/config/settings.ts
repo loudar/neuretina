@@ -1,11 +1,14 @@
 import type { SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import { parseSearchConnections } from "../capabilities/search/SearchProviders.ts";
+import { parseFinanceConnections } from "../capabilities/finance/FinanceProviders.ts";
+import { parseDecisionModelConnections } from "../capabilities/decision/DecisionProviders.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { KeyValueStore } from "../domain/kv/KeyValueRepository.ts";
 import type { AppConfig, Env } from "./env.ts";
 import { DEFAULT_SEARCH_DOMAINS } from "./env.ts";
 
-export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum";
+export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum" | "json";
 export type SettingSource = "env" | "db" | "default";
 
 export interface SettingDefinition {
@@ -13,7 +16,6 @@ export interface SettingDefinition {
   key: string;
   group: string;
   label: string;
-  description?: string;
   kind: SettingKind;
   /** Allowed values for `enum` settings. */
   options?: string[];
@@ -21,6 +23,8 @@ export interface SettingDefinition {
   default?: string;
   /** User-owned setting: the deployment environment cannot set it. */
   userOnly?: boolean;
+  /** Shape check for parsed `json` values. */
+  validate?: (value: unknown) => boolean;
   apply(config: AppConfig, value: string | undefined): void;
 }
 
@@ -28,7 +32,6 @@ export interface SettingInfo {
   key: string;
   group: string;
   label: string;
-  description?: string;
   kind: SettingKind;
   options?: string[];
   defaultValue?: string;
@@ -87,11 +90,12 @@ interface SettingSpec {
   key: string;
   group: string;
   label: string;
-  description?: string;
   kind: SettingKind;
   options?: string[];
   default?: string;
   userOnly?: boolean;
+  /** Shape check for parsed `json` values. */
+  validate?: (value: unknown) => boolean;
   /** Dotted path into AppConfig the effective value is written to. */
   path: string;
 }
@@ -102,8 +106,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "LLM_API_KEY",
     group: "LLM",
     label: "API key",
-    description:
-      "Key for your OpenAI-compatible endpoint (OpenCode Go, OpenAI, a local vLLM, …). OpenCode endpoints get their session header automatically.",
     kind: "secret",
     userOnly: true,
     path: "llm.apiKey",
@@ -112,8 +114,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "LLM_BASE_URL",
     group: "LLM",
     label: "Base URL",
-    description:
-      "OpenAI-compatible endpoint, e.g. https://opencode.ai/zen/go/v1 or https://api.openai.com/v1.",
     kind: "string",
     default: "https://opencode.ai/zen/go/v1",
     userOnly: true,
@@ -128,73 +128,55 @@ const SETTING_SPECS: SettingSpec[] = [
     userOnly: true,
     path: "llm.model",
   },
-
   {
-    key: "KEY_PERPLEXITY",
-    group: "Web search & finance (Perplexity)",
-    label: "API key",
-    description: "Used for web search and the finance lookup tool.",
-    kind: "secret",
+    key: "DECISION_MODELS",
+    group: "Decision models",
+    label: "Configured models",
+    kind: "json",
     userOnly: true,
-    path: "perplexity.apiKey",
+    validate: (value) => parseDecisionModelConnections(value) !== undefined,
+    path: "decisionModels",
   },
   {
-    key: "PERPLEXITY_BASE_URL",
-    group: "Web search & finance (Perplexity)",
-    label: "Base URL",
+    key: "DECISION_MODEL",
+    group: "Decision models",
+    label: "Active model",
     kind: "string",
-    default: "https://api.perplexity.ai",
     userOnly: true,
-    path: "perplexity.baseUrl",
+    path: "decisionModel",
   },
   {
-    key: "PERPLEXITY_FINANCE_MODEL",
-    group: "Web search & finance (Perplexity)",
-    label: "Finance model",
-    description: "Model the Agent API routes finance_search lookups to.",
-    kind: "string",
-    default: "perplexity/glm-5.3-flash",
+    key: "SEARCH_PROVIDERS",
+    group: "Web search",
+    label: "Configured providers",
+    kind: "json",
     userOnly: true,
-    path: "perplexity.financeModel",
+    validate: (value) => parseSearchConnections(value) !== undefined,
+    path: "searchProviders",
   },
   {
-    key: "KEY_EXA",
-    group: "Web search (Exa)",
-    label: "API key",
-    description: "Adds a second web search tool (search.exa) for neural and keyword search.",
-    kind: "secret",
+    key: "FINANCE_PROVIDERS",
+    group: "Finance data",
+    label: "Configured providers",
+    kind: "json",
     userOnly: true,
-    path: "exa.apiKey",
+    validate: (value) => parseFinanceConnections(value) !== undefined,
+    path: "financeProviders",
   },
-  {
-    key: "EXA_BASE_URL",
-    group: "Web search (Exa)",
-    label: "Base URL",
-    kind: "string",
-    default: "https://api.exa.ai",
-    userOnly: true,
-    path: "exa.baseUrl",
-  },
-
   {
     key: "TTS_PROVIDER",
     group: "Speech",
     label: "Provider",
-    description:
-      "Both providers speak the same TTS protocol; pick which one synthesizes voice messages.",
     kind: "enum",
     options: ["qwen", "elevenlabs"],
     default: "qwen",
     userOnly: true,
     path: "tts.provider",
   },
-
   {
     key: "QWEN_TTS_BASE_URL",
     group: "Speech (Qwen3-TTS)",
     label: "Base URL",
-    description:
-      "Local OpenAI-compatible TTS server including /v1, e.g. http://127.0.0.1:8880/v1. Speech is skipped when empty.",
     kind: "string",
     default: "",
     userOnly: true,
@@ -204,7 +186,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_MODEL",
     group: "Speech (Qwen3-TTS)",
     label: "Model",
-    description: "Most local servers accept and ignore the model name.",
     kind: "string",
     default: "tts-1",
     userOnly: true,
@@ -214,7 +195,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_VOICE",
     group: "Speech (Qwen3-TTS)",
     label: "Voice",
-    description: "Preset speaker (Ryan, vivian, …) or an OpenAI alias (alloy, nova, …).",
     kind: "string",
     default: "Ryan",
     userOnly: true,
@@ -224,7 +204,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_FORMAT",
     group: "Speech (Qwen3-TTS)",
     label: "Output format",
-    description: "opus renders as a voice message; wav/mp3/flac/aac/pcm also work.",
     kind: "enum",
     options: ["opus", "wav", "mp3", "flac", "aac", "pcm"],
     default: "opus",
@@ -235,8 +214,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_REQUEST_FORMAT",
     group: "Speech (Qwen3-TTS)",
     label: "Server request format",
-    description:
-      "What to ask the server for. Set wav for strict GGML servers that reject opus; the engine converts the response to the output format locally with ffmpeg. Empty asks for the output format directly.",
     kind: "enum",
     options: ["opus", "wav", "mp3", "flac", "aac", "pcm"],
     userOnly: true,
@@ -255,7 +232,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_LANGUAGE",
     group: "Speech (Qwen3-TTS)",
     label: "Language",
-    description: "Optional language hint for multilingual servers, e.g. English.",
     kind: "string",
     userOnly: true,
     path: "qwenTts.language",
@@ -264,7 +240,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_API_KEY",
     group: "Speech (Qwen3-TTS)",
     label: "API key",
-    description: "Only needed when the local server enforces auth.",
     kind: "secret",
     userOnly: true,
     path: "qwenTts.apiKey",
@@ -273,14 +248,11 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "QWEN_TTS_TIMEOUT_MS",
     group: "Speech (Qwen3-TTS)",
     label: "Synthesis timeout (ms)",
-    description:
-      "Per-attempt limit for one synthesis request. CPU inference needs minutes per brief; GPU servers answer in seconds.",
     kind: "number",
     default: "600000",
     userOnly: true,
     path: "qwenTts.timeoutMs",
   },
-
   {
     key: "KEY_ELEVENLABS",
     group: "Speech (ElevenLabs)",
@@ -316,12 +288,10 @@ const SETTING_SPECS: SettingSpec[] = [
     userOnly: true,
     path: "elevenlabs.speed",
   },
-
   {
     key: "BLUESKY_IDENTIFIER",
     group: "Bluesky",
     label: "Handle",
-    description: "Account handle used to authenticate search (recommended).",
     kind: "string",
     userOnly: true,
     path: "bluesky.identifier",
@@ -338,7 +308,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "BLUESKY_PDS_URL",
     group: "Bluesky",
     label: "PDS URL",
-    description: "Leave empty to auto-discover the PDS from the account's DID document.",
     kind: "string",
     userOnly: true,
     path: "bluesky.pdsUrl",
@@ -347,7 +316,6 @@ const SETTING_SPECS: SettingSpec[] = [
     key: "BLUESKY_PUBLIC_URL",
     group: "Bluesky",
     label: "Public AppView URL",
-    description: "Fallback host for unauthenticated search.",
     kind: "string",
     default: "https://public.api.bsky.app",
     userOnly: true,
@@ -359,17 +327,33 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = SETTING_SPECS.map((spec)
   key: spec.key,
   group: spec.group,
   label: spec.label,
-  description: spec.description,
   kind: spec.kind,
   options: spec.options,
   default: spec.default,
   userOnly: spec.userOnly,
-  apply: (config, value) => setPath(config, spec.path, parseSetting(spec, value)),
+  validate: spec.validate,
+  apply: (config, value) => {
+    const parsed = parseSetting(spec, value);
+    // A cleared or malformed JSON value must not blank the config default
+    // (applyAll restores the base config before every pass).
+    if (parsed === undefined && spec.kind === "json") return;
+    setPath(config, spec.path, parsed);
+  },
 }));
 
 /** Parses a raw setting value into the shape its config path expects. */
 function parseSetting(spec: SettingSpec, value: string | undefined): unknown {
   if (spec.kind === "number") return toNumber(value, Number(spec.default ?? 0));
+  if (spec.kind === "json") {
+    if (!value) return undefined;
+    try {
+      return JSON.parse(value);
+    } catch {
+      // Validation rejects malformed values before they are stored; a
+      // hand-edited database value must not crash the boot.
+      return undefined;
+    }
+  }
   if (spec.default !== undefined) return optional(value) ?? spec.default;
   return optional(value);
 }
@@ -514,7 +498,6 @@ export class SettingsService {
       key: definition.key,
       group: definition.group,
       label: definition.label,
-      description: definition.description,
       kind: definition.kind,
       options: definition.options,
       defaultValue: definition.default,
@@ -567,6 +550,18 @@ export class SettingsService {
           );
         }
         return;
+      case "json": {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(value);
+        } catch {
+          throw new ValidationError(`"${definition.key}" must be valid JSON`);
+        }
+        if (definition.validate && !definition.validate(parsed)) {
+          throw new ValidationError(`"${definition.key}" is not valid`);
+        }
+        return;
+      }
       default:
         return;
     }

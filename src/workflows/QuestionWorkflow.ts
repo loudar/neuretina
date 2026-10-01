@@ -1,5 +1,5 @@
 import { Agent } from "../agents/Agent.ts";
-import { SearchTool } from "../agents/tools/SearchTool.ts";
+import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
@@ -35,6 +35,8 @@ export interface QuestionWorkflowOutput {
 export interface QuestionWorkflowDeps {
   llm: LlmProvider;
   webSearch: SearchProvider;
+  /** All configured web providers; one search.<name> tool each. */
+  searchProviders?: SearchProvider[];
   socialSearch: SearchProvider;
   briefs: BriefStore;
   statuses?: StatusHub;
@@ -158,24 +160,25 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
   }
 
   private createAgent(contextId: string): Agent {
+    const providers =
+      this.deps.searchProviders && this.deps.searchProviders.length > 0
+        ? this.deps.searchProviders
+        : [this.deps.webSearch];
     return new Agent({
       name: "assistant",
       description: "Answers follow-up questions about briefings",
       systemPrompt: ANSWER_SYSTEM_PROMPT,
       llm: this.deps.llm,
       tools: [
-        new SearchTool({
-          provider: this.deps.webSearch,
-          defaultLimit: this.deps.defaults.resultsPerProvider,
-          defaultRecency: this.deps.defaults.recency,
-          defaultLanguage: this.deps.defaults.language,
+        ...createWebSearchTools(providers, {
+          limit: this.deps.defaults.resultsPerProvider,
+          recency: this.deps.defaults.recency,
+          language: this.deps.defaults.language,
           domains: this.deps.defaults.searchDomains,
         }),
-        new SearchTool({
-          provider: this.deps.socialSearch,
-          toolName: "bluesky_search",
-          defaultLimit: this.deps.defaults.resultsPerProvider,
-          defaultRecency: this.deps.defaults.recency,
+        createSocialSearchTool(this.deps.socialSearch, {
+          limit: this.deps.defaults.resultsPerProvider,
+          recency: this.deps.defaults.recency,
         }),
         new BriefSearchTool(this.deps.briefs, contextId),
       ],

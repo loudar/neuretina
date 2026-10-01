@@ -124,12 +124,12 @@ describe("agent cost collection", () => {
           tool: "run_code",
           result: {
             toolUsages: [
-              { tool: "perplexity_finance", usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 } },
+              { tool: "finance.perplexity", usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 } },
               { tool: "search.perplexity", usage: { costUsd: 0.005 } },
             ],
           },
         },
-        { tool: "perplexity_finance", result: { usage: { costUsd: 0.002 } } },
+        { tool: "finance.perplexity", result: { usage: { costUsd: 0.002 } } },
         { tool: "search.perplexity", result: { usage: { costUsd: 0.005 } } },
       ],
     });

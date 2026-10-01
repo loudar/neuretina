@@ -39,6 +39,24 @@ import type {
 } from "../domain/delivery/DeliveryRepository.ts";
 import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
+import {
+  DECISION_PROVIDER_PRESETS,
+  decisionModelEndpoint,
+  isDecisionModelConnection,
+  type DecisionModelConnection,
+} from "../capabilities/decision/DecisionProviders.ts";
+import {
+  isSearchConnection,
+  type SearchConnection,
+} from "../capabilities/search/SearchProviders.ts";
+import {
+  isFinanceConnection,
+  type FinanceConnection,
+} from "../capabilities/finance/FinanceProviders.ts";
+import { createSearchProvider } from "../providers/search/createSearchProvider.ts";
+import { createFinanceProvider } from "../providers/finance/createFinanceProvider.ts";
+import { isVerifiable } from "../core/verifiable.ts";
+import { SystemOneDecisionModel } from "../providers/decision/SystemOneDecisionModel.ts";
 import { DataTransfer } from "./dataTransfer.ts";
 import {
   asOptionalRecord,
@@ -130,6 +148,84 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("settings.clear", (payload) => {
     return settings.clear(requireString(asRecord(payload), "key"));
+  });
+
+  // Live pre-flight for a hosted decision model: a stored connection by id,
+  // or the unsaved form values from the Decision models settings section.
+  // Failures are reported in the result so the UI can show them inline.
+  router.register("decision.model.verify", async (payload) => {
+    const record = asRecord(payload);
+    const id = optionalString(record, "id");
+    const stored = id
+      ? (Array.isArray(config.decisionModels) ? config.decisionModels : []).find(
+          (connection) => connection.id === id,
+        )
+      : undefined;
+    if (id && !stored) throw new NotFoundError(`Decision model ${id} not found`);
+
+    const connection = stored ?? adHocDecisionConnection(record);
+    const endpoint = decisionModelEndpoint(connection);
+    if (!endpoint) throw new ValidationError("The decision-model connection is incomplete");
+
+    const model = new SystemOneDecisionModel({
+      id: connection.id,
+      provider: DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider,
+      model: connection.model,
+      endpoint,
+      ...(connection.apiKey ? { apiKey: connection.apiKey } : {}),
+    });
+
+    try {
+      return { ok: true, detail: await model.verify() };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
+  });
+
+  // Live pre-flight for a web-search connection: a stored connection by id,
+  // or the unsaved form values from the Web search settings section.
+  router.register("search.provider.verify", async (payload) => {
+    const record = asRecord(payload);
+    const id = optionalString(record, "id");
+    const stored = id
+      ? (Array.isArray(config.searchProviders) ? config.searchProviders : []).find(
+          (connection) => connection.id === id,
+        )
+      : undefined;
+    if (id && !stored) throw new NotFoundError(`Search provider ${id} not found`);
+
+    const connection = stored ?? adHocSearchConnection(record);
+    const provider = createSearchProvider(connection, {
+      defaultLimit: config.defaults.searchResultsPerProvider,
+    });
+
+    try {
+      return { ok: true, detail: isVerifiable(provider) ? await provider.verify() : "configured" };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
+  });
+
+  // Live pre-flight for a finance-data connection: a stored connection by id,
+  // or the unsaved form values from the Finance data settings section.
+  router.register("finance.provider.verify", async (payload) => {
+    const record = asRecord(payload);
+    const id = optionalString(record, "id");
+    const stored = id
+      ? (Array.isArray(config.financeProviders) ? config.financeProviders : []).find(
+          (connection) => connection.id === id,
+        )
+      : undefined;
+    if (id && !stored) throw new NotFoundError(`Finance provider ${id} not found`);
+
+    const connection = stored ?? adHocFinanceConnection(record);
+    const provider = createFinanceProvider(connection);
+
+    try {
+      return { ok: true, detail: isVerifiable(provider) ? await provider.verify() : "configured" };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
   });
 
   router.register("topic.list", (payload) => topics.list(optionalString(asRecord(payload), "contextId")));
@@ -822,6 +918,55 @@ function toUserWorkflowInfo(workflow: UserWorkflow): {
   inputs: Record<string, unknown>;
 } {
   return { id: workflow.id, name: workflow.name, inputs: workflow.inputs };
+}
+
+/** Validates unsaved decision-model form values from the settings dialog. */
+function adHocDecisionConnection(record: Record<string, unknown>): DecisionModelConnection {
+  const candidate: Record<string, unknown> = {
+    id: "unsaved",
+    provider: record.provider,
+    model: record.model,
+    baseUrl: record.baseUrl,
+  };
+  if (typeof record.accountId === "string") candidate.accountId = record.accountId;
+  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
+  if (!isDecisionModelConnection(candidate)) {
+    throw new ValidationError(
+      `"provider", "model" and "baseUrl" must describe a decision-model connection`,
+    );
+  }
+  return candidate;
+}
+
+/** Validates unsaved web-search form values from the settings dialog. */
+function adHocSearchConnection(record: Record<string, unknown>): SearchConnection {
+  const candidate: Record<string, unknown> = {
+    id: "unsaved",
+    provider: record.provider,
+    baseUrl: record.baseUrl,
+  };
+  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
+  if (!isSearchConnection(candidate)) {
+    throw new ValidationError(`"provider" and "baseUrl" must describe a web-search connection`);
+  }
+  return candidate;
+}
+
+/** Validates unsaved finance-data form values from the settings dialog. */
+function adHocFinanceConnection(record: Record<string, unknown>): FinanceConnection {
+  const candidate: Record<string, unknown> = {
+    id: "unsaved",
+    provider: record.provider,
+    model: record.model,
+    baseUrl: record.baseUrl,
+  };
+  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
+  if (!isFinanceConnection(candidate)) {
+    throw new ValidationError(
+      `"provider", "baseUrl" and "model" must describe a finance-data connection`,
+    );
+  }
+  return candidate;
 }
 
 /** The definition user workflow instances are built from (the briefing pipeline). */

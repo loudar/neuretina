@@ -50,7 +50,7 @@ export async function createTestKernel(overrides: KernelOverrides = {}): Promise
     config: overrides.config ?? testConfig(),
     logger: createLogger("test", { level: "error" }),
     llm: stubLlm(() => completion("ok")),
-    webSearch: stubSearch("perplexity", "web"),
+    searchProviders: [stubSearch("perplexity", "web")],
     socialSearch: stubSearch("bluesky", "social"),
     tts: new StubTts(),
     ...overrides,

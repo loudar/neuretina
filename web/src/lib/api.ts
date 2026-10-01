@@ -287,7 +287,7 @@ export type BlueskyMode = "authenticated" | "public";
 export interface AppConfigInfo {
   integrations: {
     llm: boolean;
-    perplexity: boolean;
+    search: boolean;
     tts: boolean;
     bluesky: BlueskyMode;
     matrix: boolean;
@@ -304,14 +304,13 @@ export interface AppConfigInfo {
   matrix: { roomId?: string };
 }
 
-export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum";
+export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum" | "json";
 export type SettingSource = "env" | "db" | "default";
 
 export interface SettingInfo {
   key: string;
   group: string;
   label: string;
-  description?: string;
   kind: SettingKind;
   options?: string[];
   defaultValue?: string;
@@ -321,6 +320,162 @@ export interface SettingInfo {
   value: string | null;
   configured: boolean;
   stored: boolean;
+}
+
+/**
+ * Provider connection presets shared by the dynamic settings sections
+ * (decision models, web search, finance data); they prefill the add/edit form.
+ */
+export interface ConnectionPreset {
+  /** Display name of the provider, e.g. "Perplexity". */
+  label: string;
+  defaultBaseUrl: string;
+  /** Default model selector; providers without models leave this empty. */
+  defaultModel?: string;
+  /** Model names the provider ships; empty/absent = no model field. */
+  models?: string[];
+  /** Account-scoped (Cloudflare): the URL embeds the account id and model. */
+  accountScoped?: boolean;
+  /** Label for the endpoint field; defaults to "API base URL". */
+  endpointLabel?: string;
+  /** Set false for keyless providers (Yahoo Finance). */
+  apiKey?: boolean;
+}
+
+/**
+ * Hosted decision-model connections. Jev (TypeSafe) and Clef (Cloudflare)
+ * share the SystemOne API, so the same connection shape covers both.
+ */
+export type DecisionProviderId = "jev" | "clef";
+
+export interface DecisionModelConnection {
+  id: string;
+  provider: DecisionProviderId;
+  model: string;
+  baseUrl: string;
+  accountId?: string;
+  apiKey?: string;
+}
+
+export const DECISION_PROVIDER_PRESETS: Record<DecisionProviderId, ConnectionPreset> = {
+  jev: {
+    label: "TypeSafe",
+    defaultBaseUrl: "https://api.typesafe.ai/v1/systemone",
+    defaultModel: "jev-latest",
+    models: ["jev-latest"],
+    accountScoped: false,
+    endpointLabel: "SystemOne endpoint",
+  },
+  clef: {
+    label: "Cloudflare",
+    defaultBaseUrl: "https://api.cloudflare.com/client/v4",
+    defaultModel: "clef",
+    models: ["clef", "clef-flash"],
+    accountScoped: true,
+  },
+};
+
+export const DECISION_PROVIDER_IDS: DecisionProviderId[] = ["jev", "clef"];
+
+/** The URL a decision request is posted to; undefined when incomplete. */
+export function decisionModelEndpoint(
+  connection: DecisionModelConnection,
+): string | undefined {
+  const preset = DECISION_PROVIDER_PRESETS[connection.provider];
+  if (!preset) return undefined;
+  const baseUrl = connection.baseUrl.trim().replace(/\/+$/, "");
+  if (!baseUrl) return undefined;
+  if (preset.accountScoped) {
+    const accountId = connection.accountId?.trim();
+    if (!accountId) return undefined;
+    return `${baseUrl}/accounts/${encodeURIComponent(accountId)}/ai/run/@cf/cloudflare/${encodeURIComponent(connection.model)}`;
+  }
+  return baseUrl;
+}
+
+/** "{provider} - {model name}", e.g. "TypeSafe - jev-latest". */
+export function decisionModelLabel(connection: DecisionModelConnection): string {
+  return `${DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider} - ${connection.model}`;
+}
+
+/** Web-search connections; one per provider keeps the tool names stable. */
+export type SearchProviderId = "perplexity" | "exa";
+
+export interface SearchConnection {
+  id: string;
+  provider: SearchProviderId;
+  baseUrl: string;
+  apiKey?: string;
+}
+
+export const SEARCH_PROVIDER_PRESETS: Record<SearchProviderId, ConnectionPreset> = {
+  perplexity: { label: "Perplexity", defaultBaseUrl: "https://api.perplexity.ai" },
+  exa: { label: "Exa", defaultBaseUrl: "https://api.exa.ai" },
+};
+
+export const SEARCH_PROVIDER_IDS: SearchProviderId[] = ["perplexity", "exa"];
+
+/** Finance-data connections; one per provider keeps the tool names stable. */
+export type FinanceProviderId = "perplexity" | "yahoo";
+
+export interface FinanceConnection {
+  id: string;
+  provider: FinanceProviderId;
+  baseUrl: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export const FINANCE_PROVIDER_PRESETS: Record<FinanceProviderId, ConnectionPreset> = {
+  perplexity: {
+    label: "Perplexity",
+    defaultBaseUrl: "https://api.perplexity.ai",
+    defaultModel: "perplexity/glm-5.3-flash",
+    models: ["perplexity/glm-5.3-flash"],
+  },
+  yahoo: {
+    label: "Yahoo Finance",
+    defaultBaseUrl: "https://query1.finance.yahoo.com",
+    defaultModel: "",
+    models: [],
+    apiKey: false,
+  },
+};
+
+export const FINANCE_PROVIDER_IDS: FinanceProviderId[] = ["perplexity", "yahoo"];
+
+/** Parses a stored connection-list setting; rows missing required fields are dropped. */
+function parseConnections<T>(value: string | null | undefined, fields: Array<keyof T & string>): T[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (entry): entry is T =>
+        Boolean(entry) &&
+        typeof entry === "object" &&
+        fields.every((field) => typeof (entry as Record<string, unknown>)[field] === "string"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Parses the stored DECISION_MODELS value into connection rows. */
+export function parseDecisionModelConnections(
+  value: string | null | undefined,
+): DecisionModelConnection[] {
+  return parseConnections<DecisionModelConnection>(value, ["id", "provider", "model", "baseUrl"]);
+}
+
+/** Parses the stored SEARCH_PROVIDERS value into connection rows. */
+export function parseSearchConnections(value: string | null | undefined): SearchConnection[] {
+  return parseConnections<SearchConnection>(value, ["id", "provider", "baseUrl"]);
+}
+
+/** Parses the stored FINANCE_PROVIDERS value into connection rows. */
+export function parseFinanceConnections(value: string | null | undefined): FinanceConnection[] {
+  return parseConnections<FinanceConnection>(value, ["id", "provider", "baseUrl"]);
 }
 
 export type DeliveryChannelType = "matrix" | "discord" | "email";

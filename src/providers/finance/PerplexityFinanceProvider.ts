@@ -57,10 +57,16 @@ export class PerplexityFinanceProvider implements FinanceProvider {
 
   constructor(private readonly options: PerplexityFinanceOptions) {}
 
+  /** Live probe: one small finance lookup through the Agent API. */
+  async verify(): Promise<string> {
+    const response = await this.lookup({ question: "Nvidia share price" });
+    return `reachable, ${response.data.length} data block(s)`;
+  }
+
   async lookup(query: FinanceQuery): Promise<FinanceResponse> {
     if (!this.options.apiKey) {
       throw new ConfigurationError(
-        "Perplexity is not configured. Set KEY_PERPLEXITY to a valid API key.",
+        "The Perplexity finance connection has no API key.",
       );
     }
 

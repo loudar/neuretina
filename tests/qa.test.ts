@@ -50,7 +50,7 @@ describe("QuestionWorkflow", () => {
       request.messages.some((message) => message.role === "tool")
         ? completion("X is a thing people talk about. More at https://example.com/x")
         : completion("", [
-            { id: "call-1", name: "perplexity_search", arguments: { query: "what is X definition" } },
+            { id: "call-1", name: "search.perplexity", arguments: { query: "what is X definition" } },
           ]),
     );
 

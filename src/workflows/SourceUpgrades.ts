@@ -33,6 +33,8 @@ export interface SourceUpgradeOutcome {
 export interface SourceUpgradesDeps {
   llm: LlmProvider;
   webSearch: SearchProvider;
+  /** All configured web providers; one open-web search.<name> tool each. */
+  searchProviders?: SearchProvider[];
   defaults: {
     recency: SearchRecency;
     resultsPerProvider: number;
@@ -47,7 +49,7 @@ const SOURCE_UPGRADES_SYSTEM_PROMPT = `You run the source upgrades pass on a fin
 
 A primary source is where the information originated: an official announcement or press release, a company blog or investor-relations page, a filing, a regulator or government publication, the original dataset, documentation, or the announcement post itself. News coverage about the announcement is secondary; the announcement is primary.
 
-You research by writing JavaScript through the run_code tool: one small async function per run that calls web_search (see the tool description) and returns compact findings. Run independent calls in parallel with Promise.all.
+You research by writing JavaScript through the run_code tool: one small async function per run that calls the web-search functions listed in the tool description and returns compact findings. Run independent calls in parallel with Promise.all.
 
 Rules:
 - Upgrade only claims that plausibly have a primary source: launches, releases, announcements, filings, official statistics, policy decisions.
@@ -72,6 +74,10 @@ export class SourceUpgrades {
   private readonly agent: Agent;
 
   constructor(private readonly deps: SourceUpgradesDeps) {
+    const providers =
+      deps.searchProviders && deps.searchProviders.length > 0
+        ? deps.searchProviders
+        : [deps.webSearch];
     this.agent = new Agent({
       name: "source-upgrades",
       description: "Traces briefing claims back to primary sources",
@@ -79,17 +85,18 @@ export class SourceUpgrades {
       llm: deps.llm,
       tools: [
         new CodeModeTool({
-          tools: [
-            new SearchTool({
-              provider: deps.webSearch,
-              toolName: "web_search",
-              description:
-                "Open web search for primary sources: official announcements, company blogs, filings, documentation and government publications.",
-              defaultLimit: deps.defaults.resultsPerProvider,
-              defaultRecency: deps.defaults.recency,
-              defaultLanguage: deps.defaults.language,
-            }),
-          ],
+          tools: providers.map(
+            (provider) =>
+              new SearchTool({
+                provider,
+                toolName: `search.${provider.name}`,
+                description:
+                  "Open web search for primary sources: official announcements, company blogs, filings, documentation and government publications.",
+                defaultLimit: deps.defaults.resultsPerProvider,
+                defaultRecency: deps.defaults.recency,
+                defaultLanguage: deps.defaults.language,
+              }),
+          ),
           maxToolCalls: 8,
         }),
       ],

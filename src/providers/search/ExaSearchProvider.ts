@@ -36,7 +36,7 @@ export class ExaSearchProvider implements SearchProvider {
   /** Cheap probe: validates the API key without a full search. */
   async verify(): Promise<string> {
     if (!this.options.apiKey) {
-      throw new ConfigurationError("Exa is not configured. Set KEY_EXA to a valid API key.");
+      throw new ConfigurationError("The Exa search connection has no API key.");
     }
 
     const response = await requestJson<ExaSearchResponse>(
@@ -54,7 +54,7 @@ export class ExaSearchProvider implements SearchProvider {
 
   async search(query: SearchQuery): Promise<SearchResponse> {
     if (!this.options.apiKey) {
-      throw new ConfigurationError("Exa is not configured. Set KEY_EXA to a valid API key.");
+      throw new ConfigurationError("The Exa search connection has no API key.");
     }
 
     const payload: Record<string, unknown> = {

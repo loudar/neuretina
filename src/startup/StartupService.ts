@@ -69,10 +69,10 @@ export class StartupService {
         },
       },
       {
-        name: "perplexity",
+        name: "web-search",
         run: async (): Promise<CheckOutcome> => {
-          if (!config.perplexity.apiKey) {
-            return { status: "skipped", detail: "KEY_PERPLEXITY not set" };
+          if (!Array.isArray(config.searchProviders) || config.searchProviders.length === 0) {
+            return { status: "skipped", detail: "no web search provider configured" };
           }
           if (isVerifiable(webSearch)) return { status: "ok", detail: await webSearch.verify() };
           const response = await webSearch.search({ query: "neuretina startup check", limit: 1 });
@@ -103,16 +103,6 @@ export class StartupService {
           }
           if (isVerifiable(tts)) return { status: "ok", detail: await tts.verify() };
           return { status: "ok", detail: "configured" };
-        },
-      },
-      {
-        name: "web-search",
-        run: async (): Promise<CheckOutcome> => {
-          if (!config.perplexity.apiKey) {
-            return { status: "skipped", detail: "search provider not configured" };
-          }
-          const response = await webSearch.search({ query: "neuretina startup check", limit: 1 });
-          return { status: "ok", detail: `${response.provider} returned ${response.results.length} result(s)` };
         },
       },
       {

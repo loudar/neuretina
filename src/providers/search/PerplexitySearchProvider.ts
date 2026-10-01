@@ -39,9 +39,7 @@ export class PerplexitySearchProvider implements SearchProvider {
   /** Cheap fast-search probe: validates the API key without a full search. */
   async verify(): Promise<string> {
     if (!this.options.apiKey) {
-      throw new ConfigurationError(
-        "Perplexity is not configured. Set KEY_PERPLEXITY to a valid API key.",
-      );
+      throw new ConfigurationError("The Perplexity search connection has no API key.");
     }
 
     const response = await requestJson<{ results?: unknown[] }>(
@@ -66,9 +64,7 @@ export class PerplexitySearchProvider implements SearchProvider {
 
   async search(query: SearchQuery): Promise<SearchResponse> {
     if (!this.options.apiKey) {
-      throw new ConfigurationError(
-        "Perplexity is not configured. Set KEY_PERPLEXITY to a valid API key.",
-      );
+      throw new ConfigurationError("The Perplexity search connection has no API key.");
     }
 
     const payload: Record<string, unknown> = {

@@ -72,16 +72,12 @@ const TOOL_DOCS: Record<string, string> = {
   Web search via Exa's neural/keyword index; a second, independent set of results.`,
   "search.bluesky": `search.bluesky({ query, limit?, recency? }) -> same shape
   Recent Bluesky posts, where hype, skepticism and disagreement show up.`,
-  perplexity_search: `perplexity_search({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
-  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).`,
-  wikipedia_search: `wikipedia_search({ query, limit? }) -> same shape
+  "search.wikipedia": `search.wikipedia({ query, limit? }) -> same shape
   Wikipedia only (all language editions), for background, definitions and context.`,
-  web_search: `web_search({ query, limit?, recency? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
-  Open web search without a source allowlist, for primary sources: official announcements, company blogs and IR pages, filings, documentation, government and agency publications.`,
-  bluesky_search: `bluesky_search({ query, limit?, recency? }) -> same shape
-  Recent Bluesky posts, where hype, skepticism and disagreement show up.`,
-  perplexity_finance: `perplexity_finance({ question }) -> { answer, data: [{ category, tickers, content, sources }] }
-  Structured market data for public companies and ETFs. Ask a business question naming the company or ticker.`,
+  "finance.perplexity": `finance.perplexity({ question }) -> { answer, data: [{ category, tickers, content, sources }] }
+  Perplexity's finance agent: a synthesized answer plus structured market and financial data for public companies and ETFs. Ask a business question naming the company or ticker.`,
+  "finance.yahoo": `finance.yahoo({ question }) -> same shape
+  Yahoo Finance quotes: latest price, change, day and 52-week ranges and volume for the tickers matched from the question.`,
   past_briefs: `past_briefs({ query?, limit? }) -> { briefs: [{ id, date, topics, excerpt }] }
   Search earlier briefings by topic or keyword, to build on what was already covered.`,
   past_brief: `past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
@@ -115,7 +111,7 @@ export class CodeModeTool implements Tool<CodeModeResult> {
       code: {
         type: "string",
         description:
-          "An async arrow function, e.g. async () => { const r = await perplexity_search({ query: \"...\" }); return { ... }; }",
+          "An async arrow function, e.g. async () => { const r = await search.perplexity({ query: \"...\" }); return { ... }; }",
       },
     },
     required: ["code"],

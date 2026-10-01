@@ -7,12 +7,13 @@ import type { Tool } from "../Tool.ts";
 /**
  * Lets the research agent pull structured financial and market data for
  * public companies and ETFs (quotes, financials, earnings, estimates) through
- * a finance data provider.
+ * a finance data provider. The name carries the provider, so several
+ * providers coexist as `finance.<provider>` tools.
  */
 export class FinanceSearchTool implements Tool<FinanceResponse> {
-  readonly name = "perplexity_finance";
+  readonly name: string;
   readonly description =
-    "Look up structured financial and market data for public companies and ETFs — quotes, financial statements, earnings, guidance, analyst estimates and ownership. Ask a business question naming the company or ticker, e.g. \"Nvidia's latest quarterly revenue and margins\" or \"Compare Apple and Microsoft on forward P/E\". Returns a synthesized answer plus the underlying data and source links. Use this for concrete market figures instead of generic web results.";
+    "Look up structured financial and market data for public companies and ETFs — quotes and market data, plus financial statements, earnings, guidance and analyst estimates where the configured provider offers them. Ask a business question naming the company or ticker, e.g. \"Nvidia's latest quarterly revenue and margins\". Returns a synthesized answer when the provider produces one, plus the underlying data and source links. Use this for concrete market figures instead of generic web results.";
   readonly parameters: Record<string, unknown> = {
     type: "object",
     properties: {
@@ -25,7 +26,9 @@ export class FinanceSearchTool implements Tool<FinanceResponse> {
     required: ["question"],
   };
 
-  constructor(private readonly provider: FinanceProvider) {}
+  constructor(private readonly provider: FinanceProvider) {
+    this.name = `finance.${provider.name}`;
+  }
 
   async execute(args: Record<string, unknown>): Promise<FinanceResponse> {
     const question = typeof args.question === "string" ? args.question.trim() : "";

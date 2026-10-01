@@ -87,7 +87,7 @@ beforeAll(async () => {
       }
       return completion(JSON.stringify({ found: true, notes: "Notes: something happened" }));
     }),
-    webSearch: stubSearch("perplexity", "web", sampleResults),
+    searchProviders: [stubSearch("perplexity", "web", sampleResults)],
     socialSearch: stubSearch("bluesky", "social", [sampleResults[1]!]),
     delivery,
   });

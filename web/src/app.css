@@ -471,6 +471,13 @@ h3 {
   color: var(--m3c-on-primary-container);
 }
 
+.provider-tag[data-provider="exa"],
+.provider-tag[data-provider="yahoo"] {
+  border-color: transparent;
+  background-color: var(--m3c-secondary-container);
+  color: var(--m3c-on-secondary-container);
+}
+
 .provider-tag[data-provider="bluesky"] {
   border-color: transparent;
   background-color: var(--m3c-tertiary-container);

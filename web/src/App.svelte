@@ -54,7 +54,7 @@
     config
       ? [
           { label: "LLM", ok: config.integrations.llm },
-          { label: "Web search", ok: config.integrations.perplexity },
+          { label: "Web search", ok: config.integrations.search },
           { label: "Bluesky", ok: config.integrations.bluesky === "authenticated" },
           { label: "Speech", ok: config.integrations.tts },
           { label: "Matrix", ok: config.integrations.matrix },

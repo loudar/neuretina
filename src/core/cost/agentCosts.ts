@@ -11,7 +11,8 @@ const WEB_SEARCH_TOOLS = new Set([
   "web_search",
 ]);
 
-const FINANCE_TOOL = "perplexity_finance";
+/** Finance tools are named `finance.<provider>`; priced usage comes from Perplexity's Agent API. */
+const FINANCE_TOOL_PREFIX = "finance.";
 
 /** Records an agent run's LLM usage, paid searches and finance lookups. */
 export function addAgentCost(
@@ -98,12 +99,12 @@ export function collectFinanceUsage(result: AgentRunResult): FinanceUsage[] {
       const response = invocation.result as
         | { usage?: unknown; toolUsages?: unknown }
         | undefined;
-      if (invocation.tool === FINANCE_TOOL) collectUsage(response?.usage, usages);
+      if (invocation.tool.startsWith(FINANCE_TOOL_PREFIX)) collectUsage(response?.usage, usages);
       if (Array.isArray(response?.toolUsages)) {
         for (const entry of response.toolUsages) {
           if (!entry || typeof entry !== "object") continue;
           const record = entry as { tool?: unknown; usage?: unknown };
-          if (record.tool !== FINANCE_TOOL) continue;
+          if (typeof record.tool !== "string" || !record.tool.startsWith(FINANCE_TOOL_PREFIX)) continue;
           collectUsage(record.usage, usages);
         }
       }

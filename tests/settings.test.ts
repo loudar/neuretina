@@ -56,9 +56,12 @@ describe("SettingsService", () => {
   });
 
   test("user-owned settings ignore the environment", () => {
+    const envProviders = [
+      { id: "env-search", provider: "exa" as const, baseUrl: "https://api.exa.ai", apiKey: "env-key" },
+    ];
     const { config, service } = setup({
       LLM_MODEL: "env-model",
-      KEY_PERPLEXITY: "env-key",
+      SEARCH_PROVIDERS: JSON.stringify(envProviders),
       BLUESKY_IDENTIFIER: "env-handle",
     });
 
@@ -66,12 +69,15 @@ describe("SettingsService", () => {
       "default",
     );
     expect(config.llm.model).toBe("deepseek-v4.1-flash");
-    expect(config.perplexity.apiKey).toBeUndefined();
+    expect(config.searchProviders).toEqual([]);
     expect(config.bluesky.identifier).toBeUndefined();
 
     // The user's own value still applies.
-    service.set("KEY_PERPLEXITY", "user-key");
-    expect(config.perplexity.apiKey).toBe("user-key");
+    const ownProviders = [
+      { id: "own-search", provider: "perplexity" as const, baseUrl: "https://api.perplexity.ai", apiKey: "user-key" },
+    ];
+    service.set("SEARCH_PROVIDERS", JSON.stringify(ownProviders));
+    expect(config.searchProviders).toEqual(ownProviders);
   });
 
   test("clearing an override restores the base value", () => {

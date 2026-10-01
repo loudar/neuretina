@@ -41,6 +41,8 @@ export interface EventExtractorDeps {
   tagModel?: string;
   /** Local decision models (Laya) for the tag choice; optional. */
   decisions?: DecisionModelRegistry;
+  /** Selected hosted decision-model connection id; empty uses the local model. */
+  decisionModel?: string;
   /** Minimum confidence before the decision model's pick is used. */
   decisionConfidence?: number;
   cost?: CostTracker;
@@ -253,15 +255,19 @@ export class EventExtractor {
   }
 
   /**
-   * Local decision model pass. Returns the chosen tags, `[]` when the model
-   * says "other"/is unsure (the caller then asks the LLM for a new tag), or
-   * undefined when no decision model is available (pure LLM path).
+   * Local/hosted decision model pass. Returns the chosen tags, `[]` when the
+   * model says "other"/is unsure (the caller then asks the LLM for a new
+   * tag), or undefined when no decision model is available (pure LLM path).
+   * The selected hosted connection wins; otherwise the local Laya model runs.
    */
   private async categorizeWithDecisionModel(
     suggestion: EventSuggestion,
     options: string[],
   ): Promise<string[] | undefined> {
-    const model = this.deps.decisions?.get("laya");
+    const registry = this.deps.decisions;
+    const model =
+      (this.deps.decisionModel ? registry?.get(this.deps.decisionModel) : undefined) ??
+      registry?.get("laya");
     if (!model || options.length < 2) return undefined;
     try {
       if (!(await model.available())) return undefined;

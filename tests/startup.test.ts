@@ -104,7 +104,14 @@ function configuredConfig(overrides: Record<string, string | undefined> = {}) {
   // Provider credentials are user-owned settings, so tests set them on the
   // config directly (in production the settings service applies them).
   config.llm.apiKey = "key";
-  config.perplexity.apiKey = "key";
+  config.searchProviders = [
+    {
+      id: "test-search",
+      provider: "perplexity",
+      baseUrl: "https://api.perplexity.test",
+      apiKey: "key",
+    },
+  ];
   config.bluesky.identifier = "bot.test";
   config.bluesky.appPassword = "pw";
   config.qwenTts.baseUrl = "http://tts.test/v1";
@@ -187,10 +194,9 @@ describe("StartupService", () => {
     expect(result.report.ok).toBe(true);
     expect(result.report.results.map((entry) => `${entry.name}:${entry.status}`)).toEqual([
       "llm:ok",
-      "perplexity:ok",
+      "web-search:ok",
       "bluesky:ok",
       "tts:ok",
-      "web-search:ok",
       "matrix:ok",
     ]);
 
@@ -297,7 +303,7 @@ describe("kernel startup validation", () => {
         MATRIX_ROOM_ID: "!room:matrix.test",
       },
       logger: log,
-      webSearch: stubSearch("perplexity", "web"),
+      searchProviders: [stubSearch("perplexity", "web")],
       socialSearch: stubSearch("bluesky", "social"),
       messaging,
     });

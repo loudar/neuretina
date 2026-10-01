@@ -77,6 +77,8 @@ export interface BriefingWorkflowDeps {
   searchProviders?: SearchProvider[];
   socialSearch: SearchProvider;
   finance: FinanceProvider;
+  /** All configured finance providers; the researcher gets one finance.<name> tool each. */
+  financeProviders?: FinanceProvider[];
   tts: TextToSpeechProvider;
   /** Routes step outputs through their assigned delivery channels. */
   delivery: DeliveryRouter;
@@ -84,6 +86,8 @@ export interface BriefingWorkflowDeps {
   appUrl?: string;
   /** Local decision models (Laya) for event tagging; optional. */
   decisions?: DecisionModelRegistry;
+  /** Selected hosted decision-model connection; empty uses the local model. */
+  decisionModel?: string;
   /** Minimum decision-model confidence before its tag pick is used. */
   decisionConfidence?: number;
   statuses?: StatusHub;
@@ -152,7 +156,7 @@ You research by writing JavaScript through the run_code tool: one small async fu
 Plan first:
 - Decide yourself what to search based on the topics: merge overlapping topics and pick distinct, high-signal queries.
 - Social discussion carries as much weight as the reporting: run at least one Bluesky search per run, and treat it as the place where hype, skepticism and disagreement actually show up.
-- When a topic touches a publicly traded company, an ETF or the markets, use perplexity_finance for concrete numbers (quotes, revenue, margins, guidance, analyst estimates) — state the business question first, then the company or ticker.
+- When a topic touches a publicly traded company, an ETF or the markets, use the finance tools for concrete numbers (quotes, revenue, margins, guidance, analyst estimates) — state the business question first, then the company or ticker.
 - Web search is restricted to a curated list of reputable sources. Only switch a query to scope "open" when that list cannot cover the topic at all (release notes, official documentation, a niche community) — prefer reputable coverage whenever it exists.
 - Search earlier briefs by topic with past_briefs and open any of them in full with past_brief, so your notes build on what was already covered instead of repeating it.
 - Run at most 6 searches in total across web and social, plus at most 2 finance lookups. Do not run near-identical queries twice.
@@ -824,6 +828,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         sessionId: correlationId,
         signal: ctx.run.signal,
         decisions: this.deps.decisions,
+        ...(this.deps.decisionModel ? { decisionModel: this.deps.decisionModel } : {}),
         decisionConfidence: this.deps.decisionConfidence,
         ...(this.deps.defaults.eventTagModel
           ? { tagModel: this.deps.defaults.eventTagModel }
@@ -1056,6 +1061,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       this.deps.searchProviders && this.deps.searchProviders.length > 0
         ? this.deps.searchProviders
         : [this.deps.webSearch];
+    const finance =
+      this.deps.financeProviders && this.deps.financeProviders.length > 0
+        ? this.deps.financeProviders
+        : [this.deps.finance];
     const tools = [
       ...createWebSearchTools(providers, {
         limit: this.deps.defaults.resultsPerProvider,
@@ -1069,7 +1078,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       }),
       new BriefSearchTool(this.deps.briefs, contextId),
       new BriefGetTool(this.deps.briefs),
-      new FinanceSearchTool(this.deps.finance),
+      ...finance.map((provider) => new FinanceSearchTool(provider)),
     ];
 
     return new Agent({
@@ -1160,6 +1169,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       const upgrades = new SourceUpgrades({
         llm: this.deps.llm,
         webSearch: this.deps.webSearch,
+        searchProviders: this.deps.searchProviders,
         defaults: {
           recency: this.deps.defaults.recency,
           resultsPerProvider: this.deps.defaults.resultsPerProvider,
@@ -1481,7 +1491,7 @@ export function formatNoMaterialNotice(topics: string[], queries: string[]): str
     "Topics:",
     ...topics.map((topic) => `- ${topic}`),
     "",
-    "Searched: web and finance data (Perplexity) and Bluesky social, latest results first.",
+    "Searched: web search, finance data and Bluesky social, latest results first.",
   ];
 
   if (queries.length > 0) {

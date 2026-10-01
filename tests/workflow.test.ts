@@ -159,7 +159,7 @@ function setup(options: SetupOptions = {}) {
             arguments: {
               code: `async () => {
                 const [wiki, web] = await Promise.all([
-                  wikipedia_search({ query: "Rust" }),
+                  search.wikipedia({ query: "Rust" }),
                   search.perplexity({ query: "Rust implications" }),
                 ]);
                 return { wiki: wiki.results.length, web: web.results.length };
@@ -186,8 +186,8 @@ function setup(options: SetupOptions = {}) {
     if (toolMessages === 0) {
       const code = options.financeOnly
         ? `async () => {
-            const finance = await perplexity_finance({ question: "NVDA quote" });
-            return { finance: finance.answer };
+            const quote = await finance.perplexity({ question: "NVDA quote" });
+            return { finance: quote.answer };
           }`
         : `async () => {
             const [web, social] = await Promise.all([

@@ -58,6 +58,8 @@ export function filterSources(sources: BriefSource[], query: string): BriefSourc
 
 const PROVIDER_LABELS: Record<string, string> = {
   perplexity: "Perplexity",
+  exa: "Exa",
+  yahoo: "Yahoo Finance",
   bluesky: "Bluesky",
 };
 

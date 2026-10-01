@@ -59,10 +59,18 @@ import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListe
 import { createChatCommandHandler } from "../chat/ChatCommands.ts";
 import { OpenAiCompatibleLlmProvider } from "../providers/llm/OpenAiCompatibleLlmProvider.ts";
 import { PerplexitySearchProvider } from "../providers/search/PerplexitySearchProvider.ts";
-import { ExaSearchProvider } from "../providers/search/ExaSearchProvider.ts";
+import { createSearchProviders } from "../providers/search/createSearchProvider.ts";
+import { SEARCH_PROVIDER_PRESETS } from "../capabilities/search/SearchProviders.ts";
 import { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
+import {
+  DECISION_PROVIDER_PRESETS,
+  decisionModelEndpoint,
+} from "../capabilities/decision/DecisionProviders.ts";
 import { LayaOnnxDecisionModel } from "../providers/decision/LayaOnnxDecisionModel.ts";
+import { SystemOneDecisionModel } from "../providers/decision/SystemOneDecisionModel.ts";
 import { PerplexityFinanceProvider } from "../providers/finance/PerplexityFinanceProvider.ts";
+import { createFinanceProviders } from "../providers/finance/createFinanceProvider.ts";
+import { FINANCE_PROVIDER_PRESETS } from "../capabilities/finance/FinanceProviders.ts";
 import { BlueskySearchProvider } from "../providers/search/BlueskySearchProvider.ts";
 import { QwenTtsProvider } from "../providers/tts/QwenTtsProvider.ts";
 import { ElevenLabsTtsProvider } from "../providers/tts/ElevenLabsTtsProvider.ts";
@@ -101,11 +109,11 @@ export interface KernelOverrides {
   /** Storage implementation; the composition root is the only place that picks one. */
   stores?: KernelStores;
   llm?: LlmProvider;
-  webSearch?: SearchProvider;
-  /** Additional web search providers (e.g. Exa) beyond `webSearch`. */
-  exaSearch?: SearchProvider;
+  /** Web-search providers (one tool each); replaces the configured connections. */
+  searchProviders?: SearchProvider[];
   socialSearch?: SearchProvider;
-  finance?: FinanceProvider;
+  /** Finance-data providers (one tool each); replaces the configured connections. */
+  financeProviders?: FinanceProvider[];
   tts?: TextToSpeechProvider;
   messaging?: MessagingProvider;
   delivery?: DeliveryRouter;
@@ -213,30 +221,22 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
       sessionId: llmSessionId,
     });
 
-  const buildWebSearch = (): SearchProvider =>
-    new PerplexitySearchProvider({
-      apiKey: config.perplexity.apiKey,
-      baseUrl: config.perplexity.baseUrl,
-      defaultLimit: config.defaults.searchResultsPerProvider,
-    });
-
-  const buildExaSearch = (): SearchProvider =>
-    new ExaSearchProvider({
-      apiKey: config.exa.apiKey,
-      baseUrl: config.exa.baseUrl,
-      defaultLimit: config.defaults.searchResultsPerProvider,
-    });
-
   /** Every configured web provider; the researcher gets one tool each. */
-  const buildSearchProviders = (): SearchProvider[] => {
-    const providers: SearchProvider[] = [];
-    if (overrides.webSearch) providers.push(overrides.webSearch);
-    else if (config.perplexity.apiKey) providers.push(buildWebSearch());
-    if (overrides.exaSearch) providers.push(overrides.exaSearch);
-    else if (config.exa.apiKey) providers.push(buildExaSearch());
-    return providers;
-  };
+  const buildSearchProviders = (): SearchProvider[] =>
+    overrides.searchProviders ??
+    createSearchProviders(config.searchProviders, {
+      defaultLimit: config.defaults.searchResultsPerProvider,
+    });
   let searchProviders = buildSearchProviders();
+
+  // Primary provider for the single-search call sites (question workflow,
+  // startup checks, source upgrades); without a connection it fails on use.
+  const buildPrimarySearch = (): SearchProvider =>
+    searchProviders[0] ??
+    new PerplexitySearchProvider({
+      baseUrl: SEARCH_PROVIDER_PRESETS.perplexity.defaultBaseUrl,
+      defaultLimit: config.defaults.searchResultsPerProvider,
+    });
 
   const buildSocialSearch = (): SearchProvider =>
     new BlueskySearchProvider({
@@ -247,11 +247,14 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
       defaultLimit: config.defaults.searchResultsPerProvider,
     });
 
-  const buildFinance = (): FinanceProvider =>
+  const buildFinanceProviders = (): FinanceProvider[] =>
+    overrides.financeProviders ?? createFinanceProviders(config.financeProviders);
+  let financeProviders = buildFinanceProviders();
+
+  const buildPrimaryFinance = (): FinanceProvider =>
+    financeProviders[0] ??
     new PerplexityFinanceProvider({
-      apiKey: config.perplexity.apiKey,
-      baseUrl: config.perplexity.baseUrl,
-      model: config.perplexity.financeModel,
+      baseUrl: FINANCE_PROVIDER_PRESETS.perplexity.defaultBaseUrl,
     });
 
   // Both speech providers implement the same TTS protocol; the user's
@@ -300,9 +303,9 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
 
   const bag = {
     llm: overrides.llm ?? buildLlm(),
-    webSearch: overrides.webSearch ?? buildWebSearch(),
+    webSearch: buildPrimarySearch(),
     socialSearch: overrides.socialSearch ?? buildSocialSearch(),
-    finance: overrides.finance ?? buildFinance(),
+    finance: buildPrimaryFinance(),
     tts: overrides.tts ?? buildTts(),
     messaging: overrides.messaging ?? buildMessaging(),
   };
@@ -339,14 +342,33 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     },
   };
 
-  // Local decision model for event tagging; unavailable models fall back
-  // to the LLM categorizer, so registering it is always safe.
+  // Decision models for the decision steps (event tagging). The local Laya
+  // model and every configured hosted connection are registered; unavailable
+  // models fall back to the LLM categorizer, so registering is always safe.
   const decisions = new DecisionModelRegistry();
-  if (config.laya.enabled) {
-    decisions.register(
-      new LayaOnnxDecisionModel({ modelDir: config.laya.modelDir, allowDownload: true }),
-    );
-  }
+  const buildDecisionModels = (): void => {
+    decisions.clear();
+    if (config.laya.enabled) {
+      decisions.register(
+        new LayaOnnxDecisionModel({ modelDir: config.laya.modelDir, allowDownload: true }),
+      );
+    }
+    const connections = Array.isArray(config.decisionModels) ? config.decisionModels : [];
+    for (const connection of connections) {
+      const endpoint = decisionModelEndpoint(connection);
+      if (!endpoint) continue;
+      decisions.register(
+        new SystemOneDecisionModel({
+          id: connection.id,
+          provider: DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider,
+          model: connection.model,
+          endpoint,
+          ...(connection.apiKey ? { apiKey: connection.apiKey } : {}),
+        }),
+      );
+    }
+  };
+  buildDecisionModels();
 
   const briefing = new BriefingWorkflow({
     topics,
@@ -370,6 +392,9 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     get finance() {
       return bag.finance;
     },
+    get financeProviders() {
+      return financeProviders;
+    },
     get tts() {
       return bag.tts;
     },
@@ -377,6 +402,9 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     appUrl: config.appUrl,
     decisions,
     decisionConfidence: config.laya.confidenceThreshold,
+    get decisionModel() {
+      return config.decisionModel;
+    },
   });
   workflows.register(briefing);
 
@@ -389,6 +417,9 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     },
     get webSearch() {
       return bag.webSearch;
+    },
+    get searchProviders() {
+      return searchProviders;
     },
     get socialSearch() {
       return bag.socialSearch;
@@ -534,11 +565,13 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
   // (tests and embedders own their instances).
   const refreshProviders = (): void => {
     if (!overrides.llm) bag.llm = buildLlm();
-    if (!overrides.webSearch) bag.webSearch = buildWebSearch();
     searchProviders = buildSearchProviders();
+    bag.webSearch = buildPrimarySearch();
     if (!overrides.socialSearch) bag.socialSearch = buildSocialSearch();
-    if (!overrides.finance) bag.finance = buildFinance();
+    financeProviders = buildFinanceProviders();
+    bag.finance = buildPrimaryFinance();
     if (!overrides.tts) bag.tts = buildTts();
+    buildDecisionModels();
     if (!overrides.messaging) {
       matrixClient = buildMatrixClient();
       bag.messaging = buildMessaging();

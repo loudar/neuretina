@@ -2,16 +2,39 @@
   import { onMount } from "svelte";
   import { Button, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconDownload from "@ktibow/iconset-material-symbols/download";
+  import iconFinance from "@ktibow/iconset-material-symbols/finance";
+  import iconPsychology from "@ktibow/iconset-material-symbols/psychology";
   import iconSave from "@ktibow/iconset-material-symbols/save";
+  import iconSearch from "@ktibow/iconset-material-symbols/search";
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
   import iconUpload from "@ktibow/iconset-material-symbols/upload";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
   import { commands } from "../lib/commands";
-  import type { DataBundle, DataImportSummary, SettingInfo } from "../lib/api";
+  import type {
+    DataBundle,
+    DataImportSummary,
+    DecisionProviderId,
+    FinanceProviderId,
+    SearchProviderId,
+    SettingInfo,
+  } from "../lib/api";
+  import {
+    DECISION_PROVIDER_IDS,
+    DECISION_PROVIDER_PRESETS,
+    decisionModelLabel,
+    FINANCE_PROVIDER_IDS,
+    FINANCE_PROVIDER_PRESETS,
+    parseDecisionModelConnections,
+    parseFinanceConnections,
+    parseSearchConnections,
+    SEARCH_PROVIDER_IDS,
+    SEARCH_PROVIDER_PRESETS,
+  } from "../lib/api";
   import { configState } from "../lib/config.svelte";
   import { reportError, reportSuccess } from "../lib/feedback";
   import Pane from "./Pane.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+  import ConnectionSection from "./ConnectionSection.svelte";
   import SecretField from "./SecretField.svelte";
 
   let settings = $state<SettingInfo[]>([]);
@@ -23,9 +46,81 @@
 
   const groups = $derived([...new Set(settings.map((setting) => setting.group))]);
 
-  /** The data transfer panel is not a setting; it leads the section nav. */
+  /** Custom panels that are not rendered by the generic settings form. */
   const DATA_GROUP = "Data transfer";
-  const navGroups = $derived([DATA_GROUP, ...groups]);
+  const DECISION_GROUP = "Decision models";
+  const SEARCH_GROUP = "Web search";
+  const FINANCE_GROUP = "Finance data";
+  const DECISION_MODELS_KEY = "DECISION_MODELS";
+  const DECISION_MODEL_KEY = "DECISION_MODEL";
+  const SEARCH_PROVIDERS_KEY = "SEARCH_PROVIDERS";
+  const FINANCE_PROVIDERS_KEY = "FINANCE_PROVIDERS";
+
+  const customGroups = [DECISION_GROUP, SEARCH_GROUP, FINANCE_GROUP];
+  const genericGroups = $derived(groups.filter((group) => !customGroups.includes(group)));
+  const navGroups = $derived([DATA_GROUP, ...customGroups, ...genericGroups]);
+
+  function settingValue(key: string): string | null {
+    return settings.find((entry) => entry.key === key)?.value ?? null;
+  }
+
+  // ── Connections ──────────────────────────────────────────────────────────
+  // Decision models, web search and finance data are dynamic connection
+  // lists; the shared section stores them as JSON settings so they travel
+  // with configuration exports.
+
+  const decisionConnections = $derived(
+    parseDecisionModelConnections(settingValue(DECISION_MODELS_KEY)),
+  );
+  const searchConnections = $derived(parseSearchConnections(settingValue(SEARCH_PROVIDERS_KEY)));
+  const financeConnections = $derived(parseFinanceConnections(settingValue(FINANCE_PROVIDERS_KEY)));
+  const activeDecisionId = $derived(settingValue(DECISION_MODEL_KEY) ?? "");
+  const activeDecisionLabel = $derived.by(() => {
+    const connection = decisionConnections.find((entry) => entry.id === activeDecisionId);
+    return connection ? decisionModelLabel(connection) : null;
+  });
+  const activeDecisionOptions = $derived(
+    decisionConnections.map((connection) => ({
+      text: decisionModelLabel(connection),
+      value: connection.id,
+    })),
+  );
+
+  async function onConnectionChange(setting: SettingInfo): Promise<void> {
+    apply(setting);
+    await configState.load();
+  }
+
+  /** Keeps the active decision valid: the first connection becomes active. */
+  async function onDecisionChange(setting: SettingInfo): Promise<void> {
+    apply(setting);
+    await configState.load();
+    const ids = parseDecisionModelConnections(setting.value).map((connection) => connection.id);
+    if (ids.length === 0 || !ids.includes(activeDecisionId)) {
+      const next = ids[0];
+      apply(
+        next
+          ? await commands.settings.set(DECISION_MODEL_KEY, next)
+          : await commands.settings.clear(DECISION_MODEL_KEY),
+      );
+      await configState.load();
+    }
+  }
+
+  async function chooseActiveDecision(event: Event): Promise<void> {
+    const target = event.currentTarget as HTMLSelectElement | null;
+    if (!target) return;
+    try {
+      apply(
+        target.value
+          ? await commands.settings.set(DECISION_MODEL_KEY, target.value)
+          : await commands.settings.clear(DECISION_MODEL_KEY),
+      );
+      await configState.load();
+    } catch (error) {
+      reportError(error);
+    }
+  }
 
   let exporting = $state(false);
   let importing = $state(false);
@@ -64,6 +159,9 @@
       const summary = await commands.data.import(bundle);
       importSummary = summary;
       await configState.load();
+      // Imported settings overwrote the local overrides: refetch so the
+      // fields (and their revealable values) show the new state.
+      if (summary.settings > 0) await refresh();
       reportSuccess(
         `Imported ${summary.topics} topic(s), ${summary.userWorkflows} workflow(s), ` +
           `${summary.deliveryChannels} channel(s), ${summary.jobs} schedule(s), ` +
@@ -244,12 +342,6 @@
     await save(setting);
   }
 
-  function sourceLabel(setting: SettingInfo): string {
-    if (setting.source === "env") return "from environment";
-    if (setting.source === "db") return "from database";
-    return "default";
-  }
-
   function placeholder(setting: SettingInfo): string {
     if (setting.kind === "secret") return setting.configured ? "•••••• (set)" : "Not set";
     return setting.defaultValue ?? "";
@@ -287,11 +379,7 @@
           <article class="setting">
             <div class="info">
               <div class="name"><span>Import / export configuration</span></div>
-              <p class="desc muted">
-                Move topics, workflows, delivery channels, schedules, settings and API keys to
-                another installation. The exported file carries credentials, so treat it as a
-                secret.
-              </p>
+              <p class="desc muted">The exported file carries credentials; treat it as a secret.</p>
               {#if importSummary}
                 <span class="source">
                   Last import: {importSummary.topics} topic(s), {importSummary.userWorkflows}
@@ -331,7 +419,164 @@
           </article>
         </section>
 
-        {#each groups as group (group)}
+        <section class="group" id={sectionId(DECISION_GROUP)}>
+          <h3>{DECISION_GROUP}</h3>
+
+          <article class="setting">
+            <div class="info">
+              <div class="name"><span>Active model</span></div>
+              <span class="source">{activeDecisionLabel ?? "local model / LLM fallback"}</span>
+            </div>
+            <div class="control">
+              {#if decisionConnections.length > 0}
+                <Select
+                  label="Active model"
+                  width="16rem"
+                  options={activeDecisionOptions}
+                  value={activeDecisionId}
+                  onchange={(event) => void chooseActiveDecision(event)}
+                />
+              {:else}
+                <p class="muted">No hosted models configured.</p>
+              {/if}
+            </div>
+          </article>
+
+          <ConnectionSection
+            settingKey={DECISION_MODELS_KEY}
+            connections={decisionConnections}
+            presets={DECISION_PROVIDER_PRESETS}
+            providerIds={DECISION_PROVIDER_IDS}
+            noun="decision model"
+            header="Hosted connections"
+            empty="No hosted decision models yet."
+            icon={iconPsychology}
+            label={decisionModelLabel}
+            subtitle={(connection) =>
+              `${connection.baseUrl}${connection.accountId ? ` · account ${connection.accountId}` : ""}`}
+            formOf={(connection) => ({
+              provider: connection.provider,
+              model: connection.model,
+              baseUrl: connection.baseUrl,
+              accountId: connection.accountId ?? "",
+              apiKey: connection.apiKey ?? "",
+            })}
+            build={(form, id) => ({
+              id,
+              provider: form.provider as DecisionProviderId,
+              model: form.model.trim(),
+              baseUrl: form.baseUrl.trim(),
+              ...(form.accountId.trim() ? { accountId: form.accountId.trim() } : {}),
+              ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+            })}
+            verify={(payload) =>
+              commands.decision.verify(
+                payload as {
+                  id?: string;
+                  provider?: DecisionProviderId;
+                  model?: string;
+                  baseUrl?: string;
+                  accountId?: string;
+                  apiKey?: string;
+                },
+              )}
+            changed={onDecisionChange}
+            removeNote="Decisions fall back to the local model or the LLM."
+          />
+        </section>
+
+        <section class="group" id={sectionId(SEARCH_GROUP)}>
+          <h3>{SEARCH_GROUP}</h3>
+
+          <ConnectionSection
+            settingKey={SEARCH_PROVIDERS_KEY}
+            connections={searchConnections}
+            presets={SEARCH_PROVIDER_PRESETS}
+            providerIds={SEARCH_PROVIDER_IDS}
+            noun="web search provider"
+            header="Providers"
+            empty="No web search providers yet."
+            icon={iconSearch}
+            uniqueProvider
+            allowDuplicate={false}
+            label={(connection) =>
+              SEARCH_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider}
+            subtitle={(connection) => connection.baseUrl}
+            formOf={(connection) => ({
+              provider: connection.provider,
+              model: "",
+              baseUrl: connection.baseUrl,
+              accountId: "",
+              apiKey: connection.apiKey ?? "",
+            })}
+            build={(form, id) => ({
+              id,
+              provider: form.provider as SearchProviderId,
+              baseUrl: form.baseUrl.trim(),
+              ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+            })}
+            verify={(payload) =>
+              commands.search.verify(
+                payload as {
+                  id?: string;
+                  provider?: SearchProviderId;
+                  baseUrl?: string;
+                  apiKey?: string;
+                },
+              )}
+            changed={onConnectionChange}
+          />
+        </section>
+
+        <section class="group" id={sectionId(FINANCE_GROUP)}>
+          <h3>{FINANCE_GROUP}</h3>
+
+          <ConnectionSection
+            settingKey={FINANCE_PROVIDERS_KEY}
+            connections={financeConnections}
+            presets={FINANCE_PROVIDER_PRESETS}
+            providerIds={FINANCE_PROVIDER_IDS}
+            noun="finance provider"
+            header="Providers"
+            empty="No finance data providers yet."
+            icon={iconFinance}
+            uniqueProvider
+            allowDuplicate={false}
+            label={(connection) =>
+              FINANCE_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider}
+            subtitle={(connection) =>
+              connection.model
+                ? `${connection.baseUrl} · ${connection.model}`
+                : connection.baseUrl}
+            formOf={(connection) => ({
+              provider: connection.provider,
+              model: connection.model ?? "",
+              baseUrl: connection.baseUrl,
+              accountId: "",
+              apiKey: connection.apiKey ?? "",
+            })}
+            build={(form, id) => ({
+              id,
+              provider: form.provider as FinanceProviderId,
+              baseUrl: form.baseUrl.trim(),
+              ...(form.model.trim() ? { model: form.model.trim() } : {}),
+              ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+            })}
+            verify={(payload) =>
+              commands.finance.verify(
+                payload as {
+                  id?: string;
+                  provider?: FinanceProviderId;
+                  baseUrl?: string;
+                  model?: string;
+                  apiKey?: string;
+                },
+              )}
+            changed={onConnectionChange}
+          />
+        </section>
+
+        {#each genericGroups as group (group)}
           <section class="group" id={sectionId(group)}>
         <h3>{group}</h3>
 
@@ -349,12 +594,6 @@
                   </span>
                 {/if}
               </div>
-              {#if setting.description}
-                <p class="desc muted">{setting.description}</p>
-              {/if}
-              <span class="source" class:env={setting.source === "env"}>
-                {sourceLabel(setting)}
-              </span>
             </div>
 
             <div class="control">
@@ -572,10 +811,6 @@
   .source {
     @apply --m3-label-medium;
     color: var(--m3c-on-surface-variant);
-  }
-
-  .source.env {
-    color: var(--m3c-warning);
   }
 
   .control {

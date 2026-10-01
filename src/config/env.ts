@@ -1,5 +1,8 @@
 import type { LogLevel } from "../core/logger.ts";
 import type { SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import type { SearchConnection } from "../capabilities/search/SearchProviders.ts";
+import type { FinanceConnection } from "../capabilities/finance/FinanceProviders.ts";
+import type { DecisionModelConnection } from "../capabilities/decision/DecisionProviders.ts";
 
 export type { SearchRecency };
 
@@ -72,17 +75,10 @@ export interface AppConfig {
     model: string;
     sessionId?: string;
   };
-  perplexity: {
-    apiKey?: string;
-    baseUrl: string;
-    /** Model used by the Agent API finance_search tool. */
-    financeModel: string;
-  };
-  /** Optional second web search provider (neural/keyword search). */
-  exa: {
-    apiKey?: string;
-    baseUrl: string;
-  };
+  /** Web-search connections (Perplexity, Exa); user-owned settings. */
+  searchProviders: SearchConnection[];
+  /** Finance-data connections (Perplexity, Yahoo Finance); user-owned settings. */
+  financeProviders: FinanceConnection[];
   /** Local OpenAI-compatible Qwen3-TTS server (the active speech provider). */
   qwenTts: {
     baseUrl: string;
@@ -119,6 +115,10 @@ export interface AppConfig {
     /** Minimum confidence before a Laya tag pick is accepted. */
     confidenceThreshold: number;
   };
+  /** Hosted decision-model connections (Jev, Clef); user-owned settings. */
+  decisionModels: DecisionModelConnection[];
+  /** Selected hosted connection id; empty falls back to the local model. */
+  decisionModel?: string;
   bluesky: {
     identifier?: string;
     appPassword?: string;
@@ -208,15 +208,10 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       model: "deepseek-v4.1-flash",
       sessionId: undefined,
     },
-    perplexity: {
-      apiKey: undefined,
-      baseUrl: "https://api.perplexity.ai",
-      financeModel: "perplexity/glm-5.3-flash",
-    },
-    exa: {
-      apiKey: undefined,
-      baseUrl: "https://api.exa.ai",
-    },
+    // Web-search and finance connections are user-owned (they carry API
+    // keys and live in the UI settings, never in the deployment environment).
+    searchProviders: [],
+    financeProviders: [],
     qwenTts: {
       // User-owned settings: UI only.
       baseUrl: "",
@@ -250,6 +245,10 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       modelDir: str(env, "LAYA_MODEL_DIR", "./data/models/laya")!,
       confidenceThreshold: num(env, "LAYA_CONFIDENCE_THRESHOLD", 0.55),
     },
+    // Hosted decision models are user-owned (connections and keys live in
+    // the UI settings, never in the deployment environment).
+    decisionModels: [],
+    decisionModel: undefined,
     bluesky: {
       // User-owned credentials: UI settings only.
       identifier: undefined,
@@ -272,7 +271,7 @@ export const LEGACY_MATRIX_KEYS = [
 
 export interface ConfigStatus {
   llm: boolean;
-  perplexity: boolean;
+  search: boolean;
   tts: boolean;
   bluesky: "authenticated" | "public";
 }
@@ -280,7 +279,7 @@ export interface ConfigStatus {
 export function configStatus(config: AppConfig): ConfigStatus {
   return {
     llm: Boolean(config.llm.apiKey),
-    perplexity: Boolean(config.perplexity.apiKey),
+    search: Array.isArray(config.searchProviders) && config.searchProviders.length > 0,
     tts:
       config.tts.provider === "elevenlabs"
         ? Boolean(config.elevenlabs.apiKey)

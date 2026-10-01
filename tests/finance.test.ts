@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { PerplexityFinanceProvider } from "../src/providers/finance/PerplexityFinanceProvider.ts";
+import { YahooFinanceProvider } from "../src/providers/finance/YahooFinanceProvider.ts";
 import { FinanceSearchTool } from "../src/agents/tools/FinanceSearchTool.ts";
 import { ConfigurationError } from "../src/core/errors.ts";
 import type {
@@ -181,11 +182,102 @@ describe("FinanceSearchTool", () => {
     };
     const tool = new FinanceSearchTool(provider);
 
-    expect(tool.name).toBe("perplexity_finance");
+    expect(tool.name).toBe("finance.perplexity");
     await expect(tool.execute({})).rejects.toThrow("`question` is required");
 
     const response = await tool.execute({ question: "  Nvidia revenue? " });
     expect(seen).toEqual([{ question: "Nvidia revenue?" }]);
     expect(response.answer).toBe("ok");
+  });
+});
+
+describe("YahooFinanceProvider", () => {
+  const chart = {
+    chart: {
+      result: [
+        {
+          meta: {
+            symbol: "NVDA",
+            currency: "USD",
+            longName: "NVIDIA Corporation",
+            fullExchangeName: "NasdaqGS",
+            regularMarketPrice: 120.5,
+            chartPreviousClose: 119,
+            regularMarketDayLow: 118.2,
+            regularMarketDayHigh: 121.4,
+            fiftyTwoWeekLow: 86.6,
+            fiftyTwoWeekHigh: 140.8,
+            regularMarketVolume: 180_200_000,
+            regularMarketTime: 1_759_280_400,
+          },
+        },
+      ],
+    },
+  };
+
+  test("resolves tickers from the question and quotes them", async () => {
+    const calls: Array<{ url: string; headers: RequestInit["headers"] }> = [];
+    mockFetch(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, headers: init?.headers });
+      if (url.includes("/v1/finance/search")) {
+        return Response.json({
+          quotes: [
+            { symbol: "NVDA", quoteType: "EQUITY" },
+            { symbol: "NVDA", quoteType: "EQUITY" },
+            { symbol: "AMD", quoteType: "EQUITY" },
+          ],
+        });
+      }
+      if (url.includes("/v8/finance/chart/")) return Response.json(chart);
+      return new Response("not found", { status: 404 });
+    });
+
+    const provider = new YahooFinanceProvider({ baseUrl: "https://query1.finance.yahoo.test" });
+    const response = await provider.lookup({ question: "How is Nvidia doing?" });
+
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://query1.finance.yahoo.test/v1/finance/search?q=How%20is%20Nvidia%20doing%3F&quotesCount=5&newsCount=0&listsCount=0",
+      "https://query1.finance.yahoo.test/v8/finance/chart/NVDA?range=1d&interval=1d",
+      "https://query1.finance.yahoo.test/v8/finance/chart/AMD?range=1d&interval=1d",
+    ]);
+    expect((calls[0]?.headers as Record<string, string>)["User-Agent"]).toContain("Mozilla");
+
+    expect(response.provider).toBe("yahoo");
+    expect(response.data).toHaveLength(2);
+    expect(response.data[0]).toMatchObject({ category: "quote", tickers: ["NVDA"] });
+    expect(response.data[0]?.content).toContain("NVDA NVIDIA Corporation — 120.50 USD NasdaqGS");
+    expect(response.data[0]?.content).toContain("previous close 119.00, change +1.50 (+1.26%)");
+    expect(response.data[0]?.content).toContain("52-week 86.60–140.80");
+    expect(response.data[0]?.content).toContain("volume 180.2M");
+    expect(response.answer).toContain("NVDA NVIDIA Corporation");
+    expect(response.results[0]).toMatchObject({
+      url: "https://finance.yahoo.com/quote/NVDA",
+      source: "finance.yahoo.com",
+    });
+  });
+
+  test("fails clearly when no ticker matches", async () => {
+    mockFetch(async () =>
+      Response.json({ quotes: [{ symbol: "??", quoteType: "NONE" }] }),
+    );
+
+    const provider = new YahooFinanceProvider({ baseUrl: "https://query1.finance.yahoo.test" });
+    await expect(provider.lookup({ question: "the weather" })).rejects.toThrow(
+      "no ticker matched",
+    );
+  });
+
+  test("verify quotes one well-known symbol", async () => {
+    mockFetch(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/finance/search")) {
+        return Response.json({ quotes: [{ symbol: "AAPL", quoteType: "EQUITY" }] });
+      }
+      return Response.json({ chart: { result: [{ meta: { ...chart.chart.result[0]!.meta, symbol: "AAPL" } }] } });
+    });
+
+    const provider = new YahooFinanceProvider({ baseUrl: "https://query1.finance.yahoo.test" });
+    await expect(provider.verify()).resolves.toBe("reachable, 1 quote(s)");
   });
 });
