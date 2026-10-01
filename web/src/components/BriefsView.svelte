@@ -7,7 +7,7 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
-  import { commands, type Brief, type DeliveryChannelInfo } from "../lib/api";
+  import { commands, type ArtifactInfo, type Brief, type DeliveryChannelInfo } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -15,11 +15,12 @@
   import DataList from "./DataList.svelte";
   import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
+  import TimelineView from "./TimelineView.svelte";
 
   let briefs = $state<Brief[]>([]);
   let selected = $state<Brief | null>(null);
   let audioUrl = $state<string | null>(null);
-  let timelineMarkdown = $state<string | null>(null);
+  let timelineArtifact = $state<ArtifactInfo | null>(null);
   let busy = $state(false);
   let resending = $state(false);
   let confirmingDelete = $state(false);
@@ -62,17 +63,17 @@
       if (briefId !== id) return;
       selected = brief;
       audioUrl = null;
-      timelineMarkdown = null;
+      timelineArtifact = null;
 
       const [audio, timeline] = await Promise.all([
         brief.hasAudio ? commands.briefs.audio(id) : Promise.resolve(null),
         brief.timelineArtifactId
-          ? commands.artifacts.content(brief.timelineArtifactId)
+          ? commands.artifacts.get(brief.timelineArtifactId)
           : Promise.resolve(null),
       ]);
       if (briefId !== id) return;
       audioUrl = audio?.dataUrl ?? null;
-      timelineMarkdown = timeline?.content ?? null;
+      timelineArtifact = timeline;
     } catch (error) {
       reportError(error);
     }
@@ -283,9 +284,9 @@
 
   {#if selected}
     <div class="brief-body">
-      {#if timelineMarkdown !== null}
+      {#if timelineArtifact !== null}
         <div class="timeline">
-          <MarkdownView markdown={timelineMarkdown} controls={false} />
+          <TimelineView artifact={timelineArtifact} />
         </div>
       {/if}
 

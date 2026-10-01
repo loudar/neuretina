@@ -425,6 +425,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     topics,
     briefs,
     jobs,
+    events: timelineEvents,
     workflows,
     coreWorkflows,
     scheduler,

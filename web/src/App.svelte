@@ -15,7 +15,7 @@
   import { eventStream } from "./lib/events.svelte";
   import { statusFeed } from "./lib/statuses.svelte";
   import { configState } from "./lib/config.svelte";
-  import { mountCitationPopovers } from "./lib/citePopover";
+  import { mountHoverPopovers } from "./lib/hoverPopover";
   import { paths, router } from "./lib/router.svelte";
   import BriefsView from "./components/BriefsView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
@@ -95,11 +95,11 @@
     eventStream.start();
     statusFeed.start();
     void configState.load();
-    const stopCitationPopovers = mountCitationPopovers();
+    const stopHoverPopovers = mountHoverPopovers();
     return () => {
       eventStream.stop();
       statusFeed.stop();
-      stopCitationPopovers();
+      stopHoverPopovers();
     };
   });
 </script>

@@ -69,6 +69,23 @@ export interface BriefAudio {
   durationMs: number | null;
 }
 
+/** A dated event extracted from a brief; the rows behind timeline artifacts. */
+export interface TimelineEvent {
+  id: string;
+  /** ISO calendar date (YYYY-MM-DD). */
+  date: string;
+  /** Time of day (HH:MM) when the source states one. */
+  time?: string;
+  entities: string[];
+  tags: string[];
+  title: string;
+  description: string;
+  /** Brief the event was extracted from, when known. */
+  sourceBriefId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface ScheduledJob {
   id: string;
   name: string;
@@ -453,6 +470,11 @@ export const commands = {
       } | null>("artifact.data", { id }),
     remove: (id: string) =>
       send<{ ok: boolean; artifactId: string; kind: string }>("artifact.delete", { id }),
+  },
+
+  timeline: {
+    /** Dated events by id (the ones a timeline artifact references). */
+    events: (ids?: string[]) => send<TimelineEvent[]>("timeline.event.list", { ids }),
   },
 };
 

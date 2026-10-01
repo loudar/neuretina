@@ -19,6 +19,7 @@ import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
 import type { ContextStore } from "../domain/contexts/ContextRepository.ts";
+import type { EventStore } from "../domain/events/EventRepository.ts";
 import type { CreateJobInput, JobStore, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
 import { assertJobInput } from "../domain/jobs/JobRepository.ts";
 import type { WorkflowRunStore } from "../domain/runs/WorkflowRunRepository.ts";
@@ -50,6 +51,8 @@ export interface CommandDeps {
   topics: TopicStore;
   briefs: BriefStore;
   jobs: JobStore;
+  /** Dated events extracted from briefs. */
+  events: EventStore;
   workflows: WorkflowRegistry;
   /** Core (built-in) workflow instances by id; customizations are rows under the same id. */
   coreWorkflows: ReadonlyMap<string, Workflow>;
@@ -63,7 +66,7 @@ export interface CommandDeps {
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, workflows, coreWorkflows, scheduler, statuses, settings, config, delivery, deliveries, userWorkflows } = deps;
+  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, events, workflows, coreWorkflows, scheduler, statuses, settings, config, delivery, deliveries, userWorkflows } = deps;
 
   router.register("config.get", () => {
     const matrixChannel = deliveries
@@ -710,6 +713,21 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     });
   });
 
+  // Dated events extracted from briefs (the rows behind timeline artifacts).
+  // With `ids` this fetches exactly the events a timeline artifact references.
+  router.register("timeline.event.list", (payload) => {
+    const record = asRecord(payload);
+    const raw = record.ids;
+    if (raw !== undefined && !Array.isArray(raw)) {
+      throw new ValidationError(`"ids" must be an array`);
+    }
+    const ids = Array.isArray(raw)
+      ? raw.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      : undefined;
+    if (ids && ids.length === 0) return [];
+    return events.list(ids ? { ids } : { limit: 200 });
+  });
+
   router.register("artifact.list", (payload) => {
     const record = asRecord(payload);
     return artifacts.list({
@@ -829,6 +847,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "delivery.channel.list",
     "delivery.workflows",
     "delivery.list",
+    "timeline.event.list",
     "event.pull",
     "event.wait",
   ];

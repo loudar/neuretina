@@ -6,6 +6,7 @@
   import { reportError, reportSuccess } from "../lib/feedback";
   import { paths, router } from "../lib/router.svelte";
   import MarkdownView from "./MarkdownView.svelte";
+  import TimelineView from "./TimelineView.svelte";
 
   interface Props {
     artifact: ArtifactInfo;
@@ -26,6 +27,14 @@
   );
   const isAudio = $derived(artifact.contentType.startsWith("audio/"));
   const isImage = $derived(artifact.contentType.startsWith("image/"));
+  const timelineEventIds = $derived(
+    Array.isArray(artifact.metadata.eventIds)
+      ? artifact.metadata.eventIds.filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        )
+      : [],
+  );
+  const isTimeline = $derived(artifact.kind === "timeline" && timelineEventIds.length > 0);
   const sources = $derived(
     Array.isArray(artifact.metadata.sources) ? (artifact.metadata.sources as BriefSource[]) : [],
   );
@@ -42,6 +51,12 @@
     text = null;
     dataUrl = null;
     loading = true;
+
+    // Timeline views load their structured events themselves.
+    if (isTimeline) {
+      loading = false;
+      return;
+    }
 
     void (async () => {
       try {
@@ -94,7 +109,9 @@
   </span>
 </div>
 
-{#if loading}
+{#if isTimeline}
+  <TimelineView {artifact} />
+{:else if loading}
   <p class="muted">Loading…</p>
 {:else if isAudio && dataUrl}
   <audio controls src={dataUrl}></audio>
