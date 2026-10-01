@@ -2,7 +2,8 @@
   import { Icon } from "m3-svelte";
   import iconViewStream from "@ktibow/iconset-material-symbols/view-stream";
   import iconViewWeek from "@ktibow/iconset-material-symbols/view-week";
-  import { commands, type ArtifactInfo, type TimelineEvent } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { ArtifactInfo, TimelineEvent } from "../lib/api";
   import { reportError } from "../lib/feedback";
   import {
     formatEventWhen,
@@ -21,7 +22,7 @@
   const tooltipPrefix = crypto.randomUUID();
 
   /** Up to this many titles show per marker; the rest collapse into one row. */
-  const MAX_STACKED = 3;
+  const MAX_STACKED = 2;
   /** Keeps left-aligned titles of neighbouring markers from touching. */
   const HORIZONTAL_MARKER_GAP_PX = 168;
   const VERTICAL_MARKER_GAP_PX = 88;
@@ -73,7 +74,7 @@
     more?: boolean;
   }
 
-  /** At most three titles per marker; anything beyond becomes one "+n more…" row. */
+  /** At most two titles per marker; anything beyond becomes one "+n more…" row. */
   function labelEntries(group: TimelineGroup): LabelEntry[] {
     const entries: LabelEntry[] = group.events.slice(0, MAX_STACKED).map((event) => ({
       key: event.id,
@@ -346,7 +347,7 @@
   .track.horizontal .scale-label {
     position: absolute;
     left: 0;
-    bottom: 0.6rem;
+    bottom: 0.85rem;
     transform: translateX(-50%);
   }
 
@@ -436,7 +437,6 @@
   }
 
   .track.horizontal .labels {
-    left: 0.35rem;
     top: 0.55rem;
     width: 9.5rem;
   }

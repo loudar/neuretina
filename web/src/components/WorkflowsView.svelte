@@ -8,17 +8,17 @@
   import iconPayments from "@ktibow/iconset-material-symbols/payments";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
-  import {
-    commands,
-    type AppContextInfo,
-    type ArtifactInfo,
-    type DeliveryChannelInfo,
-    type DeliveryRecord,
-    type DeliveryWorkflowInfo,
-    type Topic,
-    type WorkflowInfo,
-    type WorkflowRunDetail,
-    type WorkflowRunInfo,
+  import { commands } from "../lib/commands";
+  import type {
+    AppContextInfo,
+    ArtifactInfo,
+    DeliveryChannelInfo,
+    DeliveryRecord,
+    DeliveryWorkflowInfo,
+    Topic,
+    WorkflowInfo,
+    WorkflowRunDetail,
+    WorkflowRunInfo,
   } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatRelativeTime } from "../lib/format";

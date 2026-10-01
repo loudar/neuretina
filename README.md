@@ -23,9 +23,9 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
           Matrix       → voice message (MSC3245)
                                                                        ▼
                             every step publishes typed events → EventBus → SQLite event log
-                                                              │                    │
-                                              Svelte UI ◄─────┴── webhook event.wait (event feed)
-                                              Svelte UI ◄──────── WS /api/ws (live status feed)
+                                                              │
+                                          Svelte UI ◄─────────┴── WS /api/ws
+                                            (commands, live events, live status)
 ```
 
 ### Architecture
@@ -39,7 +39,7 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
 | Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` (research → compile → TTS → delivery) and `QuestionWorkflow` (Matrix follow-up answers) |
 | Command handlers | `src/commands` | application message handlers (contexts, topics, jobs, briefs, workflows, runs) |
-| API | `src/api` | single webhook gateway + static UI (no other endpoints) |
+| API | `src/api` | bidirectional WebSocket for the UI (commands, events, status), webhook gateway for external ingress, static UI |
 | UI | `web` | Svelte 5 + Vite frontend built on the **M3 Svelte** Material 3 design system |
 
 Adding a provider means implementing one interface and wiring it in `src/kernel/Kernel.ts`.
@@ -339,10 +339,12 @@ Matrix configuration is migrated into a channel automatically). Three channel ty
   nodemailer). The summary goes out as text (+HTML when available); the voice pass attaches the
   audio file.
 
-Channels are attachable to workflows (`workflow_delivery_channels`, several channels per
-workflow and several channels of the same type are fine). The briefing workflow delivers the
-summary as formatted text and — when speech synthesis succeeded — the voice message to every
-enabled channel attached to it, recording one delivery row per channel and pass with its status
+Channels are attachable to **step outputs** (`workflow_delivery_channels`, several channels per
+output and several channels of the same type are fine; the Workflows tab shows a "Send to" switch
+per deliverable output). The briefing workflow delivers the summary as formatted text, the voice
+message when speech synthesis succeeded, and — when a channel is assigned to the Timeline output —
+the timeline as a monospace code block: aligned dates and times in plain text, wrapped in
+`<pre><code>` for Matrix and email. Each pass records one delivery row per channel with its status
 (`delivery.list`). `delivery.channel.verify` runs a live pre-flight (Matrix identity + room
 membership, webhook reachability, SMTP handshake).
 
@@ -491,24 +493,30 @@ the Workflows tab.
 - Workflows accept an input object, e.g. `{"topics": ["Rust"], "deliver": false}` for a
   research-only run.
 
-## Message gateway (webhooks only)
+## Message gateway
 
-There are **no REST endpoints**. Data flows two ways:
+There are **no REST endpoints**. Data flows two ways: one bidirectional WebSocket for the UI, and
+an HTTP webhook for external systems.
 
-- **`POST /api/webhook`** — the only ingress; every UI interaction and every external message
-  goes through it (see below). `GET /api/webhook` returns `200` with the available message types
-  and doubles as the liveness probe.
-- **`GET /api/ws`** — the one WebSocket, used exclusively for the ephemeral live status feed
-  (see "Live activity feed"). Nothing else is served except the static UI.
+- **`/api/ws`** — the one WebSocket, used by the UI for everything. The client sends commands as
+  `{ id, type, payload }` frames and the server answers with `{ type: "result", id, result }` or
+  `{ type: "error", id, error, code }`. The same socket pushes the ephemeral live status feed
+  (see "Live activity feed") **and every persisted domain event as it happens**; after a
+  reconnect the client backfills the gap with `event.pull { since }`. The UI never polls and never
+  calls an HTTP command endpoint.
+- **`POST /api/webhook`** — the external ingress: integrations and scripts post messages here and
+  receive the handler result in the HTTP response. `GET /api/webhook` returns `200` with the
+  available message types and doubles as the liveness probe.
 
-Message envelope:
+Message envelope (identical for webhook messages and WebSocket commands):
 
 ```json
 { "type": "topic.create", "payload": { "name": "Rust" }, "correlationId": "optional-uuid" }
 ```
 
-The gateway publishes `message.received` (audit, except for read-only types) and dispatches the
-message to its handler. Handler results come back **in the same HTTP response**:
+The gateway publishes `message.received` (audit, except for read-only types; its `source` names the
+ingress, `ui` or `webhook`) and dispatches the message to its handler. Over HTTP the result comes
+back **in the same response**:
 
 ```json
 { "ok": true, "type": "topic.create", "correlationId": "…", "result": { "id": "…" } }
@@ -518,16 +526,13 @@ Triggers answer before the work is done: `workflow.run` and `job.run` return
 `{ started: true, runId, … }` — the run is persisted synchronously, so the id can be fetched
 (`workflow.run.get`) or linked right away.
 
-Errors use proper status codes (`400` validation, `404` unknown type, `502` provider failure) with
-`{ "ok": false, "error": "…", "code": "…" }`. Types starting with `hook.*` are fire-and-forget:
-they are forwarded to the bus as `hook.<channel>` events and answered with `202`.
+HTTP errors use proper status codes (`400` validation, `404` unknown type, `502` provider failure)
+with `{ "ok": false, "error": "…", "code": "…" }`; the WebSocket reports the same `error` and
+`code` in its error frame. Types starting with `hook.*` are fire-and-forget: they are forwarded to
+the bus as `hook.<channel>` events and answered with `202` (or an accepted result frame).
 
-**Event feed:** the UI reads events through the same webhook with `event.pull` (`{ since, limit }`)
-and `event.wait` — a long-poll that returns as soon as an event newer than `since` exists, or an
-empty list after `timeoutMs` (max 55s). The UI loops on `event.wait`, which keeps the feed live
-without any streaming connection. Read-only message types (`event.*`, `*.list`, `*.get`,
-`artifact.search`, `brief.audio`, `config.get`) are "quiet": they generate no audit events, so
-polling can never feed
+Read-only message types (`event.*`, `*.list`, `*.get`, `artifact.search`, `brief.audio`,
+`config.get`) are "quiet": they generate no audit events, so streaming/polling can never feed
 itself. Settings edits (`settings.set/clear`) are quiet too — their payload carries secrets, so the
 change is audited through the value-free `settings.updated` event instead.
 
@@ -537,10 +542,11 @@ Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
 `artifact.list/search/get/content/data/delete`, `timeline.event.list`, `event.pull/wait`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
-## Live activity feed (WebSocket)
+## Live activity feed
 
-`GET /api/ws` pushes an ephemeral, in-memory status feed to the UI (broadcast by
-`src/core/status/StatusHub.ts`, not persisted):
+The `/api/ws` WebSocket pushes an ephemeral, in-memory status feed to the UI (broadcast by
+`src/core/status/StatusHub.ts`, not persisted) alongside the commands and domain events it
+already carries:
 
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
 - Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling brief` /
@@ -589,8 +595,9 @@ Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.started/fin
 `delivery.updated` / `delivery.status`, `settings.updated`, `hook.received`, `chat.*` (commands,
 `chat.message.received` for every allowed
 message, and follow-up Q&A), `system.*`. Events are
-persisted in SQLite (`events` table) and read back through the webhook via `event.pull` /
-`event.wait`, which is what makes the Svelte live view resumable.
+persisted in SQLite (`events` table) and streamed to the UI over the WebSocket as they happen;
+`event.pull` (`{ since, limit }`, also served on the webhook) backfills what a reconnect missed,
+which is what makes the Svelte live view resumable.
 
 Known topics are typed in `src/core/events/AppEvents.ts`. Arbitrary topics (e.g. inbound hooks)
 are supported.
@@ -635,9 +642,9 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
 - **Env:** all variables from `.env.example` (`TZ` controls cron and brief dates; `STARTUP_CHECK`
   controls the boot validation + startup message).
 - **Pangolin:** `AUTH_GLOBAL_PASSWORD` can protect the site directly (see Authentication); Pangolin
-  can add its own layer on top. The UI's event feed uses `event.wait` long-polls (≤ ~30 s per
-  request); make sure the proxy's read/response timeout for `/api/webhook` is above that (Pangolin's
-  default is fine). No WebSocket or SSE support needed.
+  can add its own layer on top. The UI runs entirely over the `/api/ws` WebSocket, so the proxy must
+  forward WebSocket upgrades (`Upgrade`/`Connection` headers and long-lived connections); Pangolin
+  handles this by default. No SSE and no long-poll timeouts needed.
 - **CI image:** `.github/workflows/docker.yml` builds a multi-arch image (`linux/amd64`,
   `linux/arm64`) and publishes it to `ghcr.io/<owner>/<repo>` on pushes to `main` and `v*` tags
   (`latest` tracks `main`; pull requests only build, they don't push).

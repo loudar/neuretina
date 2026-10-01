@@ -6,7 +6,8 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
-  import { commands, type ScheduledJob, type WorkflowInfo } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { ScheduledJob, WorkflowInfo } from "../lib/api";
   import { reportError } from "../lib/feedback";
   import { formatDateTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";

@@ -81,7 +81,8 @@ function inline(text: string): string {
   return result;
 }
 
-function escapeHtml(text: string): string {
+/** Escapes text for direct interpolation into HTML (no markdown parsing). */
+export function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 

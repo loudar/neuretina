@@ -5,6 +5,15 @@ import { createLogger } from "../src/core/logger.ts";
 import { createKernel, type Kernel } from "../src/kernel/Kernel.ts";
 import { StubTts, completion, createTestKernel, stubLlm, stubSearch, testConfig } from "./support.ts";
 
+async function waitUntil(condition: () => boolean, timeoutMs = 3000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("waitUntil timed out");
+}
+
 describe("AuthService", () => {
   test("issues a session for the right password, not the wrong one", () => {
     const auth = new AuthService({ config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }) });
@@ -147,6 +156,25 @@ describe("password-protected gateway", () => {
     expect(((await denied.json()) as { code: string }).code).toBe("UNAUTHORIZED");
   });
 
+  test("answers an unauthenticated WebSocket with UNAUTHORIZED, no data", async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${kernel.api.port}/api/ws`);
+    const frames: Array<Record<string, unknown>> = [];
+    socket.onmessage = (event) =>
+      frames.push(JSON.parse(String(event.data)) as Record<string, unknown>);
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error("websocket connection failed"));
+    });
+
+    await waitUntil(() => frames.some((frame) => frame.code === "UNAUTHORIZED"));
+
+    socket.send(JSON.stringify({ id: "probe", type: "topic.list" }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(frames.some((frame) => frame.type === "result")).toBe(false);
+    expect(frames.some((frame) => frame.type === "snapshot")).toBe(false);
+    socket.close();
+  });
+
   test("logs in with the password and out again", async () => {
     const wrong = await post("/api/auth/login", { password: "nope" });
     expect(wrong.status).toBe(401);
@@ -166,6 +194,29 @@ describe("password-protected gateway", () => {
 
     const allowed = await post("/api/webhook", { type: "topic.list" }, cookie);
     expect(allowed.status).toBe(200);
+
+    // The same cookie authenticates the WebSocket the UI sends commands on.
+    const socket = new WebSocket(`ws://127.0.0.1:${kernel.api.port}/api/ws`, {
+      headers: { cookie },
+    });
+    const frames: Array<Record<string, unknown>> = [];
+    socket.onmessage = (event) =>
+      frames.push(JSON.parse(String(event.data)) as Record<string, unknown>);
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error("websocket connection failed"));
+    });
+
+    const requestId = crypto.randomUUID();
+    socket.send(JSON.stringify({ id: requestId, type: "topic.list" }));
+    await waitUntil(() =>
+      frames.some((frame) => frame.type === "result" && frame.id === requestId),
+    );
+    const reply = frames.find(
+      (frame) => frame.type === "result" && frame.id === requestId,
+    ) as { ok: boolean };
+    expect(reply.ok).toBe(true);
+    socket.close();
 
     const logout = await post("/api/auth/logout", {}, cookie);
     expect(logout.status).toBe(200);

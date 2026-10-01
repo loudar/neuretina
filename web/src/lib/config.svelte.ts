@@ -1,4 +1,5 @@
-import { commands, type AppConfigInfo } from "./api";
+import { commands } from "./commands";
+import type { AppConfigInfo } from "./api";
 
 /**
  * App config shared between the shell (health pill, job defaults) and the

@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { Button, Icon, TextFieldOutlined } from "m3-svelte";
+  import { Button, Icon } from "m3-svelte";
   import iconLock from "@ktibow/iconset-material-symbols/lock";
   import { authState } from "../lib/auth.svelte";
+  import SecretField from "./SecretField.svelte";
 
   let password = $state("");
   let submitting = $state(false);
@@ -28,9 +29,8 @@
     <h1>Neuretina</h1>
     <p class="muted">This site is protected. Enter the password to continue.</p>
 
-    <TextFieldOutlined
+    <SecretField
       label="Password"
-      type="password"
       autocomplete="current-password"
       bind:value={password}
       enter={() => void submit()}

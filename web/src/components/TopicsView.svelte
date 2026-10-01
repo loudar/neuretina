@@ -13,7 +13,8 @@
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconVisibility from "@ktibow/iconset-material-symbols/visibility";
   import iconVisibilityOff from "@ktibow/iconset-material-symbols/visibility-off";
-  import { commands, type Topic } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { Topic } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";

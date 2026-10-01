@@ -50,9 +50,21 @@ export interface InboundMessage {
   correlationId?: unknown;
 }
 
-/** WebSocket data: which account's status feed this socket follows. */
+/** WebSocket data: which account's feeds this socket follows. */
 interface WsData {
   user: string;
+  /** Session token captured at upgrade, re-verified on every message. */
+  token?: string;
+  /** Upgraded without a session; only an auth error is sent, then closed. */
+  unauthorized?: boolean;
+}
+
+/** One message sent by a WebSocket client. */
+interface WsRequest {
+  id?: unknown;
+  type?: unknown;
+  payload?: unknown;
+  correlationId?: unknown;
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
@@ -66,7 +78,7 @@ const WS_KEEPALIVE_MS = 30_000;
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
   const loginLimiter = new RateLimiter(LOGIN_RATE_LIMIT_PER_MINUTE, LOGIN_RATE_WINDOW_MS);
-  const statusSubscriptions = new Map<Bun.ServerWebSocket<WsData>, () => void>();
+  const socketCleanups = new Map<Bun.ServerWebSocket<WsData>, () => void>();
 
   const server = Bun.serve<WsData>({
     port: deps.config.port,
@@ -117,10 +129,17 @@ export function createApiServer(deps: ApiDeps): ApiServer {
         }),
       },
 
+      // The one WebSocket: server pushes (status feed, events) and client
+      // requests (`{ id, type, payload }` frames) travel over it, so the UI
+      // never calls HTTP command endpoints. Without a session the socket is
+      // still upgraded so the client receives a proper UNAUTHORIZED frame.
       "/api/ws": (request: Bun.BunRequest<"/api/ws">, server: Bun.Server<WsData>) => {
         const runtime = requestRuntime(request, deps);
-        if (!runtime) return unauthorized();
-        if (server.upgrade(request, { data: { user: runtime.user } })) return undefined;
+        const token = deps.auth.enabled ? readCookie(request, SESSION_COOKIE) : undefined;
+        const data: WsData = runtime
+          ? { user: runtime.user, token }
+          : { user: deps.adminUser, unauthorized: true };
+        if (server.upgrade(request, { data })) return undefined;
         return jsonResponse({ error: "WebSocket upgrade required" }, 426);
       },
 
@@ -134,16 +153,41 @@ export function createApiServer(deps: ApiDeps): ApiServer {
       // be minutes apart; disable that timeout and keep the connection warm
       // with pings so proxies do not drop it either.
       idleTimeout: 0,
+      // Command payloads can carry settings bundles and artifact payloads,
+      // mirroring the HTTP body limit.
+      maxPayloadLength: 32 * 1024 * 1024,
       open(ws) {
+        if (ws.data.unauthorized) {
+          sendSocketError(ws, undefined, "Authentication required", "UNAUTHORIZED");
+          ws.close(4401, "Authentication required");
+          return;
+        }
+
         const runtime = deps.runtimeFor(ws.data.user);
-        let unsubscribe: (() => void) | null = null;
-        unsubscribe = runtime.statuses.subscribe((message) => {
-          try {
-            ws.send(JSON.stringify(message));
-          } catch {
-            unsubscribe?.();
-          }
-        });
+        const cleanups: Array<() => void> = [];
+
+        cleanups.push(
+          runtime.statuses.subscribe((message) => {
+            try {
+              ws.send(JSON.stringify(message));
+            } catch {
+              // The close handler owns the cleanup.
+            }
+          }),
+        );
+
+        // Every persisted domain event is pushed live, so the UI's event feed
+        // streams instead of long-polling `event.wait` over HTTP.
+        cleanups.push(
+          runtime.bus.subscribe("*", (event) => {
+            try {
+              ws.send(JSON.stringify({ type: "event", event }));
+            } catch {
+              // The close handler owns the cleanup.
+            }
+          }),
+        );
+
         const keepAlive = setInterval(() => {
           try {
             ws.ping();
@@ -151,18 +195,31 @@ export function createApiServer(deps: ApiDeps): ApiServer {
             // The close handler owns the cleanup.
           }
         }, WS_KEEPALIVE_MS);
-        statusSubscriptions.set(ws, () => {
+
+        socketCleanups.set(ws, () => {
           clearInterval(keepAlive);
-          unsubscribe?.();
+          for (const cleanup of cleanups) cleanup();
         });
+
         ws.send(JSON.stringify(runtime.statuses.snapshotMessage()));
       },
       close(ws) {
-        statusSubscriptions.get(ws)?.();
-        statusSubscriptions.delete(ws);
+        socketCleanups.get(ws)?.();
+        socketCleanups.delete(ws);
       },
-      message() {
-        // The status feed is server-push only.
+      async message(ws, raw) {
+        // Sessions can expire mid-connection; re-verify before every request.
+        if (deps.auth.enabled) {
+          const session = deps.auth.verify(ws.data.token);
+          if (!session || session.subject !== ws.data.user) {
+            sendSocketError(ws, undefined, "Authentication required", "UNAUTHORIZED");
+            ws.close(4401, "Authentication required");
+            return;
+          }
+        }
+
+        const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        await handleSocketMessage(ws, deps.runtimeFor(ws.data.user), text);
       },
     },
 
@@ -178,8 +235,8 @@ export function createApiServer(deps: ApiDeps): ApiServer {
   return {
     port: server.port ?? deps.config.port,
     stop: () => {
-      for (const unsubscribe of statusSubscriptions.values()) unsubscribe();
-      statusSubscriptions.clear();
+      for (const cleanup of socketCleanups.values()) cleanup();
+      socketCleanups.clear();
       server.stop(true);
     },
   };
@@ -359,29 +416,28 @@ function handleSharedBriefAudio(
   });
 }
 
-async function processMessage(
-  request: Request,
+interface ExecuteMessageInput {
+  type: string;
+  payload: unknown;
+  correlationId: string;
+  /** Ingress the message arrived through, e.g. "webhook" or "ui". */
+  source: string;
+}
+
+/**
+ * Shared by the HTTP gateway and the WebSocket: audits the message, forwards
+ * fire-and-forget `hook.*` channels, and runs everything else as a command.
+ */
+async function executeMessage(
   runtime: ApiRuntime,
-  server?: Bun.Server<WsData>,
-): Promise<Response> {
-  const message = await readJson<InboundMessage>(request);
-  if (typeof message.type !== "string" || !message.type.trim()) {
-    throw new ValidationError(`"type" must be a non-empty string`);
-  }
-
-  const type = message.type.trim();
-  const correlationId =
-    typeof message.correlationId === "string" && message.correlationId.trim()
-      ? message.correlationId.trim()
-      : crypto.randomUUID();
-  const payload = message.payload ?? null;
-
+  { type, payload, correlationId, source }: ExecuteMessageInput,
+): Promise<{ result: unknown; accepted: boolean }> {
   // Read-only commands are quiet: no audit events, so polling cannot feed itself.
   if (type.startsWith("hook.") || !runtime.commands.isQuiet(type)) {
     runtime.bus.publish(
       "message.received",
       { type, correlationId, payload },
-      { source: "webhook", correlationId },
+      { source, correlationId },
     );
   }
 
@@ -405,8 +461,90 @@ async function processMessage(
       { source: `hook:${channel}`, correlationId },
     );
 
-    return jsonResponse({ ok: true, accepted: true, type, correlationId }, 202);
+    return { result: { ok: true, accepted: true, type, correlationId }, accepted: true };
   }
+
+  const result = await runtime.commands.execute(type, payload, correlationId, { source });
+  return { result, accepted: false };
+}
+
+async function handleSocketMessage(
+  ws: Bun.ServerWebSocket<WsData>,
+  runtime: ApiRuntime,
+  raw: string,
+): Promise<void> {
+  let frame: WsRequest;
+  try {
+    frame = JSON.parse(raw) as WsRequest;
+  } catch {
+    sendSocketError(ws, undefined, "Message must be valid JSON", "VALIDATION_ERROR");
+    return;
+  }
+
+  const id =
+    typeof frame.id === "string" && frame.id.trim() ? frame.id.trim() : undefined;
+  if (typeof frame.type !== "string" || !frame.type.trim()) {
+    sendSocketError(ws, id, `"type" must be a non-empty string`, "VALIDATION_ERROR");
+    return;
+  }
+
+  const type = frame.type.trim();
+  const correlationId =
+    typeof frame.correlationId === "string" && frame.correlationId.trim()
+      ? frame.correlationId.trim()
+      : crypto.randomUUID();
+
+  try {
+    const { result } = await executeMessage(runtime, {
+      type,
+      payload: frame.payload ?? null,
+      correlationId,
+      source: "ui",
+    });
+    sendSocket(ws, { type: "result", id, ok: true, result });
+  } catch (error) {
+    sendSocketError(
+      ws,
+      id,
+      errorMessage(error),
+      error instanceof AppError ? error.code : "INTERNAL_ERROR",
+    );
+  }
+}
+
+function sendSocket(ws: Bun.ServerWebSocket<WsData>, frame: unknown): void {
+  try {
+    ws.send(JSON.stringify(frame));
+  } catch {
+    // A closing socket drops its replies; the client reconnects and retries.
+  }
+}
+
+function sendSocketError(
+  ws: Bun.ServerWebSocket<WsData>,
+  id: string | undefined,
+  error: string,
+  code: string,
+): void {
+  sendSocket(ws, { type: "error", id, ok: false, error, code });
+}
+
+async function processMessage(
+  request: Request,
+  runtime: ApiRuntime,
+  server?: Bun.Server<WsData>,
+): Promise<Response> {
+  const message = await readJson<InboundMessage>(request);
+  if (typeof message.type !== "string" || !message.type.trim()) {
+    throw new ValidationError(`"type" must be a non-empty string`);
+  }
+
+  const type = message.type.trim();
+  const correlationId =
+    typeof message.correlationId === "string" && message.correlationId.trim()
+      ? message.correlationId.trim()
+      : crypto.randomUUID();
+  const payload = message.payload ?? null;
 
   // Long-polling event feed: give the request room beyond Bun's 10s idle
   // timeout (which counts time waiting for response bytes).
@@ -414,7 +552,13 @@ async function processMessage(
     server.timeout(request, Math.ceil(eventWaitTimeoutMs(payload) / 1000) + 5);
   }
 
-  const result = await runtime.commands.execute(type, payload, correlationId);
+  const { result, accepted } = await executeMessage(runtime, {
+    type,
+    payload,
+    correlationId,
+    source: "webhook",
+  });
+  if (accepted) return jsonResponse(result, 202);
   return jsonResponse({ ok: true, type, correlationId, result });
 }
 

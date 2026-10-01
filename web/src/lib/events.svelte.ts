@@ -1,73 +1,80 @@
-import { send, type DomainEvent } from "./api";
+import { connection, type ConnectionFrame } from "./connection.svelte";
+import type { DomainEvent } from "./api";
 
 const MAX_EVENTS = 400;
-const WAIT_TIMEOUT_MS = 25_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/** Server-side `event.pull` page size; a full page means there is more. */
+const PULL_LIMIT = 200;
 
 /**
- * Event feed built purely on webhook calls: a continuous loop of
- * `event.wait` long-polls (plus `event.pull` semantics on the server side).
+ * Event feed fed by the backend over the WebSocket: every persisted domain
+ * event is pushed live, and each (re)connect backfills anything missed through
+ * `event.pull`. No HTTP requests, no long-polling.
  */
 export class EventStream {
   events = $state<DomainEvent[]>([]);
-  connected = $state(false);
   lastSeq = $state(0);
 
   private running = false;
-  private generation = 0;
+  private unsubscribe: (() => void) | null = null;
+
+  get connected(): boolean {
+    return connection.connected;
+  }
 
   start(): void {
     if (this.running) return;
     this.running = true;
-    const generation = ++this.generation;
-    void this.loop(generation);
+    this.unsubscribe = connection.subscribe((frame) => this.handleFrame(frame));
+    connection.start();
+    void this.sync();
   }
 
   stop(): void {
+    if (!this.running) return;
     this.running = false;
-    // Invalidate the in-flight loop: a later start() must not end up with two
-    // loops appending the same batches (seen after dev-server remounts).
-    this.generation += 1;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    connection.stop();
   }
 
   clear(): void {
     this.events = [];
   }
 
-  private async loop(generation: number): Promise<void> {
-    let backoff = 1000;
-
-    while (this.running && generation === this.generation) {
-      try {
-        const batch = await send<DomainEvent[]>(
-          "event.wait",
-          { since: this.lastSeq, timeoutMs: WAIT_TIMEOUT_MS },
-          WAIT_TIMEOUT_MS + 15_000,
-        );
-
-        if (generation !== this.generation) return;
-
-        this.connected = true;
-        backoff = 1000;
-
-        // Never append an event we already have (defensive: seq is unique).
-        const fresh = batch.filter((event) => event.seq > this.lastSeq);
-        if (fresh.length > 0) {
-          this.events = [...this.events, ...fresh].slice(-MAX_EVENTS);
-          this.lastSeq = fresh[fresh.length - 1]!.seq;
-        }
-      } catch {
-        if (generation !== this.generation) return;
-        this.connected = false;
-        await sleep(backoff);
-        backoff = Math.min(backoff * 2, 10_000);
-      }
+  private handleFrame(frame: ConnectionFrame): void {
+    if (frame.type === "event") {
+      this.append([frame.event]);
+      return;
     }
+    // Re-sync on every (re)connect: events published while the socket was
+    // down were never pushed.
+    if (frame.type === "open") void this.sync();
+  }
 
-    if (generation === this.generation) this.connected = false;
+  private async sync(): Promise<void> {
+    if (!this.running) return;
+    try {
+      // The pull endpoint pages; keep going until it returns a short page.
+      for (;;) {
+        const batch = await connection.request<DomainEvent[]>("event.pull", {
+          since: this.lastSeq,
+        });
+        if (!this.running) return;
+        this.append(batch);
+        if (batch.length < PULL_LIMIT) return;
+      }
+    } catch {
+      // The next (re)connect syncs again.
+    }
+  }
+
+  private append(batch: DomainEvent[]): void {
+    // Never append an event we already have (seq is unique and contiguous).
+    const fresh = batch.filter((event) => event.seq > this.lastSeq);
+    if (fresh.length === 0) return;
+    fresh.sort((a, b) => a.seq - b.seq);
+    this.events = [...this.events, ...fresh].slice(-MAX_EVENTS);
+    this.lastSeq = fresh[fresh.length - 1]!.seq;
   }
 }
 

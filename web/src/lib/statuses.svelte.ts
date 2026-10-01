@@ -1,71 +1,45 @@
-import type { StatusEntry, StatusMessage, StatusState } from "./statusTypes";
+import { connection, type ConnectionFrame } from "./connection.svelte";
+import type { StatusEntry, StatusState } from "./statusTypes";
 
 export type { StatusEntry, StatusState };
 
 const MAX_ENTRIES = 100;
-const RECONNECT_DELAY_MS = 2000;
 
 /**
- * Live status feed over WebSocket (`/api/ws`): server-push, ephemeral,
- * reconnects automatically and re-syncs via a snapshot on every connect.
+ * Live status feed over the shared WebSocket: server-push, ephemeral,
+ * re-synced via a snapshot on every connect.
  */
 export class StatusFeed {
   entries = $state<StatusEntry[]>([]);
-  connected = $state(false);
 
-  private socket: WebSocket | null = null;
   private running = false;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private unsubscribe: (() => void) | null = null;
+
+  get connected(): boolean {
+    return connection.connected;
+  }
 
   start(): void {
     if (this.running) return;
     this.running = true;
-    this.connect();
+    this.unsubscribe = connection.subscribe((frame) => this.handleFrame(frame));
+    connection.start();
   }
 
   stop(): void {
+    if (!this.running) return;
     this.running = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
-    this.socket?.close();
-    this.socket = null;
-    this.connected = false;
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    connection.stop();
   }
 
-  private connect(): void {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${location.host}/api/ws`);
-    this.socket = socket;
-
-    socket.onopen = () => {
-      this.connected = true;
-    };
-
-    socket.onmessage = (event: MessageEvent<string>) => {
-      try {
-        const message = JSON.parse(event.data) as StatusMessage;
-        if (message.type === "snapshot") {
-          this.entries = message.entries.slice(-MAX_ENTRIES);
-        } else if (message.type === "entry") {
-          this.upsert(message.entry);
-        }
-      } catch {
-        // ignore malformed frames
-      }
-    };
-
-    socket.onclose = () => {
-      // Ignore closes from sockets we already replaced (remounts, reconnects).
-      if (this.socket !== socket) return;
-      this.connected = false;
-      this.socket = null;
-      if (!this.running) return;
-      this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
-    };
-
-    socket.onerror = () => {
-      socket.close();
-    };
+  private handleFrame(frame: ConnectionFrame): void {
+    if (frame.type === "snapshot") {
+      this.entries = frame.entries.slice(-MAX_ENTRIES);
+    } else if (frame.type === "entry") {
+      this.upsert(frame.entry);
+    }
   }
 
   private upsert(entry: StatusEntry): void {

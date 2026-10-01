@@ -29,6 +29,7 @@ import { isoDate } from "../core/dates.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import { audioExtension } from "../core/media.ts";
+import { stringField } from "../core/records.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import type { BriefSource, BriefStore, BriefWithAudio } from "../domain/briefs/BriefRepository.ts";
@@ -39,7 +40,12 @@ import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
 import { EventExtractor } from "./EventExtraction.ts";
-import { renderTimelineMarkdown, selectTimelineEvents } from "./EventTimeline.ts";
+import {
+  renderTimelineHtml,
+  renderTimelineMarkdown,
+  renderTimelineText,
+  selectTimelineEvents,
+} from "./EventTimeline.ts";
 import { FollowupResearch } from "./FollowupResearch.ts";
 import { SourceUpgrades } from "./SourceUpgrades.ts";
 
@@ -356,8 +362,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
             {
               kind: "timeline",
               title: "Timeline",
-              description: "The timeline artifact attached to the brief.",
+              description:
+                "The timeline artifact attached to the brief, delivered as a monospace code block.",
               guaranteed: false,
+              deliver: (value) => this.renderTimeline(value),
             },
           ],
           run: this.timelineStep.bind(this),
@@ -496,6 +504,37 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       narration: brief.narration,
       audio: brief.audio,
       audioMime: brief.audioMime ?? "audio/ogg",
+    };
+  }
+
+  /**
+   * Renders the timeline artifact as a monospace code block for chat channels:
+   * aligned dates and times in plain text, `<pre><code>` for Matrix and email.
+   */
+  private renderTimeline(value: unknown): DeliveryMessage | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    const metadata =
+      record.metadata && typeof record.metadata === "object"
+        ? (record.metadata as Record<string, unknown>)
+        : {};
+    const briefId = stringField(metadata, "briefId");
+    const ids = Array.isArray(metadata.eventIds)
+      ? metadata.eventIds.filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        )
+      : [];
+    if (!briefId || ids.length === 0) return undefined;
+
+    const events = this.deps.events.list({ ids });
+    if (events.length === 0) return undefined;
+    const text = renderTimelineText(events);
+    return {
+      kinds: ["text"],
+      reference: briefId,
+      title: "Timeline",
+      summary: text,
+      html: renderTimelineHtml(text),
     };
   }
 
@@ -882,7 +921,11 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           timeline: {
             text: markdown,
             reference: artifact.id,
-            metadata: { eventIds: selected.map((event) => event.id), count: selected.length },
+            metadata: {
+              eventIds: selected.map((event) => event.id),
+              count: selected.length,
+              briefId,
+            },
           },
         },
       };

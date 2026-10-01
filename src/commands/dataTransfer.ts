@@ -70,9 +70,11 @@ export interface DataTransferDeps {
  * Portable snapshot of everything that is configured by hand (topics,
  * workflows, delivery channels + assignments, schedules). Import merges into
  * the current account: records are matched by name (channels by type + name),
- * topic references inside workflows and jobs are remapped to the local ids,
- * and every imported record publishes the event the UI and the workflow
- * registry already listen to — so nothing needs a restart.
+ * a matched channel adopts the bundle's config and state so exported
+ * credentials actually move installations, topic references inside workflows
+ * and jobs are remapped to the local ids, and every imported record publishes
+ * the event the UI and the workflow registry already listen to — so nothing
+ * needs a restart.
  */
 export class DataTransfer {
   constructor(private readonly deps: DataTransferDeps) {}
@@ -181,13 +183,22 @@ export class DataTransfer {
         .map((channel) => [`${channel.type}:${channel.name.toLowerCase()}`, channel.id]),
     );
     for (const channel of bundle.deliveryChannels) {
+      assertChannelType(channel.type);
       const key = `${channel.type}:${channel.name.toLowerCase()}`;
       const match = existing.get(key);
       if (match) {
+        // Same channel, moved between installations: the bundle carries the
+        // live configuration (including credentials), so it wins over the
+        // local row instead of being silently ignored.
+        this.deps.deliveries.updateChannel(match, {
+          config: channel.config,
+          enabled: channel.enabled,
+        });
+        this.deps.bus.publish("delivery.updated", { action: "update" }, { source: SOURCE });
         ids.set(channel.id, match);
+        summary.deliveryChannels += 1;
         continue;
       }
-      assertChannelType(channel.type);
       const created = this.deps.deliveries.createChannel({
         type: channel.type,
         name: channel.name,

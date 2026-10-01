@@ -391,6 +391,73 @@ describe("webhook gateway", () => {
     ws.close();
   });
 
+  test("runs commands and streams events over the WebSocket", async () => {
+    const socket = new WebSocket(`ws://127.0.0.1:${kernel.api.port}/api/ws`);
+    const frames: Array<Record<string, unknown>> = [];
+    socket.onmessage = (event) =>
+      frames.push(JSON.parse(String(event.data)) as Record<string, unknown>);
+
+    await new Promise<void>((resolve, reject) => {
+      socket.onopen = () => resolve();
+      socket.onerror = () => reject(new Error("websocket connection failed"));
+    });
+
+    // The UI sends commands as frames; the reply is routed by request id.
+    const id = crypto.randomUUID();
+    socket.send(JSON.stringify({ id, type: "topic.create", payload: { name: "Socket topic" } }));
+    await waitUntil(() => frames.some((frame) => frame.type === "result" && frame.id === id));
+    const reply = frames.find((frame) => frame.type === "result" && frame.id === id) as {
+      ok: boolean;
+      result: { id: string; name: string };
+    };
+    expect(reply.ok).toBe(true);
+    expect(reply.result.name).toBe("Socket topic");
+
+    // Write commands are audited with the UI as their ingress.
+    await waitUntil(() =>
+      frames.some(
+        (frame) =>
+          frame.type === "event" &&
+          (frame.event as { topic?: string }).topic === "message.received" &&
+          (frame.event as { source?: string }).source === "ui",
+      ),
+    );
+
+    // Errors come back as error frames carrying the app code.
+    const missingId = crypto.randomUUID();
+    socket.send(JSON.stringify({ id: missingId, type: "does.not.exist" }));
+    await waitUntil(() =>
+      frames.some((frame) => frame.type === "error" && frame.id === missingId),
+    );
+    const failure = frames.find(
+      (frame) => frame.type === "error" && frame.id === missingId,
+    ) as { error: string; code: string };
+    expect(failure.code).toBe("NOT_FOUND");
+    expect(failure.error).toContain("Unknown message type");
+
+    // Every persisted event is pushed live: no event.wait polling anywhere.
+    const marker = crypto.randomUUID();
+    kernel.bus.publish("test.pushed", { marker }, { source: "test" });
+    await waitUntil(() =>
+      frames.some(
+        (frame) =>
+          frame.type === "event" &&
+          (frame.event as { topic?: string }).topic === "test.pushed" &&
+          (frame.event as { payload?: { marker?: string } }).payload?.marker === marker,
+      ),
+    );
+
+    const cleanupId = crypto.randomUUID();
+    socket.send(
+      JSON.stringify({ id: cleanupId, type: "topic.delete", payload: { id: reply.result.id } }),
+    );
+    await waitUntil(() =>
+      frames.some((frame) => frame.type === "result" && frame.id === cleanupId),
+    );
+
+    socket.close();
+  });
+
   test("a failing workflow does not raise unhandled rejections", async () => {
     kernel.workflows.register(
       stubWorkflow({

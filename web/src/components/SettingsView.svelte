@@ -6,11 +6,13 @@
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
   import iconUpload from "@ktibow/iconset-material-symbols/upload";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
-  import { commands, type DataBundle, type DataImportSummary, type SettingInfo } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { DataBundle, DataImportSummary, SettingInfo } from "../lib/api";
   import { configState } from "../lib/config.svelte";
   import { reportError, reportSuccess } from "../lib/feedback";
   import Pane from "./Pane.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+  import SecretField from "./SecretField.svelte";
 
   let settings = $state<SettingInfo[]>([]);
   let drafts = $state<Record<string, string>>({});
@@ -370,14 +372,18 @@
                   disabled={setting.source === "env" || busy === setting.key}
                   onchange={(event) => void choose(setting, event)}
                 />
+              {:else if setting.kind === "secret"}
+                <SecretField
+                  label="Value"
+                  placeholder={placeholder(setting)}
+                  disabled={setting.source === "env"}
+                  bind:value={drafts[setting.key]}
+                  enter={() => void save(setting)}
+                />
               {:else}
                 <TextFieldOutlined
                   label="Value"
-                  type={setting.kind === "secret"
-                    ? "password"
-                    : setting.kind === "number"
-                      ? "number"
-                      : "text"}
+                  type={setting.kind === "number" ? "number" : "text"}
                   placeholder={placeholder(setting)}
                   disabled={setting.source === "env"}
                   autocomplete="off"

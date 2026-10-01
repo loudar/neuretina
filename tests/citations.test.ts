@@ -14,8 +14,9 @@ describe("renderCitations", () => {
     const html = renderCitations("<p>Up 12 percent [2].</p>", sources);
 
     expect(html).toContain(
-      '<span class="cite-anchor" tabindex="0">Up 12 percent <span class="cite-popover" role="tooltip">',
+      '<span class="cite-anchor" tabindex="0">Up 12 percent<span class="cite-popover" role="tooltip">',
     );
+    expect(html).toContain("</span></span>.</p>");
     expect(html).toContain('<span class="cite-ref">2</span>');
     expect(html).toContain('href="https://b.com/x?a=1&amp;b=2"');
     expect(html).toContain('Second "quoted" &lt;source&gt;');
@@ -39,8 +40,16 @@ describe("renderCitations", () => {
     const html = renderCitations("<p>Text <strong>bold</strong> [1].</p>", sources);
 
     expect(html).toContain(
-      '<span class="cite-anchor" tabindex="0">Text <strong>bold</strong> <span class="cite-popover" role="tooltip">',
+      '<span class="cite-anchor" tabindex="0">Text <strong>bold</strong><span class="cite-popover" role="tooltip">',
     );
+  });
+
+  test("drops the space before punctuation once the marker is stripped", () => {
+    const html = renderCitations("<p>Up 12 percent [2].</p>", sources);
+
+    expect(html).toContain("Up 12 percent<span");
+    expect(html).toContain("</span></span>.</p>");
+    expect(html).not.toContain(" .");
   });
 
   test("leaves text after the last citation unwrapped", () => {

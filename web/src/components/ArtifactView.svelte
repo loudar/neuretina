@@ -2,7 +2,8 @@
   import { Button, Dialog, Icon } from "m3-svelte";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconHistory from "@ktibow/iconset-material-symbols/history";
-  import { commands, type ArtifactInfo, type BriefSource } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { ArtifactInfo, BriefSource } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { paths, router } from "../lib/router.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";

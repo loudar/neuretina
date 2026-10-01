@@ -7,7 +7,8 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
-  import { commands, type ArtifactInfo, type Brief, type DeliveryChannelInfo } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { ArtifactInfo, Brief, DeliveryChannelInfo } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";

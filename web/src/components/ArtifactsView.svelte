@@ -2,7 +2,8 @@
   import { Icon, ListItem, TextFieldOutlined } from "m3-svelte";
   import iconCategory from "@ktibow/iconset-material-symbols/category";
   import iconSearch from "@ktibow/iconset-material-symbols/search";
-  import { commands, type ArtifactInfo } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { ArtifactInfo } from "../lib/api";
   import { reportError } from "../lib/feedback";
   import { formatDateTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";

@@ -3,7 +3,12 @@ import { createLogger } from "../src/core/logger.ts";
 import { levenshteinDistance, textSimilarity } from "../src/core/text.ts";
 import { EventRepository, type TimelineEvent } from "../src/domain/events/EventRepository.ts";
 import { EventExtractor } from "../src/workflows/EventExtraction.ts";
-import { renderTimelineMarkdown, selectTimelineEvents } from "../src/workflows/EventTimeline.ts";
+import {
+  renderTimelineHtml,
+  renderTimelineMarkdown,
+  renderTimelineText,
+  selectTimelineEvents,
+} from "../src/workflows/EventTimeline.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { completion, stubLlm } from "./support.ts";
 
@@ -196,6 +201,45 @@ describe("EventTimeline", () => {
     expect(markdown).toContain("**OpenAI launch**");
     expect(markdown).toContain("#ai");
     expect(markdown).toContain("OpenAI");
+  });
+
+  test("renders a monospace timeline for chat code blocks", () => {
+    const events = [
+      event({ id: "b", date: "2026-09-30", time: "14:05", title: "Nvidia beats estimates" }),
+      event({ id: "a", date: "2026-09-30", title: "Rust 1.90 released" }),
+      event({ id: "c", date: "2026-09-20", time: "09:00", title: "A very long headline that wraps onto a continuation line because it exceeds the column width of the code block" }),
+    ];
+
+    const text = renderTimelineText(events);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("Timeline · 3 events · 2026-09-20 → 2026-09-30");
+    expect(text).toContain("2026-09-30  14:05  Nvidia beats estimates");
+    expect(text).toContain("2026-09-30         Rust 1.90 released");
+    // Long titles wrap with a hanging indent under the title column.
+    expect(lines.some((line) => /^ {19}\S/.test(line))).toBe(true);
+    // Every event title survives the wrap.
+    for (const entry of events) {
+      expect(text.replace(/\s+/g, " ")).toContain(entry.title);
+    }
+
+    const html = renderTimelineHtml(text);
+    expect(html.startsWith("<pre><code>")).toBe(true);
+    expect(html.endsWith("</code></pre>")).toBe(true);
+    expect(renderTimelineText([])).toBe("");
+  });
+
+  test("caps the delivered timeline and reports the hidden events", () => {
+    const events = Array.from({ length: 45 }, (_, index) =>
+      event({
+        id: `e${index}`,
+        date: `2026-09-${String((index % 28) + 1).padStart(2, "0")}`,
+        title: `Event ${index}`,
+      }),
+    );
+
+    const text = renderTimelineText(events);
+    expect(text).toContain("Timeline · 45 events");
+    expect(text).toContain("… and 5 more");
   });
 });
 

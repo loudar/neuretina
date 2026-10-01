@@ -49,8 +49,25 @@ function decorateBlock(inner: string, sources: BriefSource[]): string {
     }
 
     const segment = inner.slice(cursor, start);
-    output += /\S/.test(segment) ? wrapSegment(segment, indices, sources) : segment;
-    cursor = end;
+    const text = segment.replace(/\s+$/, "");
+    const gap = segment.slice(text.length);
+    const after = inner.slice(end);
+    const following = after.replace(/^[ \t]+/, "");
+    const leadingGap = after.slice(0, after.length - following.length);
+    let separator = "";
+    if (following === "" || /^[.,;:!?%)\]}…"'”’»]/.test(following)) {
+      // No text follows, or it is punctuation: the space before the marker
+      // must go too, otherwise it renders as "word ." once the marker is gone.
+      cursor = end + leadingGap.length;
+    } else {
+      // Text follows: a single space must survive the marker, either from
+      // before it or from the one already sitting after it.
+      if (leadingGap.length === 0) separator = gap;
+      cursor = end;
+    }
+    output += /\S/.test(text)
+      ? wrapSegment(text, indices, sources) + separator
+      : segment;
   }
 
   return output + inner.slice(cursor);

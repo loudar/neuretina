@@ -978,6 +978,34 @@ describe("BriefingWorkflow", () => {
     expect(emitted.some((event) => event.topic === "artifact.created")).toBe(true);
   });
 
+  test("delivers the timeline as a monospace code block to its assigned channels", async () => {
+    const { workflow, topics, deliveryStore, sender, bus, statuses } = setup({ events: true });
+    topics.add({ name: "Rust" });
+
+    const channel = deliveryStore.attachments().find(
+      (attachment) => attachment.workflow === "briefing",
+    )!.channelId;
+    deliveryStore.attach({ workflow: "briefing", step: "timeline", output: "timeline" }, channel);
+
+    const output = await workflow.run(
+      { deliver: true, generateAudio: false },
+      { correlationId: "c29", bus, logger: log, statuses },
+    );
+
+    const timeline = sender.sent.find((entry) => entry.text.startsWith("Timeline ·"));
+    expect(timeline).toBeTruthy();
+    expect(timeline?.text).toContain("2026-09-30  09:00  Rust 1.90 released");
+    expect(timeline?.html).toContain("<pre><code>");
+    expect(timeline?.html).toContain("Rust 1.90 released");
+    expect(timeline?.html).toContain("</code></pre>");
+
+    // The delivery rows are attributed to the brief, like the other passes:
+    // the brief text plus the timeline text.
+    const rows = deliveryStore.deliveries({ briefId: output.briefId! });
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.kind === "text")).toBe(true);
+  });
+
   test("extracts events concurrently with speech generation", async () => {
     const { workflow, topics, tts, events, bus, statuses } = setup({
       events: true,

@@ -5,8 +5,14 @@ import { NotFoundError, errorMessage } from "../errors.ts";
 export interface CommandContext {
   type: string;
   correlationId: string;
+  /** Ingress the command arrived through, e.g. "ui" or "webhook". */
+  source: string;
   bus: EventBus;
   logger: Logger;
+}
+
+export interface ExecuteOptions {
+  source?: string;
 }
 
 export type CommandHandler = (
@@ -43,9 +49,14 @@ export class CommandRouter {
     return [...this.handlers.keys()].sort();
   }
 
-  async execute(type: string, payload: unknown, correlationId: string): Promise<unknown> {
+  async execute(
+    type: string,
+    payload: unknown,
+    correlationId: string,
+    options: ExecuteOptions = {},
+  ): Promise<unknown> {
     const handler = this.handlers.get(type);
-    const source = `commands:${type}`;
+    const eventSource = `commands:${type}`;
     const quiet = this.quiet.has(type);
 
     if (!handler) {
@@ -53,7 +64,7 @@ export class CommandRouter {
       this.deps.bus.publish(
         "command.failed",
         { type, correlationId, error: errorMessage(error) },
-        { source, correlationId },
+        { source: eventSource, correlationId },
       );
       throw error;
     }
@@ -62,6 +73,7 @@ export class CommandRouter {
       const result = await handler(payload, {
         type,
         correlationId,
+        source: options.source ?? "api",
         bus: this.deps.bus,
         logger: this.deps.logger,
       });
@@ -71,7 +83,7 @@ export class CommandRouter {
         this.deps.bus.publish(
           "command.completed",
           { type, correlationId, result: value },
-          { source, correlationId },
+          { source: eventSource, correlationId },
         );
       }
       return value;
@@ -80,7 +92,7 @@ export class CommandRouter {
         this.deps.bus.publish(
           "command.failed",
           { type, correlationId, error: errorMessage(error) },
-          { source, correlationId },
+          { source: eventSource, correlationId },
         );
         this.deps.logger.warn("command failed", { type, error: errorMessage(error) });
       }

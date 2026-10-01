@@ -7,18 +7,14 @@
   import iconEdit from "@ktibow/iconset-material-symbols/edit";
   import iconForum from "@ktibow/iconset-material-symbols/forum";
   import iconMail from "@ktibow/iconset-material-symbols/mail";
-  import iconVisibility from "@ktibow/iconset-material-symbols/visibility";
-  import iconVisibilityOff from "@ktibow/iconset-material-symbols/visibility-off";
-  import {
-    commands,
-    type DeliveryChannelInfo,
-    type DeliveryChannelType,
-  } from "../lib/api";
+  import { commands } from "../lib/commands";
+  import type { DeliveryChannelInfo, DeliveryChannelType } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
 import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
+  import SecretField from "./SecretField.svelte";
 
   let channels = $state<DeliveryChannelInfo[]>([]);
 
@@ -68,30 +64,6 @@ import DataList from "./DataList.svelte";
   };
 
   let form = $state<ChannelForm>({ ...emptyForm });
-
-  let visibleFields = $state<Record<string, boolean>>({});
-
-  function isVisible(field: string): boolean {
-    return visibleFields[field] ?? false;
-  }
-
-  function passwordType(field: string): "text" | "password" {
-    return isVisible(field) ? "text" : "password";
-  }
-
-  function passwordTrailing(field: string): {
-    icon: typeof iconVisibility;
-    title: string;
-    onclick: () => void;
-  } {
-    return {
-      icon: isVisible(field) ? iconVisibilityOff : iconVisibility,
-      title: isVisible(field) ? "Hide value" : "Show value",
-      onclick: () => {
-        visibleFields = { ...visibleFields, [field]: !isVisible(field) };
-      },
-    };
-  }
 
   const TYPE_LABELS: Record<DeliveryChannelType, string> = {
     matrix: "Matrix",
@@ -405,13 +377,10 @@ import DataList from "./DataList.svelte";
           placeholder="@alice:matrix.example.org"
           enter={() => void saveChannel()}
         />
-        <TextFieldOutlined
+        <SecretField
           label="Access token"
-          type={passwordType("accessToken")}
-          autocomplete="off"
           bind:value={form.accessToken}
           enter={() => void saveChannel()}
-          trailing={passwordTrailing("accessToken")}
         />
         <TextFieldOutlined
           label="Username"
@@ -419,13 +388,10 @@ import DataList from "./DataList.svelte";
           bind:value={form.username}
           enter={() => void saveChannel()}
         />
-        <TextFieldOutlined
+        <SecretField
           label="Password"
-          type={passwordType("matrixPassword")}
-          autocomplete="off"
           bind:value={form.password}
           enter={() => void saveChannel()}
-          trailing={passwordTrailing("matrixPassword")}
         />
         <TextFieldOutlined
           label="Allowed senders (comma separated)"
@@ -467,13 +433,10 @@ import DataList from "./DataList.svelte";
           bind:value={form.username}
           enter={() => void saveChannel()}
         />
-        <TextFieldOutlined
+        <SecretField
           label="Password"
-          type={passwordType("emailPassword")}
-          autocomplete="off"
           bind:value={form.password}
           enter={() => void saveChannel()}
-          trailing={passwordTrailing("emailPassword")}
         />
         <TextFieldOutlined
           label="From"

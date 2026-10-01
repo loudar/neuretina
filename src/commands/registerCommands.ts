@@ -333,7 +333,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         contextId: optionalString(record, "contextId"),
         trigger: "manual",
         input,
-        detail: { source: "webhook", correlationId: context.correlationId },
+        detail: { source: context.source, correlationId: context.correlationId },
         runId,
       })
       .catch(() => undefined);
