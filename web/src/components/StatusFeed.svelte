@@ -154,7 +154,7 @@
     display: flex;
     gap: var(--space-small);
     align-items: flex-start;
-    padding: var(--space-large) var(--space-small);
+    padding: var(--space-small);
     border-radius: var(--m3-shape-small);
   }
 
