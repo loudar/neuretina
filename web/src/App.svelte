@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Chip, NavigationRail, NavigationRailItem, Snackbar } from "m3-svelte";
+  import { Chip, Icon, NavigationRail, NavigationRailItem, Snackbar } from "m3-svelte";
   import iconArticle from "@ktibow/iconset-material-symbols/article";
   import iconBolt from "@ktibow/iconset-material-symbols/bolt";
   import iconCategory from "@ktibow/iconset-material-symbols/category";

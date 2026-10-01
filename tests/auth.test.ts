@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { AuthService } from "../src/auth/AuthService.ts";
+import { RateLimiter } from "../src/auth/RateLimiter.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { createKernel, type Kernel } from "../src/kernel/Kernel.ts";
 import { StubTts, completion, stubLlm, stubSearch, testConfig } from "./support.ts";
@@ -71,6 +72,27 @@ describe("AuthService", () => {
     expect(auth.blocked("5.6.7.8")).toBe(false);
     auth.clearFailures("1.2.3.4");
     expect(auth.blocked("1.2.3.4")).toBe(false);
+  });
+});
+
+describe("RateLimiter", () => {
+  test("allows the limit per key, then blocks until the window slides", () => {
+    let now = 1_000_000;
+    const limiter = new RateLimiter(5, 60_000, () => now);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(limiter.take("1.2.3.4").allowed).toBe(true);
+    }
+
+    const blocked = limiter.take("1.2.3.4");
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.retryAfterMs).toBeGreaterThan(0);
+
+    // Other keys have their own window.
+    expect(limiter.take("5.6.7.8").allowed).toBe(true);
+
+    now += 60_001;
+    expect(limiter.take("1.2.3.4").allowed).toBe(true);
   });
 });
 
@@ -147,5 +169,47 @@ describe("password-protected gateway", () => {
     const logout = await post("/api/auth/logout", {}, cookie);
     expect(logout.status).toBe(200);
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+});
+
+describe("login rate limiting", () => {
+  let kernel: Kernel;
+  let base: string;
+
+  // A dedicated kernel: the limiter is per server and per client address, so
+  // the other tests' login calls must not count against this window.
+  beforeAll(async () => {
+    kernel = await createKernel({
+      config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }),
+      logger: createLogger("test", { level: "error" }),
+      llm: stubLlm(() => completion("ok")),
+      webSearch: stubSearch("perplexity", "web"),
+      socialSearch: stubSearch("bluesky", "social"),
+      tts: new StubTts(),
+    });
+    base = `http://127.0.0.1:${kernel.api.port}`;
+  });
+
+  afterAll(async () => {
+    await kernel.shutdown();
+  });
+
+  test("rejects more than 5 login requests per minute from one address", async () => {
+    const login = (password: string) =>
+      fetch(`${base}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const response = await login("wrong");
+      expect(response.status).toBe(401);
+    }
+
+    const blocked = await login("wrong");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get("retry-after")).toBeTruthy();
+    expect(((await blocked.json()) as { code: string }).code).toBe("TOO_MANY_REQUESTS");
   });
 });

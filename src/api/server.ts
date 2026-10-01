@@ -1,6 +1,7 @@
 import { join, normalize, resolve } from "node:path";
 import type { AppConfig } from "../config/env.ts";
 import type { AuthService, AuthSession } from "../auth/AuthService.ts";
+import { RateLimiter } from "../auth/RateLimiter.ts";
 import { AppError, NotFoundError, ValidationError, errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
@@ -30,10 +31,14 @@ export interface InboundMessage {
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const SESSION_COOKIE = "neuretina_session";
+/** Login requests allowed per client address and minute. */
+const LOGIN_RATE_LIMIT_PER_MINUTE = 5;
+const LOGIN_RATE_WINDOW_MS = 60_000;
 
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
   const statusClients = new Set<Bun.ServerWebSocket<undefined>>();
+  const loginLimiter = new RateLimiter(LOGIN_RATE_LIMIT_PER_MINUTE, LOGIN_RATE_WINDOW_MS);
 
   const unsubscribeStatuses = deps.statuses.subscribe((message) => {
     const payload = JSON.stringify(message);
@@ -58,7 +63,7 @@ export function createApiServer(deps: ApiDeps): ApiServer {
         ),
       },
       "/api/auth/login": {
-        POST: guard((request, server) => handleLogin(request, server, deps)),
+        POST: guard((request, server) => handleLogin(request, server, deps, loginLimiter)),
       },
       "/api/auth/logout": {
         POST: guard((request) => handleLogout(request, deps)),
@@ -181,8 +186,18 @@ async function handleLogin(
   request: Request,
   server: Bun.Server<undefined>,
   deps: ApiDeps,
+  loginLimiter: RateLimiter,
 ): Promise<Response> {
   const key = server.requestIP(request)?.address ?? "unknown";
+  const rate = loginLimiter.take(key);
+  if (!rate.allowed) {
+    return jsonResponse(
+      { ok: false, error: "Too many requests; try again shortly", code: "TOO_MANY_REQUESTS" },
+      429,
+      { "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
+    );
+  }
+
   if (deps.auth.blocked(key)) {
     return jsonResponse(
       { ok: false, error: "Too many attempts; try again later", code: "TOO_MANY_ATTEMPTS" },
@@ -314,8 +329,12 @@ function guard<Path extends string>(
   };
 }
 
-function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+function jsonResponse(
+  data: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(data), { status, headers: { ...JSON_HEADERS, ...headers } });
 }
 
 function errorResponse(error: unknown): Response {

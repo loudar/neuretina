@@ -583,8 +583,9 @@ The site is open until `AUTH_GLOBAL_PASSWORD` is set, either in the environment 
 loads its (data-free) shell so it can show the login gate, and the browser keeps an HttpOnly,
 SameSite=Lax session cookie signed with `AUTH_SESSION_SECRET`. Without an explicit secret the
 signing key derives from the password, so changing the password logs everyone out.
-`AUTH_SESSION_TTL_HOURS` controls the session lifetime (default 720 = 30 days). Failed logins are
-throttled per client address (10 attempts per 5 minutes).
+`AUTH_SESSION_TTL_HOURS` controls the session lifetime (default 720 = 30 days). The login endpoint
+is rate-limited per client address to 5 requests per minute (answering `429` with `Retry-After`),
+and failed logins are additionally throttled (10 failures per 5 minutes).
 
 Mechanisms are pluggable providers (`src/auth/AuthProvider.ts`); the global password is the only
 one implemented so far. OIDC and per-user accounts (separate users, config and data per user) will
