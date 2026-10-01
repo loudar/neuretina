@@ -20,7 +20,7 @@ jobs:
   # multi-arch manifest.
   meta:
     name: Compute tags
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.image.outputs.name }}
       tags: ${{ steps.meta.outputs.tags }}
@@ -44,7 +44,8 @@ jobs:
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
 
-  # Native builds: no QEMU, each architecture runs on its own runner.
+  # Native builds: no QEMU. Both standard runners are free for public
+  # repositories, including the arm64 one.
   build:
     name: Build ${{ matrix.platform }}
     needs: meta
@@ -54,10 +55,10 @@ jobs:
         include:
           - platform: linux/amd64
             arch: amd64
-            runner: warp-ubuntu-latest-x64-4x
+            runner: ubuntu-latest
           - platform: linux/arm64
             arch: arm64
-            runner: warp-ubuntu-latest-arm64-4x
+            runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -110,7 +111,7 @@ jobs:
     name: Publish multi-arch tags
     needs: [meta, build]
     if: github.event_name != 'pull_request'
-    runs-on: warp-ubuntu-latest-x64-2x
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
