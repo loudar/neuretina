@@ -17,7 +17,8 @@
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
-  import DataList from "./DataList.svelte";
+  import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
 
   let topics = $state<Topic[]>([]);
@@ -220,20 +221,14 @@
   {/if}
 </Pane>
 
-<Dialog headline="Delete this topic?" bind:open={confirmingDelete}>
-  <p>
-    "{selected?.name}" will be permanently removed. Existing briefs are kept. This cannot be
-    undone.
-  </p>
-  {#snippet buttons()}
-    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
-      Cancel
-    </Button>
-    <span class="danger">
-      <Button variant="filled" onclick={remove} disabled={deleting}>Delete</Button>
-    </span>
-  {/snippet}
-</Dialog>
+<ConfirmDeleteDialog
+  bind:open={confirmingDelete}
+  headline="Delete this topic?"
+  message={`"${selected?.name}" will be permanently removed. Existing briefs are kept. This cannot be undone.`}
+  busy={deleting}
+  onconfirm={remove}
+  oncancel={() => (confirmingDelete = false)}
+/>
 
 <style>
   .entry.muted {

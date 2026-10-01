@@ -13,6 +13,7 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import DataList from "./DataList.svelte";
+  import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
   import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
   import TimelineView from "./TimelineView.svelte";
@@ -347,21 +348,16 @@
     {/snippet}
   </Dialog>
 
-  <Dialog headline="Delete this brief?" bind:open={confirmingDelete}>
-    <p>
-      "{selected?.topics.join(", ") || "Untitled brief"}" from
-      {formatDateTime(selected?.createdAt)} will be permanently removed, including its audio. This
-      cannot be undone.
-    </p>
-    {#snippet buttons()}
-      <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
-        Cancel
-      </Button>
-      <span class="danger">
-        <Button variant="filled" onclick={deleteSelected} disabled={deleting}>Delete</Button>
-      </span>
-    {/snippet}
-  </Dialog>
+  <ConfirmDeleteDialog
+    bind:open={confirmingDelete}
+    headline="Delete this brief?"
+    message={`"${selected?.topics.join(", ") || "Untitled brief"}" from ${formatDateTime(
+      selected?.createdAt,
+    )} will be permanently removed, including its audio. This cannot be undone.`}
+    busy={deleting}
+    onconfirm={deleteSelected}
+    oncancel={() => (confirmingDelete = false)}
+  />
 </Pane>
 
 <style>

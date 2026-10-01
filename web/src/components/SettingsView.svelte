@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Button, Dialog, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconDownload from "@ktibow/iconset-material-symbols/download";
   import iconSave from "@ktibow/iconset-material-symbols/save";
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
@@ -10,6 +10,7 @@
   import { configState } from "../lib/config.svelte";
   import { reportError, reportSuccess } from "../lib/feedback";
   import Pane from "./Pane.svelte";
+  import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
 
   let settings = $state<SettingInfo[]>([]);
   let drafts = $state<Record<string, string>>({});
@@ -421,18 +422,14 @@
     </div>
   {/if}
 
-  <Dialog headline="Reset this setting?" bind:open={confirmingReset}>
-    <p>
-      The stored value for "{resetTarget?.label}" will be deleted, so its default or environment
-      value applies again.
-    </p>
-    {#snippet buttons()}
-      <Button variant="text" onclick={() => (confirmingReset = false)}>Cancel</Button>
-      <span class="danger">
-        <Button variant="filled" onclick={confirmReset}>Reset</Button>
-      </span>
-    {/snippet}
-  </Dialog>
+  <ConfirmDeleteDialog
+    bind:open={confirmingReset}
+    headline="Reset this setting?"
+    message={`The stored value for "${resetTarget?.label}" will be deleted, so its default or environment value applies again.`}
+    confirmLabel="Reset"
+    onconfirm={confirmReset}
+    oncancel={() => (confirmingReset = false)}
+  />
 </Pane>
 
 <style>

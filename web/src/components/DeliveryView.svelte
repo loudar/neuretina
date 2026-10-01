@@ -16,7 +16,8 @@
   } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
-  import DataList from "./DataList.svelte";
+  import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
 
   let channels = $state<DeliveryChannelInfo[]>([]);
@@ -497,23 +498,14 @@
     {/snippet}
   </Dialog>
 
-  <Dialog headline="Delete this channel?" bind:open={confirmingDelete}>
-    <p>
-      Channel "{deleteTarget?.name}"
-      ({deleteTarget ? TYPE_LABELS[deleteTarget.type] : ""}) will be removed and detached from all
-      workflows. This cannot be undone.
-    </p>
-    {#snippet buttons()}
-      <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
-        Cancel
-      </Button>
-      <span class="danger">
-        <Button variant="filled" onclick={() => void removeChannel()} disabled={deleting}>
-          Delete
-        </Button>
-      </span>
-    {/snippet}
-  </Dialog>
+  <ConfirmDeleteDialog
+    bind:open={confirmingDelete}
+    headline="Delete this channel?"
+    message={`Channel "${deleteTarget?.name}" (${deleteTarget ? TYPE_LABELS[deleteTarget.type] : ""}) will be removed and detached from all workflows. This cannot be undone.`}
+    busy={deleting}
+    onconfirm={() => void removeChannel()}
+    oncancel={() => (confirmingDelete = false)}
+  />
 </Pane>
 
 <style>

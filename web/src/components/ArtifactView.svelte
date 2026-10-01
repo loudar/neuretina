@@ -5,7 +5,8 @@
   import { commands, type ArtifactInfo, type BriefSource } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { paths, router } from "../lib/router.svelte";
-  import MarkdownView from "./MarkdownView.svelte";
+  import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+import MarkdownView from "./MarkdownView.svelte";
   import TimelineView from "./TimelineView.svelte";
 
   interface Props {
@@ -134,20 +135,14 @@
   <pre>{JSON.stringify(artifact.metadata, null, 2)}</pre>
 {/if}
 
-<Dialog headline="Delete this artifact?" bind:open={confirmingDelete}>
-  <p>
-    "{artifact.name ?? artifact.id.slice(0, 8)}" ({artifact.kind}) will be permanently removed,
-    including anything referencing it (e.g. a brief's audio). This cannot be undone.
-  </p>
-  {#snippet buttons()}
-    <Button variant="text" onclick={() => (confirmingDelete = false)} disabled={deleting}>
-      Cancel
-    </Button>
-    <span class="danger">
-      <Button variant="filled" onclick={remove} disabled={deleting}>Delete</Button>
-    </span>
-  {/snippet}
-</Dialog>
+<ConfirmDeleteDialog
+  bind:open={confirmingDelete}
+  headline="Delete this artifact?"
+  message={`"${artifact.name ?? artifact.id.slice(0, 8)}" (${artifact.kind}) will be permanently removed, including anything referencing it (e.g. a brief's audio). This cannot be undone.`}
+  busy={deleting}
+  onconfirm={remove}
+  oncancel={() => (confirmingDelete = false)}
+/>
 
 <style>
   .artifact-actions {
