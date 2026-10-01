@@ -40,9 +40,13 @@ export interface PipelineOutcome {
 }
 
 /**
- * Executes a workflow definition step by step, checkpointing after every step
- * and reusing completed steps from an earlier attempt. Deliverable outputs are
- * routed through the channels assigned to their (step, output) target.
+ * Executes a workflow definition as a dependency graph: every step whose
+ * `after` dependencies are complete starts immediately, so independent
+ * actions (e.g. TTS and event extraction) run concurrently. Steps without
+ * `after` depend on every earlier step and stay sequential.
+ *
+ * Completed steps are checkpointed and reused on resume, and each deliverable
+ * output is routed through the channels assigned to its (step, output) target.
  */
 export class StepPipeline {
   constructor(private readonly definition: WorkflowDefinition) {}
@@ -52,66 +56,171 @@ export class StepPipeline {
     state.steps ??= {};
     state.delivered ??= {};
 
+    const steps = this.definition.steps;
+    const dependencies = this.dependencies();
+    const closures = this.closures(dependencies);
     const outputs = new Map<string, Record<string, unknown>>();
+    const completed = new Set<string>();
+    const inFlight = new Map<string, Promise<void>>();
     const shouldDeliver = options.deliver !== false && options.delivery !== undefined;
     let delivered = 0;
 
-    // A resumed run that already halted is done; its outputs stay available.
-    if (state.halted !== undefined) {
-      for (const step of this.definition.steps) {
-        const completed = state.steps[step.id];
-        if (completed !== undefined) outputs.set(step.id, completed);
+    // Resume: completed steps are restored (replaying any missing delivery)
+    // before anything new starts.
+    for (const step of steps) {
+      const saved = state.steps[step.id];
+      if (saved === undefined) continue;
+      outputs.set(step.id, saved);
+      completed.add(step.id);
+      if (shouldDeliver) {
+        delivered += await this.deliverOutputs(step, saved, state, options);
       }
-      return { outputs, halted: state.halted, delivered: 0 };
     }
 
-    for (const step of this.definition.steps) {
-      options.context.signal?.throwIfAborted();
+    // A resumed run that already halted is done; its outputs stay available.
+    if (state.halted !== undefined) {
+      return { outputs, halted: state.halted, delivered };
+    }
 
-      const completed = state.steps[step.id];
-      if (completed !== undefined) {
-        outputs.set(step.id, completed);
-        // A previous attempt may have stopped between a step and its delivery.
-        if (shouldDeliver) {
-          delivered += await this.deliverOutputs(step, completed, state, options);
+    let halted: unknown;
+    let haltFallback: DeliveryMessage | undefined;
+    let failure: unknown;
+    let failed = false;
+    let wake: (() => void) | null = null;
+
+    const notify = (): void => {
+      const resume = wake;
+      wake = null;
+      resume?.();
+    };
+
+    const start = (step: StepDefinition): void => {
+      const promise = (async () => {
+        try {
+          const result = await step.run({
+            inputs: options.inputs,
+            options: options.options,
+            // Handlers only see the outputs of the steps they depend on, so
+            // concurrent siblings cannot leak half-finished values.
+            outputs: this.visibleOutputs(step, closures, outputs),
+            run: options.context,
+          });
+
+          const stepOutputs = result?.outputs ?? {};
+          state.steps[step.id] = stepOutputs;
+          outputs.set(step.id, stepOutputs);
+          options.context.checkpoint?.(state);
+
+          if (shouldDeliver) {
+            delivered += await this.deliverOutputs(step, stepOutputs, state, options);
+          }
+          completed.add(step.id);
+
+          if (result?.halt !== undefined && halted === undefined) {
+            halted = result.halt;
+            haltFallback = result.fallback;
+          }
+        } catch (error) {
+          options.context.logger.warn("step failed", {
+            step: step.id,
+            error: errorMessage(error),
+          });
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+        } finally {
+          inFlight.delete(step.id);
+          notify();
         }
-        continue;
-      }
+      })();
+      inFlight.set(step.id, promise);
+    };
 
-      let result: Awaited<ReturnType<StepDefinition["run"]>>;
-      try {
-        result = await step.run({
-          inputs: options.inputs,
-          options: options.options,
-          outputs,
-          run: options.context,
-        });
-      } catch (error) {
-        options.context.logger.warn("step failed", {
-          step: step.id,
-          error: errorMessage(error),
-        });
-        throw error;
-      }
+    const ready = (step: StepDefinition): boolean =>
+      (dependencies.get(step.id) ?? []).every((id) => completed.has(id));
 
-      const stepOutputs = result?.outputs ?? {};
-      state.steps[step.id] = stepOutputs;
-      outputs.set(step.id, stepOutputs);
+    while (true) {
+      // Starting stops on the first failure, halt or cancellation; in-flight
+      // steps still settle so their work is recorded.
+      if (!failed && halted === undefined && !options.context.signal?.aborted) {
+        for (const step of steps) {
+          if (completed.has(step.id) || inFlight.has(step.id)) continue;
+          if (!ready(step)) continue;
+          start(step);
+        }
+      }
+      if (inFlight.size === 0) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    }
+
+    options.context.signal?.throwIfAborted();
+    if (failed) throw failure;
+
+    if (halted !== undefined) {
+      state.halted = halted;
       options.context.checkpoint?.(state);
-
-      if (shouldDeliver) {
-        delivered += await this.deliverOutputs(step, stepOutputs, state, options);
-      }
-
-      if (result?.halt !== undefined) {
-        state.halted = result.halt;
-        options.context.checkpoint?.(state);
-        delivered += await this.deliverFallback(result.fallback, state, options, shouldDeliver);
-        return { outputs, halted: result.halt, delivered };
-      }
+      delivered += await this.deliverFallback(haltFallback, state, options, shouldDeliver);
+      return { outputs, halted, delivered };
     }
 
     return { outputs, halted: undefined, delivered };
+  }
+
+  /** Step dependencies: declared `after`, or every earlier step. */
+  private dependencies(): Map<string, string[]> {
+    const steps = this.definition.steps;
+    const position = new Map(steps.map((step, index) => [step.id, index]));
+    const dependencies = new Map<string, string[]>();
+
+    for (const [index, step] of steps.entries()) {
+      const after = step.after ?? steps.slice(0, index).map((entry) => entry.id);
+      for (const id of after) {
+        const at = position.get(id);
+        if (at === undefined || at >= index) {
+          throw new Error(`Step "${step.id}" depends on "${id}", which is not an earlier step`);
+        }
+      }
+      dependencies.set(step.id, [...after]);
+    }
+
+    return dependencies;
+  }
+
+  /** Transitive dependencies per step, for the handler's output view. */
+  private closures(dependencies: Map<string, string[]>): Map<string, string[]> {
+    const closures = new Map<string, string[]>();
+    for (const id of dependencies.keys()) {
+      const seen = new Set<string>();
+      const stack = [...(dependencies.get(id) ?? [])];
+      while (stack.length > 0) {
+        const current = stack.pop()!;
+        if (seen.has(current)) continue;
+        seen.add(current);
+        stack.push(...(dependencies.get(current) ?? []));
+      }
+      closures.set(id, [...seen]);
+    }
+    return closures;
+  }
+
+  private visibleOutputs(
+    step: StepDefinition,
+    closures: Map<string, string[]>,
+    outputs: Map<string, Record<string, unknown>>,
+  ): Map<string, Record<string, unknown>> {
+    // Definition order matters: consumers like `latestOutput` pick the last
+    // matching output, which must be the most recent step in pipeline order.
+    const closure = new Set(closures.get(step.id) ?? []);
+    const visible = new Map<string, Record<string, unknown>>();
+    for (const entry of this.definition.steps) {
+      if (!closure.has(entry.id)) continue;
+      const value = outputs.get(entry.id);
+      if (value !== undefined) visible.set(entry.id, value);
+    }
+    return visible;
   }
 
   /** Delivers each present, deliverable output of a finished step exactly once. */

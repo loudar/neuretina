@@ -30,6 +30,14 @@ import {
 
 const log = createLogger("test", { level: "error" });
 
+async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
 interface SetupOptions {
   webResults?: typeof sampleResults;
   socialResults?: typeof sampleResults;
@@ -57,6 +65,8 @@ interface SetupOptions {
   llmUsage?: { inputTokens?: number; outputTokens?: number };
   /** Enable event extraction and the timeline step. */
   events?: boolean;
+  /** The event suggestion call waits until speech generation has started. */
+  eventsWaitForTts?: boolean;
 }
 
 function setup(options: SetupOptions = {}) {
@@ -71,10 +81,14 @@ function setup(options: SetupOptions = {}) {
   const llmRequests: LlmCompletionRequest[] = [];
   let compilerCalls = 0;
 
-  const respond = (request: LlmCompletionRequest): LlmCompletionResult => {
+  const respond = async (request: LlmCompletionRequest): Promise<LlmCompletionResult> => {
     const system = request.messages[0]?.content ?? "";
 
     if (system.includes("extract dated events")) {
+      if (options.eventsWaitForTts) {
+        // Fails when event extraction does not overlap speech generation.
+        await waitUntil(() => tts.requests.length > 0, 2000);
+      }
       return completion(
         JSON.stringify({
           events: [
@@ -194,9 +208,9 @@ function setup(options: SetupOptions = {}) {
     );
   };
 
-  const llm = stubLlm((request) => {
+  const llm = stubLlm(async (request) => {
     llmRequests.push(request);
-    const result = respond(request);
+    const result = await respond(request);
     if (!options.llmUsage) return result;
     return { ...result, usage: { ...result.usage, ...options.llmUsage } };
   });
@@ -961,6 +975,24 @@ describe("BriefingWorkflow", () => {
     expect(timeline.content).toContain("Rust 1.90 released");
     expect(timeline.metadata.eventIds).toEqual([stored[0]?.id]);
     expect(emitted.some((event) => event.topic === "artifact.created")).toBe(true);
+  });
+
+  test("extracts events concurrently with speech generation", async () => {
+    const { workflow, topics, tts, events, bus, statuses } = setup({
+      events: true,
+      eventsWaitForTts: true,
+    });
+    topics.add({ name: "Rust" });
+
+    const output = await workflow.run(
+      { deliver: false, generateAudio: true },
+      { correlationId: "c28", bus, logger: log, statuses },
+    );
+
+    expect(output.skipped).toBe(false);
+    // The extraction LLM call only resolves because TTS started meanwhile.
+    expect(tts.requests).toHaveLength(1);
+    expect(events.list()).toHaveLength(1);
   });
 });
 

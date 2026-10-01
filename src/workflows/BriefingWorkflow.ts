@@ -225,6 +225,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "research",
           type: "research",
+          after: [],
           title: "Research",
           description:
             "Searches the web, social media and finance data for the selected topics and keeps compact notes.",
@@ -242,6 +243,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "compile",
           type: "compile",
+          after: ["research"],
           title: "Compile brief",
           description: "Turns the research notes into one short, neutral brief.",
           inputs: [{ kind: "research", title: "Research notes", required: true }],
@@ -251,6 +253,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "followups",
           type: "followups",
+          after: ["compile"],
           title: "Dig deeper",
           description:
             "Plans follow-up questions from the draft and appends an Implications section.",
@@ -276,6 +279,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "sources",
           type: "sources",
+          after: ["followups"],
           title: "Upgrade sources",
           description: "Replaces secondary coverage with primary sources where possible.",
           inputs: [
@@ -291,6 +295,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "brief",
           type: "brief",
+          after: ["sources"],
           title: "Write brief",
           description: "Stores the compiled brief as an artifact.",
           inputs: [
@@ -311,6 +316,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "events",
           type: "events",
+          after: ["brief"],
           title: "Extract events",
           description:
             "Turns the brief and its sources into dated events, deduplicating against the stored events.",
@@ -331,6 +337,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "timeline",
           type: "timeline",
+          after: ["events"],
           title: "Build timeline",
           description:
             "Collects the related stored events and stores a timeline artifact next to the brief.",
@@ -351,6 +358,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "audio",
           type: "tts",
+          after: ["brief"],
           title: "Generate voice",
           description:
             "Synthesizes any text output (the brief here) into a voice message.",

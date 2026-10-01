@@ -98,6 +98,12 @@ export interface StepDefinition {
   type: string;
   title: string;
   description?: string;
+  /**
+   * Step ids that must complete before this step runs. Steps whose
+   * dependencies are met start immediately and run concurrently; without
+   * `after`, a step depends on every earlier step and stays sequential.
+   */
+  after?: string[];
   inputs: StepInputSpec[];
   outputs: StepOutputSpec[];
   /** Direct implementation reference (see `type`). */

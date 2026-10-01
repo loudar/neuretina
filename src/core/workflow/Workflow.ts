@@ -56,18 +56,28 @@ export class WorkflowRegistry {
 
   register<TInput, TOutput>(workflow: Workflow<TInput, TOutput>): void {
     this.workflows.set(workflow.definition.id, workflow as Workflow);
-    this.warnUnknownPortTypes(workflow.definition);
+    this.warnDefinitionProblems(workflow.definition);
   }
 
-  /** Ports must use registered types so composition rules keep working. */
-  private warnUnknownPortTypes(definition: WorkflowDefinition): void {
-    for (const step of definition.steps) {
+  /** Ports must use registered types and steps may only depend on earlier steps. */
+  private warnDefinitionProblems(definition: WorkflowDefinition): void {
+    const position = new Map(definition.steps.map((step, index) => [step.id, index]));
+    for (const [index, step] of definition.steps.entries()) {
       for (const port of [...step.inputs, ...step.outputs]) {
         if (portType(port.kind)) continue;
         this.deps.logger.warn("unknown port type", {
           workflow: definition.id,
           step: step.id,
           kind: port.kind,
+        });
+      }
+      for (const id of step.after ?? []) {
+        const at = position.get(id);
+        if (at !== undefined && at < index) continue;
+        this.deps.logger.warn("step dependency is unknown or not earlier", {
+          workflow: definition.id,
+          step: step.id,
+          after: id,
         });
       }
     }
