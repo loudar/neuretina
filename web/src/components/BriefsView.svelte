@@ -432,14 +432,14 @@
 
   .badges {
     display: inline-flex;
-    gap: var(--space-large);
+    gap: var(--space-small);
     align-items: center;
   }
 
   .badge {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-large);
+    gap: var(--space-small);
     padding: 0 var(--space-small);
     border-radius: var(--m3-shape-full);
     font-size: 0.72rem;

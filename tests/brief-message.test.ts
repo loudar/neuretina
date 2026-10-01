@@ -18,7 +18,7 @@ describe("selectHighlightSources", () => {
 
 describe("buildBriefMessage", () => {
   test("appends clickable markdown sources and sanitizes titles", () => {
-    const message = buildBriefMessage("# Brief\n\nBody.", sources, 3);
+    const message = buildBriefMessage("# Brief\n\nBody.", sources, { maxSources: 3 });
 
     expect(message).toContain("**Sources**");
     expect(message).toContain("1. [First](https://a.com/1)");

@@ -362,6 +362,7 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
       return bag.tts;
     },
     delivery,
+    appUrl: config.appUrl,
   });
   workflows.register(briefing);
 

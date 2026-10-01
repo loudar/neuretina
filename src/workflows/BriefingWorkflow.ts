@@ -71,6 +71,8 @@ export interface BriefingWorkflowDeps {
   tts: TextToSpeechProvider;
   /** Routes step outputs through their assigned delivery channels. */
   delivery: DeliveryRouter;
+  /** Public app URL; delivered briefs link back to their detail page. */
+  appUrl?: string;
   statuses?: StatusHub;
   defaults: {
     recency: SearchRecency;
@@ -458,7 +460,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const reference = textReference(value);
     if (!reference) return undefined;
     const brief = this.deps.briefs.get(reference);
-    const summary = buildBriefMessage(brief.markdown, brief.sources);
+      const summary = buildBriefMessage(brief.markdown, brief.sources, {
+        appUrl: this.deps.appUrl,
+        briefId: brief.id,
+      });
     return {
       kinds: ["text"],
       reference: brief.id,

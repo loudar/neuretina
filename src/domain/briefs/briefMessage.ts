@@ -1,26 +1,46 @@
 import type { BriefSource } from "./BriefRepository.ts";
 
+export interface BriefMessageOptions {
+  /** Cap on highlighted source links (default 6). */
+  maxSources?: number;
+  /** Public app URL; with `briefId` appends a "View this Brief" link. */
+  appUrl?: string;
+  briefId?: string;
+}
+
 /**
  * Message text for a brief: the summary plus the most interesting sources as
- * clickable markdown links. This is only used for the text message — the
+ * clickable markdown links. This is only used for the text message �?" the
  * spoken narration never contains links or sources.
  */
 export function buildBriefMessage(
   markdown: string,
   sources: BriefSource[],
-  maxSources = 6,
+  options: BriefMessageOptions = {},
 ): string {
   const body = linkCitations(markdown, sources);
-  const highlights = selectHighlightSources(sources, maxSources);
-  if (highlights.length === 0) return body;
-
-  const lines = [
-    "",
-    "**Sources**",
-    ...highlights.map((source, index) => `${index + 1}. [${sanitizeTitle(source.title)}](${source.url})`),
-  ];
+  const highlights = selectHighlightSources(sources, options.maxSources ?? 6);
+  const lines: string[] = [];
+  if (highlights.length > 0) {
+    lines.push(
+      "",
+      "**Sources**",
+      ...highlights.map(
+        (source, index) => `${index + 1}. [${sanitizeTitle(source.title)}](${source.url})`,
+      ),
+    );
+  }
+  const link = briefLink(options);
+  if (link) lines.push("", link);
+  if (lines.length === 0) return body;
 
   return `${body.trimEnd()}\n${lines.join("\n")}`;
+}
+
+function briefLink(options: BriefMessageOptions): string | undefined {
+  if (!options.appUrl || !options.briefId) return undefined;
+  const base = options.appUrl.replace(/\/+$/, "");
+  return `[View this Brief on Neuretina](${base}/briefs/${options.briefId})`;
 }
 
 /** Keeps [n] citation markers clickable in Matrix clients. */

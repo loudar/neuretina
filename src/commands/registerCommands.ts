@@ -564,7 +564,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         correlationId: context.correlationId,
       });
       try {
-        const summary = buildBriefMessage(brief.markdown, brief.sources);
+        const summary = buildBriefMessage(brief.markdown, brief.sources, { appUrl: config.appUrl, briefId: brief.id });
         // The brief's workflow owns the routing: voice goes to the channels
         // assigned to the TTS output of that workflow.
         const voiceTarget = deliveryTargetForKind(
@@ -625,7 +625,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const brief = briefs.get(id);
     const audio = briefs.getAudio(id);
 
-    const text = buildBriefMessage(brief.markdown, brief.sources);
+    const text = buildBriefMessage(brief.markdown, brief.sources, { appUrl: config.appUrl, briefId: brief.id });
     const results = await deps.delivery.deliver({
       briefId: id,
       runId: context.correlationId,

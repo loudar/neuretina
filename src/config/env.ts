@@ -36,6 +36,8 @@ export interface AppConfig {
   port: number;
   dbPath: string;
   webDist: string | null;
+  /** Public URL of this deployment, used for links in delivered messages. */
+  appUrl?: string;
   timezone: string;
   logLevel: LogLevel;
   /** Site protection; no mechanism configured means the site is open. */
@@ -170,6 +172,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     port: num(env, "PORT", 8080),
     dbPath: str(env, "DB_PATH", "./data/app.db")!,
     webDist: str(env, "WEB_DIST") ?? null,
+    appUrl: str(env, "APP_URL"),
     timezone: str(env, "TZ", "UTC")!,
     logLevel: str(env, "LOG_LEVEL", "info") as LogLevel,
     auth: {

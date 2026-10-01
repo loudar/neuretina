@@ -479,7 +479,7 @@ h3 {
 
 /* One spacing scale for every margin, padding and gap. */
 :root {
-  --space-small: 0.5rem;
+  --space-small: 5px;
   --space-medium: 0.75rem;
   --space-large: 1rem;
 }

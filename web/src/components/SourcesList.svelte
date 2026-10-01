@@ -202,7 +202,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    padding: var(--space-large);
+    padding: var(--space-small);
     box-sizing: border-box;
     border-radius: inherit;
     object-fit: contain;
