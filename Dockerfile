@@ -2,26 +2,42 @@
 
 FROM oven/bun:1-slim AS build
 WORKDIR /app
+
+# Dependencies and the model change rarely but are expensive: install and
+# download before any source is copied so edits never invalidate them.
+# Cache mounts keep Bun's package cache and the model files warm across
+# builds, so even a lockfile or script change does not re-fetch everything.
 COPY package.json bun.lock ./
-RUN bun install
+RUN --mount=type=cache,target=/bun-cache,sharing=locked \
+    BUN_INSTALL_CACHE_DIR=/bun-cache bun install --frozen-lockfile
+
+# Bundle the local decision model (Laya multilingual, fp16 ONNX) in the image.
+COPY scripts/laya-pull.ts ./scripts/laya-pull.ts
+RUN --mount=type=cache,target=/laya-cache,sharing=locked \
+    LAYA_MODEL_DIR=/laya-cache bun run laya:pull \
+    && mkdir -p /app/models \
+    && cp -a /laya-cache /app/models/laya
+
 COPY tsconfig.json ./
 # The web build imports shared code from src/ (e.g. the markdown renderer).
 COPY src ./src
 COPY web ./web
-# Bundle the local decision model (Laya multilingual, fp16 ONNX) in the image.
-COPY scripts/laya-pull.ts ./scripts/laya-pull.ts
-RUN LAYA_MODEL_DIR=/app/models/laya bun run laya:pull
 RUN bun run build:web
 
 FROM oven/bun:1-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+
 COPY package.json bun.lock ./
-RUN bun install --production
+RUN --mount=type=cache,target=/bun-cache,sharing=locked \
+    BUN_INSTALL_CACHE_DIR=/bun-cache bun install --frozen-lockfile --production
+
+# Heaviest, most stable layers first; src changes most often, so it goes last
+# and only rebuilds the final (cheap) layer.
 COPY tsconfig.json ./
-COPY src ./src
-COPY --from=build /app/web/dist ./web/dist
 COPY --from=build /app/models ./models
+COPY --from=build /app/web/dist ./web/dist
+COPY src ./src
 
 ENV PORT=8080 \
     DB_PATH=/app/data/app.db \

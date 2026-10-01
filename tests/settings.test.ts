@@ -86,17 +86,17 @@ describe("SettingsService", () => {
     expect(config.llm.model).toBe("deepseek-v4.1-flash");
   });
 
-  test("secrets are applied but never returned to the UI", () => {
+  test("secrets are applied and returned to the UI so the eye toggle can reveal them", () => {
     const { config, service } = setup();
 
     const info = service.set("LLM_API_KEY", "top-secret-key");
-    expect(info.value).toBeNull();
+    expect(info.value).toBe("top-secret-key");
     expect(info.configured).toBe(true);
     expect(info.stored).toBe(true);
     expect(config.llm.apiKey).toBe("top-secret-key");
 
     const listed = service.list().find((setting) => setting.key === "LLM_API_KEY");
-    expect(listed?.value).toBeNull();
+    expect(listed?.value).toBe("top-secret-key");
     expect(listed?.configured).toBe(true);
   });
 

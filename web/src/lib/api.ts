@@ -317,7 +317,7 @@ export interface SettingInfo {
   defaultValue?: string;
   /** `env` values always win over database overrides. */
   source: SettingSource;
-  /** Effective value; `null` for secrets, which the backend never sends. */
+  /** Effective value (secrets included) so the eye toggle can reveal it. */
   value: string | null;
   configured: boolean;
   stored: boolean;

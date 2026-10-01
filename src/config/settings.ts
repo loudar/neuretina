@@ -34,7 +34,7 @@ export interface SettingInfo {
   defaultValue?: string;
   /** Where the effective value comes from; `env` always wins. */
   source: SettingSource;
-  /** Effective value; `null` for secret settings, which are never sent to the UI. */
+  /** Effective value (secrets included) so the UI can reveal it with the eye toggle. */
   value: string | null;
   /** Whether an effective value exists (secrets included). */
   configured: boolean;
@@ -509,7 +509,6 @@ export class SettingsService {
   private info(definition: SettingDefinition): SettingInfo {
     const { effective, source } = this.resolve(definition);
     const stored = this.options.kv.get(DB_PREFIX + definition.key);
-    const isSecret = definition.kind === "secret";
 
     return {
       key: definition.key,
@@ -520,7 +519,7 @@ export class SettingsService {
       options: definition.options,
       defaultValue: definition.default,
       source,
-      value: isSecret ? null : (effective ?? null),
+      value: effective ?? null,
       configured: Boolean(effective),
       stored: stored !== null && stored !== "",
     };

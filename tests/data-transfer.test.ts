@@ -94,7 +94,7 @@ describe("data transfer", () => {
 
       const key = target.settings.list().find((setting) => setting.key === "LLM_API_KEY");
       expect(key?.configured).toBe(true);
-      expect(key?.value).toBeNull();
+      expect(key?.value).toBe("sk-bundle-secret");
       expect(target.config.llm.apiKey).toBe("sk-bundle-secret");
     } finally {
       await source.shutdown();

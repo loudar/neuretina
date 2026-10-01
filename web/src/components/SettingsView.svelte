@@ -179,7 +179,6 @@
   }
 
   function isDirty(setting: SettingInfo): boolean {
-    if (setting.kind === "secret") return draftOf(setting).trim().length > 0;
     return draftOf(setting) !== (setting.value ?? "");
   }
 
