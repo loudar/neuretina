@@ -588,6 +588,9 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
 - **Pangolin:** the app has no built-in auth — Pangolin handles that. The UI's event feed uses
   `event.wait` long-polls (≤ ~30 s per request); make sure the proxy's read/response timeout for
   `/api/webhook` is above that (Pangolin's default is fine). No WebSocket or SSE support needed.
+- **CI image:** `.github/workflows/docker.yml` builds a multi-arch image (`linux/amd64`,
+  `linux/arm64`) and publishes it to `ghcr.io/<owner>/<repo>` on pushes to `main` and `v*` tags
+  (`latest` tracks `main`; pull requests only build, they don't push).
 
 ```bash
 docker build -t briefing-engine .

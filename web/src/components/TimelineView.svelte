@@ -4,7 +4,12 @@
   import iconViewWeek from "@ktibow/iconset-material-symbols/view-week";
   import { commands, type ArtifactInfo, type TimelineEvent } from "../lib/api";
   import { reportError } from "../lib/feedback";
-  import { formatEventWhen, groupTimelineEvents, timelineScale } from "../lib/timeline";
+  import {
+    formatEventWhen,
+    groupTimelineEvents,
+    timelineScale,
+    type TimelineGroup,
+  } from "../lib/timeline";
   import { timelinePrefs, type TimelineOrientation } from "../lib/timeline.svelte";
 
   interface Props {
@@ -15,9 +20,13 @@
 
   const tooltipPrefix = crypto.randomUUID();
 
-  /** Titles below the axis are as wide as their label, so keep them apart. */
+  /** Up to this many titles show per marker; the rest collapse into one row. */
+  const MAX_STACKED = 3;
+  /** Keeps left-aligned titles of neighbouring markers from touching. */
   const HORIZONTAL_MARKER_GAP_PX = 168;
   const VERTICAL_MARKER_GAP_PX = 88;
+  const HORIZONTAL_LABEL_PX = 152;
+  const LABEL_LINE_REM = 1.35;
 
   let events = $state<TimelineEvent[] | null>(null);
   let loading = $state(true);
@@ -56,39 +65,93 @@
     };
   });
 
+  interface LabelEntry {
+    key: string;
+    label: string;
+    events: TimelineEvent[];
+    /** True for the "+n more…" row that collects the hidden events. */
+    more?: boolean;
+  }
+
+  /** At most three titles per marker; anything beyond becomes one "+n more…" row. */
+  function labelEntries(group: TimelineGroup): LabelEntry[] {
+    const entries: LabelEntry[] = group.events.slice(0, MAX_STACKED).map((event) => ({
+      key: event.id,
+      label: event.title,
+      events: [event],
+    }));
+    const rest = group.events.slice(MAX_STACKED);
+    if (rest.length > 0) {
+      entries.push({
+        key: `${group.key}:more`,
+        label: `+${rest.length} more…`,
+        events: rest,
+        more: true,
+      });
+    }
+    return entries;
+  }
+
+  function labelLines(group: TimelineGroup): number {
+    return Math.min(group.events.length, MAX_STACKED + 1);
+  }
+
   const orientation = $derived(timelinePrefs.orientation);
   const trackLength = $derived(orientation === "horizontal" ? measuredWidth : measuredHeight);
-  /** Space kept free at both ends so the outer labels are not clipped. */
-  const edgeInset = $derived(
-    trackLength > 0
-      ? orientation === "horizontal"
-        ? Math.min(trackLength * 0.4, 84)
-        : Math.min(trackLength * 0.2, 14)
-      : 0,
-  );
-  const axisLength = $derived(Math.max(0, trackLength - edgeInset * 2));
   const markerGap = $derived(
     orientation === "horizontal" ? HORIZONTAL_MARKER_GAP_PX : VERTICAL_MARKER_GAP_PX,
   );
   const groups = $derived(
-    groupTimelineEvents(events ?? [], { length: axisLength, minGap: markerGap }),
+    groupTimelineEvents(events ?? [], { length: Math.max(0, trackLength), minGap: markerGap }),
   );
   const scale = $derived(timelineScale(events ?? []));
+  const maxLines = $derived(
+    groups.reduce((max, group) => Math.max(max, labelLines(group)), 1),
+  );
+
+  /** Half of the tallest stacked block has to stay inside the track. */
+  const verticalEdge = $derived(4 + maxLines * 10);
+  const edgeStart = $derived(orientation === "horizontal" ? 6 : verticalEdge);
+  const edgeEnd = $derived(
+    orientation === "horizontal"
+      ? Math.min(trackLength * 0.5, HORIZONTAL_LABEL_PX + 8)
+      : verticalEdge,
+  );
+  const axisLength = $derived(Math.max(0, trackLength - edgeStart - edgeEnd));
+  const horizontalHeight = $derived(2.95 + maxLines * LABEL_LINE_REM);
   const verticalHeight = $derived(
     Math.min(900, Math.max(320, (events?.length ?? 0) * 44 + 96)),
   );
 
-  /** Maps a 0..1 position onto the track, clear of both edges. */
+  /** Maps a 0..1 position onto the track, clear of the edges. */
   function offset(position: number): string {
-    if (trackLength <= 0 || edgeInset <= 0) return `${(5 + position * 90).toFixed(3)}%`;
-    const pixels = edgeInset + position * axisLength;
-    return `${((pixels / trackLength) * 100).toFixed(3)}%`;
+    if (trackLength <= 0 || axisLength <= 0) return `${(position * 100).toFixed(3)}%`;
+    return `${(((edgeStart + position * axisLength) / trackLength) * 100).toFixed(3)}%`;
   }
 
   function setOrientation(next: TimelineOrientation): void {
     timelinePrefs.setOrientation(next);
   }
 </script>
+
+{#snippet eventDetails(event: TimelineEvent)}
+  <span class="popover-event">
+    <span class="popover-head">
+      <span class="popover-title">{event.title}</span>
+      <span class="popover-when">{formatEventWhen(event)}</span>
+    </span>
+    {#if event.description}
+      <span class="popover-description">{event.description}</span>
+    {/if}
+    {#if event.tags.length > 0}
+      <span class="popover-tags">
+        {#each event.tags as tag (tag)}
+          <span class="provider-tag">{tag}</span>
+        {/each}
+      </span>
+    {/if}
+  </span>
+{/snippet}
 
 <div class="timeline-view">
   <div class="timeline-head">
@@ -127,7 +190,9 @@
   {:else}
     <div
       class="track {orientation}"
-      style:height={orientation === "vertical" ? `${verticalHeight}px` : undefined}
+      style:height={orientation === "horizontal"
+        ? `${horizontalHeight.toFixed(2)}rem`
+        : `${verticalHeight}px`}
       bind:clientWidth={measuredWidth}
       bind:clientHeight={measuredHeight}
     >
@@ -141,34 +206,30 @@
       {/each}
 
       {#each groups as group, index (group.key)}
-        <div class="marker" style:--at={offset(group.position)}>
+        <div
+          class="marker"
+          style:--at={offset(group.position)}
+          style:--lines={labelLines(group)}
+        >
           <span class="tick" class:multi={group.events.length > 1} aria-hidden="true"></span>
-          <button
-            type="button"
-            class="timeline-anchor"
-            aria-describedby={`${tooltipPrefix}-${index}`}
-          >
-            <span class="label" class:multi={group.events.length > 1}>
-              {group.events.length === 1 ? group.events[0]?.title : `${group.events.length} events`}
-            </span>
-          </button>
-          <span class="timeline-popover" role="tooltip" id={`${tooltipPrefix}-${index}`}>
-            {#each group.events as event (event.id)}
-              <span class="popover-event">
-                <span class="popover-head">
-                  <span class="popover-title">{event.title}</span>
-                  <span class="popover-when">{formatEventWhen(event)}</span>
-                </span>
-                {#if event.description}
-                  <span class="popover-description">{event.description}</span>
-                {/if}
-                {#if event.tags.length > 0}
-                  <span class="popover-tags">
-                    {#each event.tags as tag (tag)}
-                      <span class="provider-tag">{tag}</span>
-                    {/each}
-                  </span>
-                {/if}
+          <span class="labels">
+            {#each labelEntries(group) as entry, entryIndex (entry.key)}
+              <button
+                type="button"
+                class="timeline-anchor"
+                class:more={entry.more}
+                aria-describedby={`${tooltipPrefix}-${index}-${entryIndex}`}
+              >
+                {entry.label}
+              </button>
+              <span
+                class="timeline-popover"
+                role="tooltip"
+                id={`${tooltipPrefix}-${index}-${entryIndex}`}
+              >
+                {#each entry.events as event (event.id)}
+                  {@render eventDetails(event)}
+                {/each}
               </span>
             {/each}
           </span>
@@ -239,10 +300,6 @@
     width: 100%;
   }
 
-  .track.horizontal {
-    height: 6.5rem;
-  }
-
   .axis {
     position: absolute;
     background-color: var(--m3c-outline-variant);
@@ -251,7 +308,7 @@
   .track.horizontal .axis {
     left: 0;
     right: 0;
-    top: 42%;
+    top: 2rem;
     height: 2px;
     transform: translateY(-50%);
   }
@@ -270,7 +327,7 @@
   }
 
   .track.horizontal .scale {
-    top: 42%;
+    top: 2rem;
     left: var(--at);
     width: 0;
     height: 0;
@@ -324,14 +381,14 @@
     line-height: 1.3;
   }
 
-  /* Event markers. No z-index here: it would trap the popover below later
-     markers; the popover needs to sit above everything. */
+  /* Event markers. No transforms or z-index here: transforms would capture the
+     fixed-position popover, a z-index would trap it below later markers. */
   .marker {
     position: absolute;
   }
 
   .track.horizontal .marker {
-    top: 42%;
+    top: 2rem;
     left: var(--at);
     width: 0;
     height: 0;
@@ -369,46 +426,50 @@
     background-color: var(--m3c-primary);
   }
 
-  .timeline-anchor {
+  /* Titles: left-aligned, stacked under each other, starting at the tick. */
+  .labels {
     position: absolute;
-    display: inline-flex;
-    align-items: center;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.1rem;
+  }
+
+  .track.horizontal .labels {
+    left: 0.35rem;
+    top: 0.55rem;
+    width: 9.5rem;
+  }
+
+  .track.vertical .labels {
+    left: 1.15rem;
+    top: calc(var(--lines, 1) * -0.62rem);
+    max-width: calc(100% - 1.35rem);
+  }
+
+  .timeline-anchor {
+    display: block;
+    width: 100%;
     margin: 0;
     padding: 0;
     border: none;
     background: transparent;
     color: var(--m3c-on-surface);
     font: inherit;
-    cursor: help;
-  }
-
-  .track.horizontal .timeline-anchor {
-    left: 0;
-    top: 0.6rem;
-    max-width: 9.5rem;
-    transform: translateX(-50%);
-  }
-
-  .track.vertical .timeline-anchor {
-    left: 1.15rem;
-    top: 0;
-    max-width: calc(100% - 1.35rem);
-    transform: translateY(-50%);
-  }
-
-  .label {
+    font-size: 0.84rem;
+    line-height: 1.4;
+    text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.84rem;
-    line-height: 1.4;
+    cursor: help;
   }
 
-  .label.multi {
-    font-weight: 600;
+  .timeline-anchor.more {
+    color: var(--m3c-on-surface-variant);
   }
 
-  .timeline-anchor:hover .label {
+  .timeline-anchor:hover {
     text-decoration: underline dotted;
     text-decoration-color: var(--m3c-primary);
     text-underline-offset: 0.22em;
@@ -420,8 +481,6 @@
     border-radius: 2px;
   }
 
-  /* The popover is a sibling of the anchor: the anchor is transformed to
-     center it, and a transform would capture position: fixed children. */
   .timeline-popover {
     display: none;
     position: absolute;
