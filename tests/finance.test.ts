@@ -72,6 +72,8 @@ describe("PerplexityFinanceProvider", () => {
     expect(body.tools).toEqual([{ type: "finance_search" }]);
     expect(body.model).toBe("perplexity/glm-5.3-flash");
     expect(Number(body.max_steps)).toBeGreaterThanOrEqual(3);
+    expect(Number(body.max_output_tokens)).toBeGreaterThanOrEqual(4096);
+    expect(body.reasoning).toEqual({ effort: "low" });
 
     expect(response.provider).toBe("perplexity");
     expect(response.answer).toContain("$200.23");
@@ -111,6 +113,53 @@ describe("PerplexityFinanceProvider", () => {
     await expect(provider.lookup({ question: "NVDA quote" })).rejects.toThrow(
       "finance_search is not enabled for this key",
     );
+  });
+
+  test("retries an incomplete run with a larger output budget", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    mockFetch(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const payload =
+        bodies.length === 1
+          ? { status: "incomplete", incomplete_details: { reason: "max_output_tokens" }, output: [] }
+          : agentResponse;
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const provider = new PerplexityFinanceProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+    const response = await provider.lookup({ question: "NVIDIA quote" });
+
+    expect(bodies).toHaveLength(2);
+    expect(Number(bodies[1]!.max_output_tokens)).toBeGreaterThan(
+      Number(bodies[0]!.max_output_tokens),
+    );
+    expect(response.answer).toContain("$200.23");
+  });
+
+  test("surfaces why an incomplete run produced nothing", async () => {
+    mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+            output: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    const provider = new PerplexityFinanceProvider({
+      apiKey: "key",
+      baseUrl: "https://api.perplexity.ai",
+    });
+    await expect(provider.lookup({ question: "NVDA quote" })).rejects.toThrow("max_output_tokens");
   });
 });
 

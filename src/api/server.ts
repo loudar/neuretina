@@ -60,6 +60,8 @@ const SESSION_COOKIE = "neuretina_session";
 /** Login requests allowed per client address and minute. */
 const LOGIN_RATE_LIMIT_PER_MINUTE = 5;
 const LOGIN_RATE_WINDOW_MS = 60_000;
+/** Keep-alive ping cadence for the status socket. */
+const WS_KEEPALIVE_MS = 30_000;
 
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
@@ -128,6 +130,10 @@ export function createApiServer(deps: ApiDeps): ApiServer {
     },
 
     websocket: {
+      // Bun closes idle sockets after 120s by default, but status pushes can
+      // be minutes apart; disable that timeout and keep the connection warm
+      // with pings so proxies do not drop it either.
+      idleTimeout: 0,
       open(ws) {
         const runtime = deps.runtimeFor(ws.data.user);
         let unsubscribe: (() => void) | null = null;
@@ -138,7 +144,17 @@ export function createApiServer(deps: ApiDeps): ApiServer {
             unsubscribe?.();
           }
         });
-        statusSubscriptions.set(ws, () => unsubscribe?.());
+        const keepAlive = setInterval(() => {
+          try {
+            ws.ping();
+          } catch {
+            // The close handler owns the cleanup.
+          }
+        }, WS_KEEPALIVE_MS);
+        statusSubscriptions.set(ws, () => {
+          clearInterval(keepAlive);
+          unsubscribe?.();
+        });
         ws.send(JSON.stringify(runtime.statuses.snapshotMessage()));
       },
       close(ws) {
