@@ -9,6 +9,7 @@ import {
   StubDeliveryService,
   StubTts,
   completion,
+  createTestKernel,
   sampleResults,
   stubLlm,
   stubSearch,
@@ -78,9 +79,7 @@ let delivery: StubDeliveryService;
 
 beforeAll(async () => {
   delivery = new StubDeliveryService();
-  kernel = await createKernel({
-    config: testConfig(),
-    logger: createLogger("test", { level: "error" }),
+  kernel = await createTestKernel({
     llm: stubLlm((request) => {
       const system = request.messages[0]?.content ?? "";
       if (system.includes("editor")) {
@@ -90,7 +89,6 @@ beforeAll(async () => {
     }),
     webSearch: stubSearch("perplexity", "web", sampleResults),
     socialSearch: stubSearch("bluesky", "social", [sampleResults[1]!]),
-    tts: new StubTts(),
     delivery,
   });
   base = `http://127.0.0.1:${kernel.api.port}`;
