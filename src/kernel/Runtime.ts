@@ -59,6 +59,8 @@ import { createChatCommandHandler } from "../chat/ChatCommands.ts";
 import { OpenAiCompatibleLlmProvider } from "../providers/llm/OpenAiCompatibleLlmProvider.ts";
 import { PerplexitySearchProvider } from "../providers/search/PerplexitySearchProvider.ts";
 import { ExaSearchProvider } from "../providers/search/ExaSearchProvider.ts";
+import { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
+import { LayaOnnxDecisionModel } from "../providers/decision/LayaOnnxDecisionModel.ts";
 import { PerplexityFinanceProvider } from "../providers/finance/PerplexityFinanceProvider.ts";
 import { BlueskySearchProvider } from "../providers/search/BlueskySearchProvider.ts";
 import { QwenTtsProvider } from "../providers/tts/QwenTtsProvider.ts";
@@ -336,6 +338,15 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     },
   };
 
+  // Local decision model for event tagging; unavailable models fall back
+  // to the LLM categorizer, so registering it is always safe.
+  const decisions = new DecisionModelRegistry();
+  if (config.laya.enabled) {
+    decisions.register(
+      new LayaOnnxDecisionModel({ modelDir: config.laya.modelDir, allowDownload: true }),
+    );
+  }
+
   const briefing = new BriefingWorkflow({
     topics,
     briefs,
@@ -363,6 +374,8 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     },
     delivery,
     appUrl: config.appUrl,
+    decisions,
+    decisionConfidence: config.laya.confidenceThreshold,
   });
   workflows.register(briefing);
 

@@ -112,6 +112,13 @@ export interface AppConfig {
   tts: {
     provider: "qwen" | "elevenlabs";
   };
+  /** Local Laya decision model used for event tagging. */
+  laya: {
+    enabled: boolean;
+    modelDir: string;
+    /** Minimum confidence before a Laya tag pick is accepted. */
+    confidenceThreshold: number;
+  };
   bluesky: {
     identifier?: string;
     appPassword?: string;
@@ -237,6 +244,11 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     /** Active speech provider; both speak the shared TTS protocol. */
     tts: {
       provider: "qwen",
+    },
+    laya: {
+      enabled: bool(env, "LAYA_ENABLED", true),
+      modelDir: str(env, "LAYA_MODEL_DIR", "./data/models/laya")!,
+      confidenceThreshold: num(env, "LAYA_CONFIDENCE_THRESHOLD", 0.55),
     },
     bluesky: {
       // User-owned credentials: UI settings only.

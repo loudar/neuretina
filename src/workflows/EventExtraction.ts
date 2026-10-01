@@ -5,6 +5,7 @@ import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { Logger } from "../core/logger.ts";
 import { textSimilarity } from "../core/text.ts";
+import type { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
 import type { BriefSource } from "../domain/briefs/BriefRepository.ts";
 import type { EventStore, TimelineEvent } from "../domain/events/EventRepository.ts";
 
@@ -38,6 +39,10 @@ export interface EventExtractorDeps {
   logger: Logger;
   /** Model used for the tag decision step; defaults to the provider's model. */
   tagModel?: string;
+  /** Local decision models (Laya) for the tag choice; optional. */
+  decisions?: DecisionModelRegistry;
+  /** Minimum confidence before the decision model's pick is used. */
+  decisionConfidence?: number;
   cost?: CostTracker;
   sessionId?: string;
   signal?: AbortSignal;
@@ -188,12 +193,24 @@ export class EventExtractor {
   /**
    * Tag decision: pick existing tags with confidence, or ask for a new one
    * when "other" wins (or nothing does). New tags extend the option list.
+   * The local decision model (Laya) classifies first when it is available;
+   * "other" or low confidence falls back to the LLM feedback loop.
    */
   private async categorize(
     suggestion: EventSuggestion,
     options: string[],
     newTags: string[],
   ): Promise<string[]> {
+    const local = await this.categorizeWithDecisionModel(suggestion, options);
+    if (local !== undefined) {
+      if (local.length > 0) return local;
+      const generated = await this.generateTag(suggestion, options);
+      if (!generated) return [];
+      options.push(generated);
+      newTags.push(generated);
+      return [generated];
+    }
+
     const parsed = (await this.complete(
       CATEGORIZE_PROMPT,
       {
@@ -233,6 +250,46 @@ export class EventExtractor {
     options.push(generated);
     newTags.push(generated);
     return [...chosen, generated];
+  }
+
+  /**
+   * Local decision model pass. Returns the chosen tags, `[]` when the model
+   * says "other"/is unsure (the caller then asks the LLM for a new tag), or
+   * undefined when no decision model is available (pure LLM path).
+   */
+  private async categorizeWithDecisionModel(
+    suggestion: EventSuggestion,
+    options: string[],
+  ): Promise<string[] | undefined> {
+    const model = this.deps.decisions?.get("laya");
+    if (!model || options.length < 2) return undefined;
+    try {
+      if (!(await model.available())) return undefined;
+      const answer = await model.choose(
+        [
+          suggestion.title,
+          suggestion.description,
+          suggestion.entities.length > 0 ? `Entities: ${suggestion.entities.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        {
+          instructions: "Pick the category tag that best fits the event.",
+          options: {
+            ...Object.fromEntries(options.map((tag) => [tag, `events about ${tag}`])),
+            other: "none of the existing tags fits",
+          },
+        },
+      );
+      const threshold = this.deps.decisionConfidence ?? 0.55;
+      if (answer.choice === "other" || answer.confidence < threshold) return [];
+      const match = options.find(
+        (option) => option.toLowerCase() === answer.choice.toLowerCase(),
+      );
+      return match ? [match] : [];
+    } catch {
+      return undefined;
+    }
   }
 
   /** "Other" fallback: invent one reusable tag, checked against the options. */

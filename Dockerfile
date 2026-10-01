@@ -8,6 +8,9 @@ COPY tsconfig.json ./
 # The web build imports shared code from src/ (e.g. the markdown renderer).
 COPY src ./src
 COPY web ./web
+# Bundle the local decision model (Laya multilingual, fp16 ONNX) in the image.
+COPY scripts/laya-pull.ts ./scripts/laya-pull.ts
+RUN LAYA_MODEL_DIR=/app/models/laya bun run laya:pull
 RUN bun run build:web
 
 FROM oven/bun:1-slim AS runtime
@@ -18,10 +21,12 @@ RUN bun install --production
 COPY tsconfig.json ./
 COPY src ./src
 COPY --from=build /app/web/dist ./web/dist
+COPY --from=build /app/models ./models
 
 ENV PORT=8080 \
     DB_PATH=/app/data/app.db \
-    WEB_DIST=/app/web/dist
+    WEB_DIST=/app/web/dist \
+    LAYA_MODEL_DIR=/app/models/laya
 
 VOLUME ["/app/data"]
 EXPOSE 8080

@@ -7,6 +7,7 @@ import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
 import type { LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
+import type { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
 import type { FinanceProvider } from "../capabilities/finance/FinanceProvider.ts";
 import type { SpeechAudio, TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { DeliveryMessage, DeliveryRouter } from "../delivery/DeliveryService.ts";
@@ -73,6 +74,10 @@ export interface BriefingWorkflowDeps {
   delivery: DeliveryRouter;
   /** Public app URL; delivered briefs link back to their detail page. */
   appUrl?: string;
+  /** Local decision models (Laya) for event tagging; optional. */
+  decisions?: DecisionModelRegistry;
+  /** Minimum decision-model confidence before its tag pick is used. */
+  decisionConfidence?: number;
   statuses?: StatusHub;
   defaults: {
     recency: SearchRecency;
@@ -774,6 +779,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         cost: ctx.run.cost,
         sessionId: correlationId,
         signal: ctx.run.signal,
+        decisions: this.deps.decisions,
+        decisionConfidence: this.deps.decisionConfidence,
         ...(this.deps.defaults.eventTagModel
           ? { tagModel: this.deps.defaults.eventTagModel }
           : {}),
