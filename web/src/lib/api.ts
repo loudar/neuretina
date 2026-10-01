@@ -299,7 +299,7 @@ export interface AppConfigInfo {
     briefLanguage: string;
   };
   timezone: string;
-  llm: { model: string; baseUrl: string };
+  llm: { provider: string; model: string; baseUrl: string };
   tts: { provider: string; baseUrl: string; model: string; voiceId: string; outputFormat: string };
   matrix: { roomId?: string };
 }
@@ -324,7 +324,8 @@ export interface SettingInfo {
 
 /**
  * Provider connection presets shared by the dynamic settings sections
- * (decision models, web search, finance data); they prefill the add/edit form.
+ * (LLM, decision models, web search, finance data); they prefill the add/edit
+ * form.
  */
 export interface ConnectionPreset {
   /** Display name of the provider, e.g. "Perplexity". */
@@ -398,6 +399,52 @@ export function decisionModelLabel(connection: DecisionModelConnection): string 
   return `${DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider} - ${connection.model}`;
 }
 
+/** LLM connections; one connection is one provider+model pairing. */
+export type LlmProviderId = "opencode" | "openai" | "openrouter" | "ollama";
+
+export interface LlmConnection {
+  id: string;
+  provider: LlmProviderId;
+  model: string;
+  baseUrl: string;
+  apiKey?: string;
+}
+
+export const LLM_PROVIDER_PRESETS: Record<LlmProviderId, ConnectionPreset> = {
+  opencode: {
+    label: "OpenCode",
+    defaultBaseUrl: "https://opencode.ai/zen/go/v1",
+    defaultModel: "deepseek-v4.1-flash",
+    models: ["deepseek-v4.1-flash"],
+  },
+  openai: {
+    label: "OpenAI",
+    defaultBaseUrl: "https://api.openai.com/v1",
+    defaultModel: "gpt-5",
+    models: ["gpt-5", "gpt-5-mini"],
+  },
+  openrouter: {
+    label: "OpenRouter",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+    defaultModel: "deepseek/deepseek-v4.1-flash",
+    models: ["deepseek/deepseek-v4.1-flash"],
+  },
+  ollama: {
+    label: "Ollama",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultModel: "llama3.3",
+    models: ["llama3.3"],
+    apiKey: false,
+  },
+};
+
+export const LLM_PROVIDER_IDS: LlmProviderId[] = ["opencode", "openai", "openrouter", "ollama"];
+
+/** "{provider} - {model}", e.g. "OpenAI - gpt-5". */
+export function llmProviderLabel(connection: LlmConnection): string {
+  return `${LLM_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider} - ${connection.model}`;
+}
+
 /** Web-search connections; one per provider keeps the tool names stable. */
 export type SearchProviderId = "perplexity" | "exa";
 
@@ -466,6 +513,11 @@ export function parseDecisionModelConnections(
   value: string | null | undefined,
 ): DecisionModelConnection[] {
   return parseConnections<DecisionModelConnection>(value, ["id", "provider", "model", "baseUrl"]);
+}
+
+/** Parses the stored LLM_PROVIDERS value into connection rows. */
+export function parseLlmConnections(value: string | null | undefined): LlmConnection[] {
+  return parseConnections<LlmConnection>(value, ["id", "provider", "model", "baseUrl"]);
 }
 
 /** Parses the stored SEARCH_PROVIDERS value into connection rows. */

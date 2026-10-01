@@ -74,28 +74,28 @@ describe("data transfer", () => {
   test("exports and restores user-specific settings, API keys included", async () => {
     const source = await createTestKernel();
     const target = await createTestKernel();
+    const connection = {
+      id: "bundle-llm",
+      provider: "openai" as const,
+      model: "bundle-model",
+      baseUrl: "https://api.openai.test/v1",
+      apiKey: "sk-bundle-secret",
+    };
     try {
-      source.settings.set("LLM_MODEL", "bundle-model");
-      source.settings.set("LLM_API_KEY", "sk-bundle-secret");
+      source.settings.set("LLM_PROVIDERS", JSON.stringify([connection]));
 
       const bundle = await exportBundle(source);
       expect(bundle.settings).toEqual([
-        { key: "LLM_API_KEY", value: "sk-bundle-secret" },
-        { key: "LLM_MODEL", value: "bundle-model" },
+        { key: "LLM_PROVIDERS", value: JSON.stringify([connection]) },
       ]);
 
       const summary = await importBundle(target, bundle);
-      expect(summary.settings).toBe(2);
+      expect(summary.settings).toBe(1);
 
-      const model = target.settings.list().find((setting) => setting.key === "LLM_MODEL");
-      expect(model?.source).toBe("db");
-      expect(model?.value).toBe("bundle-model");
-      expect(target.config.llm.model).toBe("bundle-model");
-
-      const key = target.settings.list().find((setting) => setting.key === "LLM_API_KEY");
-      expect(key?.configured).toBe(true);
-      expect(key?.value).toBe("sk-bundle-secret");
-      expect(target.config.llm.apiKey).toBe("sk-bundle-secret");
+      const providers = target.settings.list().find((setting) => setting.key === "LLM_PROVIDERS");
+      expect(providers?.source).toBe("db");
+      expect(providers?.configured).toBe(true);
+      expect(target.config.llmProviders).toEqual([connection]);
     } finally {
       await source.shutdown();
       await target.shutdown();

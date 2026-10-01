@@ -15,6 +15,7 @@ import type {
   DeliveryTargetInfo,
   DeliveryWorkflowInfo,
   FinanceProviderId,
+  LlmProviderId,
   ScheduledJob,
   SearchProviderId,
   SettingInfo,
@@ -45,6 +46,17 @@ export const commands = {
     list: () => send<SettingInfo[]>("settings.list"),
     set: (key: string, value: string) => send<SettingInfo>("settings.set", { key, value }),
     clear: (key: string) => send<SettingInfo>("settings.clear", { key }),
+  },
+
+  llm: {
+    /** Live pre-flight: stored connection by id, or unsaved dialog values. */
+    verify: (connection: {
+      id?: string;
+      provider?: LlmProviderId;
+      model?: string;
+      baseUrl?: string;
+      apiKey?: string;
+    }) => send<{ ok: boolean; detail: string }>("llm.provider.verify", connection),
   },
 
   decision: {

@@ -44,6 +44,15 @@ export function isSearchConnection(value: unknown): value is SearchConnection {
   return true;
 }
 
+/** The connection single-search call sites use: the selected id, else the first. */
+export function activeSearchConnection(
+  connections: SearchConnection[],
+  selected?: string,
+): SearchConnection | undefined {
+  const list = Array.isArray(connections) ? connections : [];
+  return list.find((connection) => connection.id === selected) ?? list[0];
+}
+
 /** Parses a stored connection list; undefined when invalid or duplicated. */
 export function parseSearchConnections(
   value: unknown,

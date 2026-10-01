@@ -1,4 +1,8 @@
 import type { AppConfig } from "../config/env.ts";
+import {
+  activeLlmConnection,
+  isLlmConnectionConfigured,
+} from "../capabilities/llm/LlmProviders.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
@@ -61,8 +65,9 @@ export class StartupService {
       {
         name: "llm",
         run: async (): Promise<CheckOutcome> => {
-          if (!config.llm.apiKey) {
-            return { status: "skipped", detail: "OPENCODE_API_KEY not set" };
+          const connection = activeLlmConnection(config.llmProviders, config.llmProvider);
+          if (!isLlmConnectionConfigured(connection)) {
+            return { status: "skipped", detail: "no LLM provider configured" };
           }
           if (isVerifiable(llm)) return { status: "ok", detail: await llm.verify() };
           return { status: "ok", detail: "configured" };

@@ -53,8 +53,15 @@ import {
   isFinanceConnection,
   type FinanceConnection,
 } from "../capabilities/finance/FinanceProviders.ts";
+import {
+  activeLlmConnection,
+  DEFAULT_LLM_CONNECTION,
+  isLlmConnection,
+  type LlmConnection,
+} from "../capabilities/llm/LlmProviders.ts";
 import { createSearchProvider } from "../providers/search/createSearchProvider.ts";
 import { createFinanceProvider } from "../providers/finance/createFinanceProvider.ts";
+import { createLlmProvider } from "../providers/llm/createLlmProvider.ts";
 import { isVerifiable } from "../core/verifiable.ts";
 import { SystemOneDecisionModel } from "../providers/decision/SystemOneDecisionModel.ts";
 import { DataTransfer } from "./dataTransfer.ts";
@@ -107,12 +114,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       typeof matrixChannel?.config.roomId === "string" && matrixChannel.config.roomId.trim()
         ? matrixChannel.config.roomId
         : undefined;
+    const llm =
+      activeLlmConnection(config.llmProviders, config.llmProvider) ?? DEFAULT_LLM_CONNECTION;
 
     return {
       integrations: { ...configStatus(config), matrix: Boolean(matrixChannel) },
       defaults: config.defaults,
       timezone: config.timezone,
-      llm: { model: config.llm.model, baseUrl: config.llm.baseUrl },
+      llm: { provider: llm.provider, model: llm.model, baseUrl: llm.baseUrl },
       tts: {
         provider: config.tts.provider,
         baseUrl:
@@ -148,6 +157,29 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("settings.clear", (payload) => {
     return settings.clear(requireString(asRecord(payload), "key"));
+  });
+
+  // Live pre-flight for an LLM connection: a stored connection by id, or the
+  // unsaved form values from the LLM settings section. Failures are reported
+  // in the result so the UI can show them inline.
+  router.register("llm.provider.verify", async (payload) => {
+    const record = asRecord(payload);
+    const id = optionalString(record, "id");
+    const stored = id
+      ? (Array.isArray(config.llmProviders) ? config.llmProviders : []).find(
+          (connection) => connection.id === id,
+        )
+      : undefined;
+    if (id && !stored) throw new NotFoundError(`LLM provider ${id} not found`);
+
+    const connection = stored ?? adHocLlmConnection(record);
+    const provider = createLlmProvider(connection, crypto.randomUUID());
+
+    try {
+      return { ok: true, detail: await provider.verify() };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
   });
 
   // Live pre-flight for a hosted decision model: a stored connection by id,
@@ -918,6 +950,23 @@ function toUserWorkflowInfo(workflow: UserWorkflow): {
   inputs: Record<string, unknown>;
 } {
   return { id: workflow.id, name: workflow.name, inputs: workflow.inputs };
+}
+
+/** Validates unsaved LLM form values from the settings dialog. */
+function adHocLlmConnection(record: Record<string, unknown>): LlmConnection {
+  const candidate: Record<string, unknown> = {
+    id: "unsaved",
+    provider: record.provider,
+    model: record.model,
+    baseUrl: record.baseUrl,
+  };
+  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
+  if (!isLlmConnection(candidate)) {
+    throw new ValidationError(
+      `"provider", "model" and "baseUrl" must describe an LLM connection`,
+    );
+  }
+  return candidate;
 }
 
 /** Validates unsaved decision-model form values from the settings dialog. */

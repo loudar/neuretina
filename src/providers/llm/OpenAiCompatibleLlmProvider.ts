@@ -19,6 +19,8 @@ export interface OpenAiCompatibleLlmOptions {
   timeoutMs?: number;
   sessionId?: string;
   userAgent?: string;
+  /** Set false for local servers that accept requests without a key. */
+  apiKeyRequired?: boolean;
 }
 
 export class OpenAiCompatibleLlmProvider implements LlmProvider {
@@ -30,6 +32,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   private readonly apiKey?: string;
   private readonly baseUrl: string;
   private readonly client: OpenAI | null;
+  private readonly apiKeyRequired: boolean;
   /** OpenCode endpoints require their routing/session header; others don't. */
   private readonly openCode: boolean;
 
@@ -38,12 +41,15 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
     this.defaultModel = options.defaultModel;
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl;
+    this.apiKeyRequired = options.apiKeyRequired ?? true;
     this.sessionId = options.sessionId ?? crypto.randomUUID();
     this.userAgent = options.userAgent ?? APP_USER_AGENT;
     this.openCode = isOpenCodeEndpoint(options.baseUrl);
-    this.client = options.apiKey
+    // The SDK insists on a key; local servers ignore the placeholder.
+    const clientKey = options.apiKey ?? (this.apiKeyRequired ? undefined : "not-needed");
+    this.client = clientKey
       ? new OpenAI({
-          apiKey: options.apiKey,
+          apiKey: clientKey,
           baseURL: options.baseUrl,
           timeout: options.timeoutMs ?? 120_000,
         })
@@ -56,7 +62,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 
   /** Verifies the key/endpoint without spending tokens on a completion. */
   async verify(): Promise<string> {
-    if (!this.apiKey) {
+    if (this.apiKeyRequired && !this.apiKey) {
       throw new ConfigurationError(
         "LLM provider is not configured. Add an API key for your OpenAI-compatible endpoint in Settings.",
       );
@@ -67,7 +73,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
       `${this.baseUrl.replace(/\/$/, "")}/models`,
       {
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
           ...(this.openCode ? { "x-opencode-session": this.sessionId } : {}),
           "user-agent": this.userAgent,
         },

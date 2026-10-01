@@ -57,10 +57,17 @@ import { KeyValueRepository, type KeyValueStore } from "../domain/kv/KeyValueRep
 import { MatrixClient } from "../providers/messaging/MatrixClient.ts";
 import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListener.ts";
 import { createChatCommandHandler } from "../chat/ChatCommands.ts";
-import { OpenAiCompatibleLlmProvider } from "../providers/llm/OpenAiCompatibleLlmProvider.ts";
+import { createLlmProvider } from "../providers/llm/createLlmProvider.ts";
+import {
+  activeLlmConnection,
+  DEFAULT_LLM_CONNECTION,
+} from "../capabilities/llm/LlmProviders.ts";
 import { PerplexitySearchProvider } from "../providers/search/PerplexitySearchProvider.ts";
 import { createSearchProviders } from "../providers/search/createSearchProvider.ts";
-import { SEARCH_PROVIDER_PRESETS } from "../capabilities/search/SearchProviders.ts";
+import {
+  activeSearchConnection,
+  SEARCH_PROVIDER_PRESETS,
+} from "../capabilities/search/SearchProviders.ts";
 import { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
 import {
   DECISION_PROVIDER_PRESETS,
@@ -210,16 +217,13 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
       logger: logger.child("delivery"),
     });
 
-  const llmSessionId = config.llm.sessionId ?? crypto.randomUUID();
+  const llmSessionId = crypto.randomUUID();
 
   const buildLlm = (): LlmProvider =>
-    new OpenAiCompatibleLlmProvider({
-      apiKey: config.llm.apiKey,
-      baseUrl: config.llm.baseUrl,
-      defaultModel: config.llm.model,
-      name: "openai-compatible",
-      sessionId: llmSessionId,
-    });
+    createLlmProvider(
+      activeLlmConnection(config.llmProviders, config.llmProvider) ?? DEFAULT_LLM_CONNECTION,
+      llmSessionId,
+    );
 
   /** Every configured web provider; the researcher gets one tool each. */
   const buildSearchProviders = (): SearchProvider[] =>
@@ -229,14 +233,23 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     });
   let searchProviders = buildSearchProviders();
 
-  // Primary provider for the single-search call sites (question workflow,
-  // startup checks, source upgrades); without a connection it fails on use.
-  const buildPrimarySearch = (): SearchProvider =>
-    searchProviders[0] ??
-    new PerplexitySearchProvider({
-      baseUrl: SEARCH_PROVIDER_PRESETS.perplexity.defaultBaseUrl,
-      defaultLimit: config.defaults.searchResultsPerProvider,
-    });
+  // Primary provider for the single-search call sites (the Wikipedia tool,
+  // startup checks, source upgrades): the selected connection, else the first.
+  // Without any connection it fails on use.
+  const buildPrimarySearch = (): SearchProvider => {
+    const connection = activeSearchConnection(config.searchProviders, config.searchProvider);
+    const primary = connection
+      ? searchProviders.find((provider) => provider.name === connection.provider)
+      : undefined;
+    return (
+      primary ??
+      searchProviders[0] ??
+      new PerplexitySearchProvider({
+        baseUrl: SEARCH_PROVIDER_PRESETS.perplexity.defaultBaseUrl,
+        defaultLimit: config.defaults.searchResultsPerProvider,
+      })
+    );
+  };
 
   const buildSocialSearch = (): SearchProvider =>
     new BlueskySearchProvider({

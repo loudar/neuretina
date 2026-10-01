@@ -175,28 +175,42 @@ describe("webhook gateway", () => {
     const list = await call<
       Array<{ key: string; source: string; value: string | null; stored: boolean }>
     >("settings.list");
-    const model = list.find((setting) => setting.key === "LLM_MODEL");
-    expect(model?.source).toBe("default");
+    const providers = list.find((setting) => setting.key === "LLM_PROVIDERS");
+    expect(providers?.source).toBe("default");
 
+    const connection = {
+      id: "webhook-llm",
+      provider: "opencode",
+      model: "webhook-model",
+      baseUrl: "https://api.opencode.test/v1",
+      apiKey: "webhook-key",
+    };
     const updated = await call<{ source: string; value: string | null; stored: boolean }>(
       "settings.set",
-      { key: "LLM_MODEL", value: "webhook-model" },
+      { key: "LLM_PROVIDERS", value: JSON.stringify([connection]) },
     );
     expect(updated.source).toBe("db");
-    expect(updated.value).toBe("webhook-model");
+    expect(updated.value).toBe(JSON.stringify([connection]));
     expect(updated.stored).toBe(true);
 
     const live = await call<{ llm: { model: string } }>("config.get");
     expect(live.llm.model).toBe("webhook-model");
 
-    await call("settings.clear", { key: "LLM_MODEL" });
+    await call("settings.clear", { key: "LLM_PROVIDERS" });
     const restored = await call<{ llm: { model: string } }>("config.get");
     expect(restored.llm.model).toBe("deepseek-v4.1-flash");
   });
 
   test("never persists secret setting values in the event log", async () => {
-    await call("settings.set", { key: "LLM_API_KEY", value: "sekrit-value" });
-    await call("settings.clear", { key: "LLM_API_KEY" });
+    const connection = {
+      id: "secret-llm",
+      provider: "openai",
+      model: "gpt-5",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "sekrit-value",
+    };
+    await call("settings.set", { key: "LLM_PROVIDERS", value: JSON.stringify([connection]) });
+    await call("settings.clear", { key: "LLM_PROVIDERS" });
 
     const log = JSON.stringify(kernel.bus.replayAfter(0, 5000));
     expect(log).not.toContain("sekrit-value");

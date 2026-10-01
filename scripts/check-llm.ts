@@ -1,23 +1,35 @@
 /**
- * Connectivity check for the configured LLM (OpenCode Go): sends one tiny
- * chat completion. Usage: `bun run check:llm`
+ * Connectivity check for the active LLM connection: sends one tiny chat
+ * completion. Usage: `bun run check:llm`
  */
+import {
+  activeLlmConnection,
+  isLlmConnectionConfigured,
+  llmProviderLabel,
+} from "../src/capabilities/llm/LlmProviders.ts";
 import { loadConfig } from "../src/config/env.ts";
-import { OpenAiCompatibleLlmProvider } from "../src/providers/llm/OpenAiCompatibleLlmProvider.ts";
+import { SettingsService } from "../src/config/settings.ts";
+import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
+import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
+import { createLlmProvider } from "../src/providers/llm/createLlmProvider.ts";
 
 const config = loadConfig();
-if (!config.llm.apiKey) {
-  console.error("OPENCODE_API_KEY is not set (see .env.example)");
+const db = new SqliteDatabase(config.dbPath);
+const settings = new SettingsService({
+  kv: new KeyValueRepository(db),
+  env: Bun.env,
+  config,
+});
+settings.applyAll();
+
+const connection = activeLlmConnection(config.llmProviders, config.llmProvider);
+if (!connection || !isLlmConnectionConfigured(connection)) {
+  console.error("No LLM provider configured (Settings → LLM)");
   process.exit(1);
 }
 
-const provider = new OpenAiCompatibleLlmProvider({
-  apiKey: config.llm.apiKey,
-  baseUrl: config.llm.baseUrl,
-  defaultModel: config.llm.model,
-  name: "opencode-go",
-  sessionId: config.llm.sessionId,
-});
+console.log(`checking ${llmProviderLabel(connection)} at ${connection.baseUrl}`);
+const provider = createLlmProvider(connection, "llm-check");
 
 const started = Date.now();
 try {
@@ -32,4 +44,6 @@ try {
 } catch (error) {
   console.error(`failed: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
+} finally {
+  db.close();
 }

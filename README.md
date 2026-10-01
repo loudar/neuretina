@@ -184,14 +184,25 @@ paste it.
 
 ### LLM (OpenAI-compatible)
 
-- Any OpenAI-compatible endpoint works. For OpenCode Go subscribe at https://opencode.ai/auth and
-  paste the key in **Settings → LLM**; point the base URL at another provider (OpenAI, vLLM, …) and
-  the engine adapts.
-- Defaults: base URL `https://opencode.ai/zen/go/v1`, model `deepseek-v4.1-flash`.
-- OpenCode endpoints require a client user agent and a stable `x-opencode-session` id per
+- **Settings → LLM** manages the LLM connections: **Add connection** offers **OpenCode**
+  (`https://opencode.ai/zen/go/v1`, model `deepseek-v4.1-flash`), **OpenAI**
+  (`https://api.openai.com/v1`), **OpenRouter** (`https://openrouter.ai/api/v1`) and **Ollama**
+  (`http://localhost:11434/v1`, no API key). One connection is one provider+model pairing; add
+  several to switch models without retyping keys. Any other OpenAI-compatible endpoint (vLLM, a
+  proxy, …) works too — pick the closest preset and edit the base URL and model. **Test** calls
+  `GET {baseUrl}/models` through the connection (`llm.provider.verify`).
+- **Active provider** is the one setting that picks which configured connection runs the agents,
+  labelled `{provider} - {model}` (e.g. `OpenAI - gpt-5`); empty uses the first connection. While
+  nothing is configured the engine falls back to the default OpenCode pairing, and the startup
+  check reports the LLM as skipped.
+- For OpenCode Go subscribe at https://opencode.ai/auth and paste the key into the connection.
+  OpenCode endpoints require a client user agent and a stable `x-opencode-session` id per
   conversation; the engine detects `opencode.ai`/`opencode.com` and sends both automatically. Other
   endpoints only get the user agent.
-- `bun run check:llm` sends one tiny completion to verify the key/endpoint end-to-end.
+- Connections (including API keys) are stored as user settings, so **export/import configuration**
+  carries them to another installation.
+- `bun run check:llm` sends one tiny completion through the active connection to verify the
+  key/endpoint end-to-end.
 
 ### Decision models (Jev / Clef)
 
@@ -221,9 +232,11 @@ one). Besides the built-in local Laya model, hosted connections are configured i
 
 - **Settings → Web search** manages the web-search connections: **Add connection** offers
   **Perplexity** (`https://api.perplexity.ai`) and **Exa** (`https://api.exa.ai`), each with its own
-  API key. One connection per provider; every configured provider becomes its own
-  `search.<provider>` tool (`search.perplexity`, `search.exa`), so the researcher can cross-check
-  both indexes in one program. **Test** runs a cheap probe query through the connection.
+  API key. One connection per provider; **Test** runs a cheap probe query through the connection.
+- **Active provider** picks which configured connection the single-search call sites use (the
+  Wikipedia tool, the startup check and fallbacks); empty uses the first connection. Every
+  configured provider still becomes its own `search.<provider>` tool (`search.perplexity`,
+  `search.exa`), so the researcher can cross-check both indexes in one program.
 - Perplexity: create an API key at https://perplexity.ai and paste it into the connection.
 - Exa: request a key at https://exa.ai; Exa's neural/keyword index is independent of Perplexity's.
 - **Web search:** the agent calls `POST {baseUrl}/search` and receives raw ranked results
@@ -255,7 +268,7 @@ one). Besides the built-in local Laya model, hosted connections are configured i
   links that flow into the brief's source list. The default model `perplexity/glm-5.3-flash` is the
   best open-weight model on Vals AI Finance Agent v2 (57.9%, ahead of DeepSeek V4 Pro 0813 at
   50.4%, Kimi K3 at 54.4% and MiniMax M3 at 48.3%) and the cheapest capable option. The research
-  agent and compiler keep running on `LLM_MODEL` (`deepseek-v4.1-flash`).
+  agent and compiler keep running on the active LLM provider (`deepseek-v4.1-flash` by default).
 - **Yahoo Finance** is keyless: the public search endpoint resolves tickers from the question and
   the public chart endpoint returns price, change, day and 52-week ranges, volume and the quote
   timestamp; sources link to `finance.yahoo.com/quote/<ticker>`.

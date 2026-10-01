@@ -103,7 +103,15 @@ function configuredConfig(overrides: Record<string, string | undefined> = {}) {
   const config = testConfig(overrides);
   // Provider credentials are user-owned settings, so tests set them on the
   // config directly (in production the settings service applies them).
-  config.llm.apiKey = "key";
+  config.llmProviders = [
+    {
+      id: "test-llm",
+      provider: "opencode",
+      model: "deepseek-v4.1-flash",
+      baseUrl: "https://api.opencode.test/v1",
+      apiKey: "key",
+    },
+  ];
   config.searchProviders = [
     {
       id: "test-search",

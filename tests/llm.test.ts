@@ -89,4 +89,29 @@ describe("OpenAiCompatibleLlmProvider", () => {
     expect(seen[0]).toBeTruthy();
     expect(seen[0]).toBe(seen[1]);
   });
+
+  test("serves keyless local endpoints without an Authorization header", async () => {
+    const calls = captureCalls();
+    const client = new OpenAiCompatibleLlmProvider({
+      baseUrl: "http://localhost:11434/v1",
+      defaultModel: "llama3.3",
+      apiKeyRequired: false,
+    });
+
+    await expect(client.verify()).resolves.toBe("reachable");
+    await expect(client.complete({ messages: userMessage })).resolves.toMatchObject({
+      text: "OK",
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.headers.get("authorization")).toBeNull();
+  });
+
+  test("refuses to verify keyed endpoints without a key", async () => {
+    const client = new OpenAiCompatibleLlmProvider({
+      baseUrl: "https://api.openai.com/v1",
+      defaultModel: "gpt-5",
+    });
+
+    await expect(client.verify()).rejects.toThrow("not configured");
+  });
 });

@@ -6,6 +6,7 @@
   import iconPsychology from "@ktibow/iconset-material-symbols/psychology";
   import iconSave from "@ktibow/iconset-material-symbols/save";
   import iconSearch from "@ktibow/iconset-material-symbols/search";
+  import iconSmartToy from "@ktibow/iconset-material-symbols/smart-toy";
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
   import iconUpload from "@ktibow/iconset-material-symbols/upload";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
@@ -15,6 +16,8 @@
     DataImportSummary,
     DecisionProviderId,
     FinanceProviderId,
+    LlmProviderId,
+    SearchConnection,
     SearchProviderId,
     SettingInfo,
   } from "../lib/api";
@@ -24,8 +27,12 @@
     decisionModelLabel,
     FINANCE_PROVIDER_IDS,
     FINANCE_PROVIDER_PRESETS,
+    LLM_PROVIDER_IDS,
+    LLM_PROVIDER_PRESETS,
+    llmProviderLabel,
     parseDecisionModelConnections,
     parseFinanceConnections,
+    parseLlmConnections,
     parseSearchConnections,
     SEARCH_PROVIDER_IDS,
     SEARCH_PROVIDER_PRESETS,
@@ -48,15 +55,19 @@
 
   /** Custom panels that are not rendered by the generic settings form. */
   const DATA_GROUP = "Data transfer";
+  const LLM_GROUP = "LLM";
   const DECISION_GROUP = "Decision models";
   const SEARCH_GROUP = "Web search";
   const FINANCE_GROUP = "Finance data";
+  const LLM_PROVIDERS_KEY = "LLM_PROVIDERS";
+  const LLM_PROVIDER_KEY = "LLM_PROVIDER";
   const DECISION_MODELS_KEY = "DECISION_MODELS";
   const DECISION_MODEL_KEY = "DECISION_MODEL";
   const SEARCH_PROVIDERS_KEY = "SEARCH_PROVIDERS";
+  const SEARCH_PROVIDER_KEY = "SEARCH_PROVIDER";
   const FINANCE_PROVIDERS_KEY = "FINANCE_PROVIDERS";
 
-  const customGroups = [DECISION_GROUP, SEARCH_GROUP, FINANCE_GROUP];
+  const customGroups = [LLM_GROUP, DECISION_GROUP, SEARCH_GROUP, FINANCE_GROUP];
   const genericGroups = $derived(groups.filter((group) => !customGroups.includes(group)));
   const navGroups = $derived([DATA_GROUP, ...customGroups, ...genericGroups]);
 
@@ -69,11 +80,38 @@
   // lists; the shared section stores them as JSON settings so they travel
   // with configuration exports.
 
+  const llmConnections = $derived(parseLlmConnections(settingValue(LLM_PROVIDERS_KEY)));
   const decisionConnections = $derived(
     parseDecisionModelConnections(settingValue(DECISION_MODELS_KEY)),
   );
   const searchConnections = $derived(parseSearchConnections(settingValue(SEARCH_PROVIDERS_KEY)));
   const financeConnections = $derived(parseFinanceConnections(settingValue(FINANCE_PROVIDERS_KEY)));
+
+  // LLM and search always run on a connection: an unset selection means the
+  // first configured one, so the UI shows that as the active choice.
+  const activeLlmConnection = $derived(
+    llmConnections.find((connection) => connection.id === settingValue(LLM_PROVIDER_KEY)) ??
+      llmConnections[0] ??
+      null,
+  );
+  const activeLlmOptions = $derived(
+    llmConnections.map((connection) => ({
+      text: llmProviderLabel(connection),
+      value: connection.id,
+    })),
+  );
+  const activeSearchConnection = $derived(
+    searchConnections.find((connection) => connection.id === settingValue(SEARCH_PROVIDER_KEY)) ??
+      searchConnections[0] ??
+      null,
+  );
+  const activeSearchOptions = $derived(
+    searchConnections.map((connection) => ({
+      text: searchConnectionLabel(connection),
+      value: connection.id,
+    })),
+  );
+
   const activeDecisionId = $derived(settingValue(DECISION_MODEL_KEY) ?? "");
   const activeDecisionLabel = $derived.by(() => {
     const connection = decisionConnections.find((entry) => entry.id === activeDecisionId);
@@ -86,35 +124,43 @@
     })),
   );
 
+  function searchConnectionLabel(connection: SearchConnection): string {
+    return SEARCH_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider;
+  }
+
   async function onConnectionChange(setting: SettingInfo): Promise<void> {
     apply(setting);
     await configState.load();
   }
 
-  /** Keeps the active decision valid: the first connection becomes active. */
-  async function onDecisionChange(setting: SettingInfo): Promise<void> {
+  /**
+   * Applies a changed connection list and keeps the active selection valid:
+   * the first connection becomes active when the current one disappears.
+   */
+  async function onConnectionsChange(
+    setting: SettingInfo,
+    ids: (value: string | null) => string[],
+    activeKey: string,
+  ): Promise<void> {
     apply(setting);
     await configState.load();
-    const ids = parseDecisionModelConnections(setting.value).map((connection) => connection.id);
-    if (ids.length === 0 || !ids.includes(activeDecisionId)) {
-      const next = ids[0];
-      apply(
-        next
-          ? await commands.settings.set(DECISION_MODEL_KEY, next)
-          : await commands.settings.clear(DECISION_MODEL_KEY),
-      );
-      await configState.load();
-    }
+    const available = ids(setting.value);
+    if (available.includes(settingValue(activeKey) ?? "")) return;
+    const next = available[0];
+    apply(
+      next ? await commands.settings.set(activeKey, next) : await commands.settings.clear(activeKey),
+    );
+    await configState.load();
   }
 
-  async function chooseActiveDecision(event: Event): Promise<void> {
+  async function chooseActive(key: string, event: Event): Promise<void> {
     const target = event.currentTarget as HTMLSelectElement | null;
     if (!target) return;
     try {
       apply(
         target.value
-          ? await commands.settings.set(DECISION_MODEL_KEY, target.value)
-          : await commands.settings.clear(DECISION_MODEL_KEY),
+          ? await commands.settings.set(key, target.value)
+          : await commands.settings.clear(key),
       );
       await configState.load();
     } catch (error) {
@@ -353,6 +399,29 @@
     <Button variant="text" onclick={() => void refresh()} disabled={loading}>Reload</Button>
   {/snippet}
 
+  {#snippet activeConnectionRow(
+    title: string,
+    summary: string,
+    connectionId: string,
+    options: Array<{ text: string; value: string }>,
+    empty: string,
+    onchange: (event: Event) => void,
+  )}
+    <article class="setting">
+      <div class="info">
+        <div class="name"><span>{title}</span></div>
+        <span class="source">{summary}</span>
+      </div>
+      <div class="control">
+        {#if options.length > 0}
+          <Select label={title} width="16rem" {options} value={connectionId} {onchange} />
+        {:else}
+          <p class="muted">{empty}</p>
+        {/if}
+      </div>
+    </article>
+  {/snippet}
+
   {#if loading}
     <p class="muted">Loading settings…</p>
   {:else}
@@ -419,28 +488,75 @@
           </article>
         </section>
 
+        <section class="group" id={sectionId(LLM_GROUP)}>
+          <h3>{LLM_GROUP}</h3>
+
+          {@render activeConnectionRow(
+            "Active provider",
+            activeLlmConnection
+              ? llmProviderLabel(activeLlmConnection)
+              : "default OpenCode pairing",
+            activeLlmConnection?.id ?? "",
+            activeLlmOptions,
+            "No LLM providers configured.",
+            (event) => void chooseActive(LLM_PROVIDER_KEY, event),
+          )}
+
+          <ConnectionSection
+            settingKey={LLM_PROVIDERS_KEY}
+            connections={llmConnections}
+            presets={LLM_PROVIDER_PRESETS}
+            providerIds={LLM_PROVIDER_IDS}
+            noun="LLM provider"
+            header="Connections"
+            empty="No LLM providers yet."
+            icon={iconSmartToy}
+            label={llmProviderLabel}
+            subtitle={(connection) => connection.baseUrl}
+            formOf={(connection) => ({
+              provider: connection.provider,
+              model: connection.model,
+              baseUrl: connection.baseUrl,
+              accountId: "",
+              apiKey: connection.apiKey ?? "",
+            })}
+            build={(form, id) => ({
+              id,
+              provider: form.provider as LlmProviderId,
+              model: form.model.trim(),
+              baseUrl: form.baseUrl.trim(),
+              ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+            })}
+            verify={(payload) =>
+              commands.llm.verify(
+                payload as {
+                  id?: string;
+                  provider?: LlmProviderId;
+                  model?: string;
+                  baseUrl?: string;
+                  apiKey?: string;
+                },
+              )}
+            changed={(setting) =>
+              onConnectionsChange(
+                setting,
+                (value) => parseLlmConnections(value).map((connection) => connection.id),
+                LLM_PROVIDER_KEY,
+              )}
+          />
+        </section>
+
         <section class="group" id={sectionId(DECISION_GROUP)}>
           <h3>{DECISION_GROUP}</h3>
 
-          <article class="setting">
-            <div class="info">
-              <div class="name"><span>Active model</span></div>
-              <span class="source">{activeDecisionLabel ?? "local model / LLM fallback"}</span>
-            </div>
-            <div class="control">
-              {#if decisionConnections.length > 0}
-                <Select
-                  label="Active model"
-                  width="16rem"
-                  options={activeDecisionOptions}
-                  value={activeDecisionId}
-                  onchange={(event) => void chooseActiveDecision(event)}
-                />
-              {:else}
-                <p class="muted">No hosted models configured.</p>
-              {/if}
-            </div>
-          </article>
+          {@render activeConnectionRow(
+            "Active model",
+            activeDecisionLabel ?? "local model / LLM fallback",
+            activeDecisionId,
+            activeDecisionOptions,
+            "No hosted models configured.",
+            (event) => void chooseActive(DECISION_MODEL_KEY, event),
+          )}
 
           <ConnectionSection
             settingKey={DECISION_MODELS_KEY}
@@ -480,13 +596,29 @@
                   apiKey?: string;
                 },
               )}
-            changed={onDecisionChange}
+            changed={(setting) =>
+              onConnectionsChange(
+                setting,
+                (value) => parseDecisionModelConnections(value).map((connection) => connection.id),
+                DECISION_MODEL_KEY,
+              )}
             removeNote="Decisions fall back to the local model or the LLM."
           />
         </section>
 
         <section class="group" id={sectionId(SEARCH_GROUP)}>
           <h3>{SEARCH_GROUP}</h3>
+
+          {@render activeConnectionRow(
+            "Active provider",
+            activeSearchConnection
+              ? searchConnectionLabel(activeSearchConnection)
+              : "no provider configured",
+            activeSearchConnection?.id ?? "",
+            activeSearchOptions,
+            "No web search providers configured.",
+            (event) => void chooseActive(SEARCH_PROVIDER_KEY, event),
+          )}
 
           <ConnectionSection
             settingKey={SEARCH_PROVIDERS_KEY}
@@ -499,8 +631,7 @@
             icon={iconSearch}
             uniqueProvider
             allowDuplicate={false}
-            label={(connection) =>
-              SEARCH_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider}
+            label={searchConnectionLabel}
             subtitle={(connection) => connection.baseUrl}
             formOf={(connection) => ({
               provider: connection.provider,
@@ -524,7 +655,12 @@
                   apiKey?: string;
                 },
               )}
-            changed={onConnectionChange}
+            changed={(setting) =>
+              onConnectionsChange(
+                setting,
+                (value) => parseSearchConnections(value).map((connection) => connection.id),
+                SEARCH_PROVIDER_KEY,
+              )}
           />
         </section>
 

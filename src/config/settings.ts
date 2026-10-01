@@ -2,6 +2,11 @@ import type { SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import { parseSearchConnections } from "../capabilities/search/SearchProviders.ts";
 import { parseFinanceConnections } from "../capabilities/finance/FinanceProviders.ts";
 import { parseDecisionModelConnections } from "../capabilities/decision/DecisionProviders.ts";
+import {
+  LLM_PROVIDER_PRESETS,
+  parseLlmConnections,
+  type LlmConnection,
+} from "../capabilities/llm/LlmProviders.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { KeyValueStore } from "../domain/kv/KeyValueRepository.ts";
@@ -103,30 +108,21 @@ interface SettingSpec {
 /** One row per setting; the definition's behavior is derived from this. */
 const SETTING_SPECS: SettingSpec[] = [
   {
-    key: "LLM_API_KEY",
+    key: "LLM_PROVIDERS",
     group: "LLM",
-    label: "API key",
-    kind: "secret",
+    label: "Configured providers",
+    kind: "json",
     userOnly: true,
-    path: "llm.apiKey",
+    validate: (value) => parseLlmConnections(value) !== undefined,
+    path: "llmProviders",
   },
   {
-    key: "LLM_BASE_URL",
+    key: "LLM_PROVIDER",
     group: "LLM",
-    label: "Base URL",
+    label: "Active provider",
     kind: "string",
-    default: "https://opencode.ai/zen/go/v1",
     userOnly: true,
-    path: "llm.baseUrl",
-  },
-  {
-    key: "LLM_MODEL",
-    group: "LLM",
-    label: "Model",
-    kind: "string",
-    default: "deepseek-v4.1-flash",
-    userOnly: true,
-    path: "llm.model",
+    path: "llmProvider",
   },
   {
     key: "DECISION_MODELS",
@@ -153,6 +149,14 @@ const SETTING_SPECS: SettingSpec[] = [
     userOnly: true,
     validate: (value) => parseSearchConnections(value) !== undefined,
     path: "searchProviders",
+  },
+  {
+    key: "SEARCH_PROVIDER",
+    group: "Web search",
+    label: "Active provider",
+    kind: "string",
+    userOnly: true,
+    path: "searchProvider",
   },
   {
     key: "FINANCE_PROVIDERS",
@@ -369,6 +373,34 @@ function setPath(target: object, path: string, value: unknown): void {
 }
 
 /**
+ * The LLM used to be three settings (LLM_API_KEY / LLM_BASE_URL / LLM_MODEL,
+ * originally OPENCODE_API_KEY); fold whatever was stored into one connection
+ * so existing installations keep their endpoint, then drop the old keys.
+ */
+function migrateLegacyLlmSettings(kv: KeyValueStore): void {
+  if (!kv.get(`${DB_PREFIX}LLM_PROVIDERS`)) {
+    const apiKey =
+      kv.get(`${DB_PREFIX}LLM_API_KEY`) ?? kv.get(`${DB_PREFIX}OPENCODE_API_KEY`);
+    const baseUrl = kv.get(`${DB_PREFIX}LLM_BASE_URL`);
+    const model = kv.get(`${DB_PREFIX}LLM_MODEL`);
+    if (apiKey || baseUrl || model) {
+      const connection: LlmConnection = {
+        id: crypto.randomUUID(),
+        provider: "opencode",
+        baseUrl: baseUrl ?? LLM_PROVIDER_PRESETS.opencode.defaultBaseUrl,
+        model: model ?? LLM_PROVIDER_PRESETS.opencode.defaultModel,
+        ...(apiKey ? { apiKey } : {}),
+      };
+      kv.set(`${DB_PREFIX}LLM_PROVIDERS`, JSON.stringify([connection]));
+      kv.set(`${DB_PREFIX}LLM_PROVIDER`, connection.id);
+    }
+  }
+  for (const key of ["OPENCODE_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"]) {
+    kv.delete(`${DB_PREFIX}${key}`);
+  }
+}
+
+/**
  * Settings live in the SQLite key/value store and can be edited in the UI.
  * The environment always wins: a `.env` value shadows the database override
  * (the UI marks those rows as overridden).
@@ -382,12 +414,7 @@ export class SettingsService {
 
   constructor(private readonly options: SettingsServiceOptions) {
     this.base = structuredClone(options.config);
-    // The LLM key used to be OpenCode-specific; carry stored values over.
-    const legacyLlmKey = options.kv.get(`${DB_PREFIX}OPENCODE_API_KEY`);
-    if (legacyLlmKey && !options.kv.get(`${DB_PREFIX}LLM_API_KEY`)) {
-      options.kv.set(`${DB_PREFIX}LLM_API_KEY`, legacyLlmKey);
-    }
-    options.kv.delete(`${DB_PREFIX}OPENCODE_API_KEY`);
+    migrateLegacyLlmSettings(options.kv);
   }
 
   list(): SettingInfo[] {

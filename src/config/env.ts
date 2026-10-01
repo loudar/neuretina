@@ -3,6 +3,11 @@ import type { SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import type { SearchConnection } from "../capabilities/search/SearchProviders.ts";
 import type { FinanceConnection } from "../capabilities/finance/FinanceProviders.ts";
 import type { DecisionModelConnection } from "../capabilities/decision/DecisionProviders.ts";
+import {
+  activeLlmConnection,
+  isLlmConnectionConfigured,
+  type LlmConnection,
+} from "../capabilities/llm/LlmProviders.ts";
 
 export type { SearchRecency };
 
@@ -69,14 +74,14 @@ export interface AppConfig {
     eventTagModel?: string;
     briefLanguage: string;
   };
-  llm: {
-    apiKey?: string;
-    baseUrl: string;
-    model: string;
-    sessionId?: string;
-  };
+  /** LLM connections (provider + model pairings); user-owned settings. */
+  llmProviders: LlmConnection[];
+  /** Selected LLM connection id; empty uses the first configured one. */
+  llmProvider?: string;
   /** Web-search connections (Perplexity, Exa); user-owned settings. */
   searchProviders: SearchConnection[];
+  /** Selected web-search connection id; empty uses the first configured one. */
+  searchProvider?: string;
   /** Finance-data connections (Perplexity, Yahoo Finance); user-owned settings. */
   financeProviders: FinanceConnection[];
   /** Local OpenAI-compatible Qwen3-TTS server (the active speech provider). */
@@ -200,17 +205,12 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       eventTagModel: str(env, "EVENTS_TAG_MODEL", "") || undefined,
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
-    llm: {
-      // Provider credentials are user-owned: they can only be set in the UI,
-      // never through the deployment environment.
-      apiKey: undefined,
-      baseUrl: "https://opencode.ai/zen/go/v1",
-      model: "deepseek-v4.1-flash",
-      sessionId: undefined,
-    },
-    // Web-search and finance connections are user-owned (they carry API
+    // LLM, web-search and finance connections are user-owned (they carry API
     // keys and live in the UI settings, never in the deployment environment).
+    llmProviders: [],
+    llmProvider: undefined,
     searchProviders: [],
+    searchProvider: undefined,
     financeProviders: [],
     qwenTts: {
       // User-owned settings: UI only.
@@ -278,7 +278,9 @@ export interface ConfigStatus {
 
 export function configStatus(config: AppConfig): ConfigStatus {
   return {
-    llm: Boolean(config.llm.apiKey),
+    llm: isLlmConnectionConfigured(
+      activeLlmConnection(config.llmProviders, config.llmProvider),
+    ),
     search: Array.isArray(config.searchProviders) && config.searchProviders.length > 0,
     tts:
       config.tts.provider === "elevenlabs"

@@ -4,9 +4,16 @@ import {
   parseFinanceConnections,
 } from "../src/capabilities/finance/FinanceProviders.ts";
 import {
+  activeSearchConnection,
   isSearchConnection,
   parseSearchConnections,
 } from "../src/capabilities/search/SearchProviders.ts";
+import {
+  activeLlmConnection,
+  isLlmConnection,
+  isLlmConnectionConfigured,
+  parseLlmConnections,
+} from "../src/capabilities/llm/LlmProviders.ts";
 import { createFinanceProviders } from "../src/providers/finance/createFinanceProvider.ts";
 import { createSearchProviders } from "../src/providers/search/createSearchProvider.ts";
 
@@ -37,6 +44,81 @@ describe("search connections", () => {
     ]);
 
     expect(providers.map((provider) => provider.name)).toEqual(["perplexity", "exa"]);
+  });
+
+  test("selects the active connection, falling back to the first", () => {
+    const connections = [
+      { id: "a", provider: "perplexity" as const, baseUrl: "https://api.perplexity.ai" },
+      { id: "b", provider: "exa" as const, baseUrl: "https://api.exa.ai" },
+    ];
+
+    expect(activeSearchConnection(connections, "b")?.id).toBe("b");
+    expect(activeSearchConnection(connections, "missing")?.id).toBe("a");
+    expect(activeSearchConnection([], "b")).toBeUndefined();
+  });
+});
+
+describe("llm connections", () => {
+  test("parses provider+model pairings and rejects unknown or incomplete rows", () => {
+    const connections = [
+      {
+        id: "a",
+        provider: "openai" as const,
+        model: "gpt-5",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "k",
+      },
+      {
+        id: "b",
+        provider: "ollama" as const,
+        model: "llama3.3",
+        baseUrl: "http://localhost:11434/v1",
+      },
+    ];
+    expect(parseLlmConnections(connections)).toEqual(connections);
+    expect(
+      parseLlmConnections([{ id: "c", provider: "nope", model: "m", baseUrl: "https://x" }]),
+    ).toBeUndefined();
+    expect(
+      parseLlmConnections([{ id: "c", provider: "openai", model: "", baseUrl: "https://x" }]),
+    ).toBeUndefined();
+    expect(parseLlmConnections([connections[0], connections[0]])).toBeUndefined();
+    expect(parseLlmConnections("nope")).toBeUndefined();
+    expect(isLlmConnection(connections[1])).toBe(true);
+  });
+
+  test("selects the active connection and treats keyless providers as configured", () => {
+    const connections = [
+      {
+        id: "a",
+        provider: "openai" as const,
+        model: "gpt-5",
+        baseUrl: "https://api.openai.com/v1",
+        apiKey: "k",
+      },
+      {
+        id: "b",
+        provider: "ollama" as const,
+        model: "llama3.3",
+        baseUrl: "http://localhost:11434/v1",
+      },
+    ];
+
+    expect(activeLlmConnection(connections, "b")?.id).toBe("b");
+    expect(activeLlmConnection(connections, "missing")?.id).toBe("a");
+    expect(activeLlmConnection([], "b")).toBeUndefined();
+
+    expect(isLlmConnectionConfigured(connections[0])).toBe(true);
+    expect(isLlmConnectionConfigured(connections[1])).toBe(true);
+    expect(
+      isLlmConnectionConfigured({
+        id: "c",
+        provider: "openai",
+        model: "gpt-5",
+        baseUrl: "https://api.openai.com/v1",
+      }),
+    ).toBe(false);
+    expect(isLlmConnectionConfigured(undefined)).toBe(false);
   });
 });
 
