@@ -42,6 +42,12 @@ export interface SettingInfo {
   stored: boolean;
 }
 
+/** One stored (database) override, secrets included. */
+export interface StoredSetting {
+  key: string;
+  value: string;
+}
+
 export interface SettingsServiceOptions {
   kv: KeyValueStore;
   env: Env;
@@ -406,19 +412,7 @@ export class SettingsService {
 
   set(key: string, value: unknown): SettingInfo {
     const definition = this.definition(key);
-    if (value !== undefined && value !== null && !["string", "number", "boolean"].includes(typeof value)) {
-      throw new ValidationError(`"value" must be a string, number or boolean`);
-    }
-    const raw = typeof value === "string" ? value : value == null ? "" : String(value);
-    const trimmed = raw.trim();
-
-    if (trimmed === "") {
-      this.options.kv.delete(DB_PREFIX + definition.key);
-    } else {
-      this.validate(definition, trimmed);
-      this.options.kv.set(DB_PREFIX + definition.key, trimmed);
-    }
-
+    this.store(definition, value);
     return this.changed(definition);
   }
 
@@ -426,6 +420,51 @@ export class SettingsService {
     const definition = this.definition(key);
     this.options.kv.delete(DB_PREFIX + definition.key);
     return this.changed(definition);
+  }
+
+  /**
+   * Every stored override, secrets (API keys) included. This is the
+   * persistence half of a data bundle, so treat the result as sensitive.
+   */
+  exportStored(): StoredSetting[] {
+    const entries: StoredSetting[] = [];
+    for (const definition of SETTING_DEFINITIONS) {
+      const value = this.options.kv.get(DB_PREFIX + definition.key);
+      if (value !== null && value !== "") entries.push({ key: definition.key, value });
+    }
+    return entries;
+  }
+
+  /**
+   * Restores stored overrides from a bundle (unknown keys and non-string
+   * values are skipped, so bundles from other versions stay importable) and
+   * applies the whole batch at once: one provider reload per import.
+   */
+  importStored(entries: unknown): number {
+    if (!Array.isArray(entries)) return 0;
+
+    const applied: SettingDefinition[] = [];
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const record = entry as Record<string, unknown>;
+      if (typeof record.key !== "string" || typeof record.value !== "string") continue;
+      const definition = SETTING_DEFINITIONS.find((candidate) => candidate.key === record.key);
+      if (!definition) continue;
+      this.store(definition, record.value);
+      applied.push(definition);
+    }
+
+    if (applied.length === 0) return 0;
+    this.applyAll();
+    for (const definition of applied) {
+      this.options.bus?.publish(
+        "settings.updated",
+        { key: definition.key, action: this.options.kv.get(DB_PREFIX + definition.key) ? "set" : "cleared" },
+        { source: "settings" },
+      );
+    }
+    this.onReload?.();
+    return applied.length;
   }
 
   /** Recomputes the effective config: boot-time base + env/database overrides. */
@@ -437,6 +476,22 @@ export class SettingsService {
       const { source, effective } = this.resolve(definition);
       // Defaults are already baked into the base config by loadConfig().
       if (source !== "default") definition.apply(config, effective);
+    }
+  }
+
+  /** Validates and writes (or clears) one stored override. */
+  private store(definition: SettingDefinition, value: unknown): void {
+    if (value !== undefined && value !== null && !["string", "number", "boolean"].includes(typeof value)) {
+      throw new ValidationError(`"value" must be a string, number or boolean`);
+    }
+    const raw = typeof value === "string" ? value : value == null ? "" : String(value);
+    const trimmed = raw.trim();
+
+    if (trimmed === "") {
+      this.options.kv.delete(DB_PREFIX + definition.key);
+    } else {
+      this.validate(definition, trimmed);
+      this.options.kv.set(DB_PREFIX + definition.key, trimmed);
     }
   }
 

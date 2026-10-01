@@ -66,7 +66,8 @@
       await configState.load();
       reportSuccess(
         `Imported ${summary.topics} topic(s), ${summary.userWorkflows} workflow(s), ` +
-          `${summary.deliveryChannels} channel(s), ${summary.jobs} schedule(s)`,
+          `${summary.deliveryChannels} channel(s), ${summary.jobs} schedule(s), ` +
+          `${summary.settings} setting(s)`,
       );
     } catch (error) {
       reportError(error);
@@ -288,14 +289,15 @@
             <div class="info">
               <div class="name"><span>Import / export configuration</span></div>
               <p class="desc muted">
-                Move topics, workflows, delivery channels and schedules to another installation.
-                Channels keep their credentials, so treat the exported file as a secret.
+                Move topics, workflows, delivery channels, schedules, settings and API keys to
+                another installation. The exported file carries credentials, so treat it as a
+                secret.
               </p>
               {#if importSummary}
                 <span class="source">
                   Last import: {importSummary.topics} topic(s), {importSummary.userWorkflows}
                   workflow(s), {importSummary.deliveryChannels} channel(s), {importSummary.jobs}
-                  schedule(s)
+                  schedule(s), {importSummary.settings} setting(s)
                 </span>
               {/if}
             </div>

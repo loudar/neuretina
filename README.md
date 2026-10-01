@@ -539,7 +539,7 @@ change is audited through the value-free `settings.updated` event instead.
 Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
 `topic.list/create/update/delete`, `job.list/create/update/delete/run`,
 `workflow.list/run/run.list/run.get/run.delete`, `brief.list/get/audio/audio.generate/send/delete`,
-`artifact.list/search/get/content/data/delete`, `timeline.event.list`, `event.pull/wait`. Adding one is
+`artifact.list/search/get/content/data/delete`, `timeline.event.list`, `event.pull`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
 ## Live activity feed

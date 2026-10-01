@@ -745,12 +745,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   // Portable snapshot of the hand-configured parts (topics, workflows,
-  // delivery channels, schedules) for moving an installation.
+  // delivery channels, schedules, user settings and API keys) for moving an
+  // installation.
   const dataTransfer = new DataTransfer({
     topics,
     userWorkflows,
     deliveries,
     jobs,
+    settings,
     scheduler,
     bus,
     logger: logger.child("data"),
@@ -764,38 +766,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return summary;
   });
 
+  // Backfill for the UI's WebSocket event feed (and any external reader):
+  // returns the persisted events after `since`, oldest first.
   router.register("event.pull", (payload) => {
     const record = asRecord(payload);
     const since = typeof record.since === "number" ? record.since : 0;
     const limit = clampNumber(record.limit, 200, 1, 1000);
     return bus.replayAfter(since, limit);
-  });
-
-  // Long-poll: returns as soon as an event newer than `since` exists, or an
-  // empty list after `timeoutMs`. The UI loops on this to get its event feed.
-  router.register("event.wait", async (payload) => {
-    const record = asRecord(payload);
-    const since = typeof record.since === "number" ? record.since : 0;
-    const timeoutMs = clampNumber(record.timeoutMs, 25_000, 1_000, 55_000);
-    const limit = 200;
-
-    const backlog = bus.replayAfter(since, limit);
-    if (backlog.length > 0) return backlog;
-
-    return new Promise<unknown[]>((resolve) => {
-      let unsubscribe: (() => void) | null = null;
-      const timer = setTimeout(() => {
-        unsubscribe?.();
-        resolve([]);
-      }, timeoutMs);
-
-      unsubscribe = bus.subscribe("*", (event) => {
-        if (event.seq <= since) return;
-        clearTimeout(timer);
-        unsubscribe?.();
-        resolve(bus.replayAfter(since, limit));
-      });
-    });
   });
 
   // Read-only message types: no audit events, so polling cannot feed itself
@@ -828,7 +805,6 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "delivery.list",
     "timeline.event.list",
     "event.pull",
-    "event.wait",
   ];
   for (const type of READ_ONLY_TYPES) router.markQuiet(type);
 }
@@ -939,11 +915,3 @@ function optionalChannelIds(record: Record<string, unknown>): string[] | undefin
     return entry.trim();
   });
 }
-
-export function eventWaitTimeoutMs(payload: unknown): number {
-  const record = asRecord(payload);
-  return clampNumber(record.timeoutMs, 25_000, 1_000, 55_000);
-}
-
-
-

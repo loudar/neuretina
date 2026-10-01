@@ -15,10 +15,6 @@ export class StatusFeed {
   private running = false;
   private unsubscribe: (() => void) | null = null;
 
-  get connected(): boolean {
-    return connection.connected;
-  }
-
   start(): void {
     if (this.running) return;
     this.running = true;

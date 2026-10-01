@@ -2,15 +2,14 @@ import { notifyUnauthorized } from "./authGate";
 import type { DomainEvent } from "./api";
 import type { StatusMessage } from "./statusTypes";
 
-/** Frames the backend pushes over `/api/ws` (plus open/close notifications). */
+/** Frames the backend pushes over `/api/ws` (plus connect notifications). */
 export type ConnectionFrame =
   | { type: "open" }
-  | { type: "close" }
   | StatusMessage
   | { type: "event"; event: DomainEvent };
 
 /** A failed request, carrying the backend's error code when it has one. */
-export class ConnectionError extends Error {
+class ConnectionError extends Error {
   readonly code?: string;
 
   constructor(message: string, code?: string) {
@@ -40,7 +39,7 @@ const RECONNECT_DELAY_MS = 2000;
  * keyed by id; status entries and domain events are pushed on the same socket.
  * Reconnects automatically while enabled.
  */
-export class Connection {
+class Connection {
   connected = $state(false);
 
   private socket: WebSocket | null = null;
@@ -124,7 +123,6 @@ export class Connection {
       if (this.socket !== socket) return;
       this.socket = null;
       this.connected = false;
-      this.emit({ type: "close" });
       this.rejectPending(new ConnectionError("Connection lost"));
       if (!this.enabled) return;
       this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_DELAY_MS);
@@ -155,7 +153,6 @@ export class Connection {
       clearTimeout(waiter.timer);
       waiter.reject(reason);
     }
-    this.emit({ type: "close" });
   }
 
   private waitForOpen(deadline: number): Promise<void> {

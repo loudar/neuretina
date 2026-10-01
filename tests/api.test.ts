@@ -74,7 +74,6 @@ describe("webhook gateway", () => {
     const body = (await probe.json()) as { ok: boolean; commands: string[] };
     expect(body.ok).toBe(true);
     expect(body.commands).toContain("topic.create");
-    expect(body.commands).toContain("event.wait");
     expect(body.commands).toContain("event.pull");
 
     expect((await fetch(`${base}/api/events`)).status).toBe(404);
@@ -435,7 +434,7 @@ describe("webhook gateway", () => {
     expect(failure.code).toBe("NOT_FOUND");
     expect(failure.error).toContain("Unknown message type");
 
-    // Every persisted event is pushed live: no event.wait polling anywhere.
+    // Every persisted event is pushed live; nothing polls an endpoint.
     const marker = crypto.randomUUID();
     kernel.bus.publish("test.pushed", { marker }, { source: "test" });
     await waitUntil(() =>
@@ -765,37 +764,5 @@ describe("webhook gateway", () => {
     expect(topics).toContain("message.received");
     expect(topics).toContain("topic.created");
     expect(topics).toContain("hook.deploy");
-  });
-
-  test("event.wait returns immediately when there is a backlog", async () => {
-    const events = await call<DomainEvent[]>("event.wait", { since: 0, timeoutMs: 1000 });
-    expect(events.length).toBeGreaterThan(0);
-  });
-
-  test("event.wait wakes up when a new event arrives", async () => {
-    const since = kernel.bus.replayAfter(0, 5000).at(-1)?.seq ?? 0;
-
-    const pending = call<DomainEvent[]>("event.wait", { since, timeoutMs: 5000 });
-
-    // Publish repeatedly so at least one event lands after the server has
-    // subscribed, regardless of request scheduling jitter.
-    for (let i = 0; i < 5; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      kernel.bus.publish("test.wake", { attempt: i }, { source: "test" });
-    }
-
-    const events = await pending;
-    expect(events.length).toBeGreaterThan(0);
-    expect(events.every((event) => event.seq > since)).toBe(true);
-  });
-
-  test("event.wait returns an empty list after its timeout", async () => {
-    const since = kernel.bus.replayAfter(0, 5000).at(-1)?.seq ?? 0;
-    const started = Date.now();
-
-    const events = await call<DomainEvent[]>("event.wait", { since, timeoutMs: 400 });
-
-    expect(events).toEqual([]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(350);
   });
 });

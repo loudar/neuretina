@@ -17,10 +17,11 @@ async function exportBundle(kernel: Kernel): Promise<Record<string, unknown>> {
 async function importBundle(
   kernel: Kernel,
   bundle: Record<string, unknown>,
-): Promise<{ deliveryChannels: number; deliveryAttachments: number }> {
+): Promise<{ deliveryChannels: number; deliveryAttachments: number; settings: number }> {
   return (await kernel.commands.execute("data.import", { bundle }, "test")) as {
     deliveryChannels: number;
     deliveryAttachments: number;
+    settings: number;
   };
 }
 
@@ -64,6 +65,37 @@ describe("data transfer", () => {
           channelId: imported!.id,
         },
       ]);
+    } finally {
+      await source.shutdown();
+      await target.shutdown();
+    }
+  });
+
+  test("exports and restores user-specific settings, API keys included", async () => {
+    const source = await createTestKernel();
+    const target = await createTestKernel();
+    try {
+      source.settings.set("LLM_MODEL", "bundle-model");
+      source.settings.set("LLM_API_KEY", "sk-bundle-secret");
+
+      const bundle = await exportBundle(source);
+      expect(bundle.settings).toEqual([
+        { key: "LLM_API_KEY", value: "sk-bundle-secret" },
+        { key: "LLM_MODEL", value: "bundle-model" },
+      ]);
+
+      const summary = await importBundle(target, bundle);
+      expect(summary.settings).toBe(2);
+
+      const model = target.settings.list().find((setting) => setting.key === "LLM_MODEL");
+      expect(model?.source).toBe("db");
+      expect(model?.value).toBe("bundle-model");
+      expect(target.config.llm.model).toBe("bundle-model");
+
+      const key = target.settings.list().find((setting) => setting.key === "LLM_API_KEY");
+      expect(key?.configured).toBe(true);
+      expect(key?.value).toBeNull();
+      expect(target.config.llm.apiKey).toBe("sk-bundle-secret");
     } finally {
       await source.shutdown();
       await target.shutdown();

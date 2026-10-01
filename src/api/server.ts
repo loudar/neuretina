@@ -8,7 +8,6 @@ import type { Logger } from "../core/logger.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { Brief } from "../domain/briefs/BriefRepository.ts";
-import { eventWaitTimeoutMs } from "../commands/registerCommands.ts";
 
 export interface ApiDeps {
   config: AppConfig;
@@ -122,10 +121,10 @@ export function createApiServer(deps: ApiDeps): ApiServer {
             ingress: "POST a message { type, payload?, correlationId? } to this path",
             commands: deps.runtimeFor(deps.adminUser).commands.list(),
           }),
-        POST: guard((request: Bun.BunRequest<"/api/webhook">, server: Bun.Server<WsData>) => {
+        POST: guard((request: Bun.BunRequest<"/api/webhook">) => {
           const runtime = requestRuntime(request, deps);
           if (!runtime) return unauthorized();
-          return processMessage(request, runtime, server);
+          return processMessage(request, runtime);
         }),
       },
 
@@ -177,7 +176,7 @@ export function createApiServer(deps: ApiDeps): ApiServer {
         );
 
         // Every persisted domain event is pushed live, so the UI's event feed
-        // streams instead of long-polling `event.wait` over HTTP.
+        // streams over this socket instead of polling an HTTP endpoint.
         cleanups.push(
           runtime.bus.subscribe("*", (event) => {
             try {
@@ -529,11 +528,7 @@ function sendSocketError(
   sendSocket(ws, { type: "error", id, ok: false, error, code });
 }
 
-async function processMessage(
-  request: Request,
-  runtime: ApiRuntime,
-  server?: Bun.Server<WsData>,
-): Promise<Response> {
+async function processMessage(request: Request, runtime: ApiRuntime): Promise<Response> {
   const message = await readJson<InboundMessage>(request);
   if (typeof message.type !== "string" || !message.type.trim()) {
     throw new ValidationError(`"type" must be a non-empty string`);
@@ -545,12 +540,6 @@ async function processMessage(
       ? message.correlationId.trim()
       : crypto.randomUUID();
   const payload = message.payload ?? null;
-
-  // Long-polling event feed: give the request room beyond Bun's 10s idle
-  // timeout (which counts time waiting for response bytes).
-  if (type === "event.wait" && server) {
-    server.timeout(request, Math.ceil(eventWaitTimeoutMs(payload) / 1000) + 5);
-  }
 
   const { result, accepted } = await executeMessage(runtime, {
     type,

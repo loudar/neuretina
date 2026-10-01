@@ -160,6 +160,7 @@ export interface AppEvents {
     deliveryAttachments: number;
     userWorkflows: number;
     jobs: number;
+    settings: number;
   };
 
   /** Authentication activity; payloads never carry credentials. */

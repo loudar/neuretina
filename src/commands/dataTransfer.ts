@@ -1,3 +1,4 @@
+import type { SettingsService, StoredSetting } from "../config/settings.ts";
 import { ValidationError } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
@@ -46,6 +47,8 @@ export interface DataBundle {
     input: Record<string, unknown>;
     enabled: boolean;
   }>;
+  /** User-specific settings and API keys stored in the database. */
+  settings: StoredSetting[];
 }
 
 export interface ImportSummary {
@@ -54,6 +57,7 @@ export interface ImportSummary {
   deliveryAttachments: number;
   userWorkflows: number;
   jobs: number;
+  settings: number;
 }
 
 export interface DataTransferDeps {
@@ -61,6 +65,7 @@ export interface DataTransferDeps {
   userWorkflows: UserWorkflowStore;
   deliveries: DeliveryStore;
   jobs: JobStore;
+  settings: SettingsService;
   scheduler: Scheduler;
   bus: EventBus;
   logger: Logger;
@@ -68,13 +73,14 @@ export interface DataTransferDeps {
 
 /**
  * Portable snapshot of everything that is configured by hand (topics,
- * workflows, delivery channels + assignments, schedules). Import merges into
- * the current account: records are matched by name (channels by type + name),
- * a matched channel adopts the bundle's config and state so exported
- * credentials actually move installations, topic references inside workflows
- * and jobs are remapped to the local ids, and every imported record publishes
- * the event the UI and the workflow registry already listen to — so nothing
- * needs a restart.
+ * workflows, delivery channels + assignments, schedules, user-specific
+ * settings and API keys). Import merges into the current account: records are
+ * matched by name (channels by type + name), a matched channel adopts the
+ * bundle's config and state so exported credentials actually move
+ * installations, stored settings overwrite the local overrides, topic
+ * references inside workflows and jobs are remapped to the local ids, and
+ * every imported record publishes the event the UI and the workflow registry
+ * already listen to — so nothing needs a restart.
  */
 export class DataTransfer {
   constructor(private readonly deps: DataTransferDeps) {}
@@ -117,6 +123,7 @@ export class DataTransfer {
         input: job.input,
         enabled: job.enabled,
       })),
+      settings: this.deps.settings.exportStored(),
     };
   }
 
@@ -128,8 +135,12 @@ export class DataTransfer {
       deliveryAttachments: 0,
       userWorkflows: 0,
       jobs: 0,
+      settings: 0,
     };
 
+    // Settings first: the provider reload they trigger is done before the
+    // rest of the bundle lands.
+    summary.settings = this.deps.settings.importStored(bundle.settings);
     const topicIds = this.importTopics(bundle, summary);
     const channelIds = this.importChannels(bundle, summary);
     this.importAttachments(bundle, channelIds, summary);
@@ -315,6 +326,7 @@ export class DataTransfer {
       deliveryChannels: list(record.deliveryChannels),
       deliveryAttachments: list(record.deliveryAttachments),
       jobs: list(record.jobs),
+      settings: list(record.settings),
     };
   }
 }

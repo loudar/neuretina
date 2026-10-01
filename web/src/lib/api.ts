@@ -99,7 +99,7 @@ export interface TimelineEvent {
   updatedAt: number;
 }
 
-/** Portable configuration bundle (topics, workflows, channels, schedules). */
+/** Portable configuration bundle (topics, workflows, channels, schedules, settings). */
 export interface DataBundle {
   version: number;
   exportedAt: number;
@@ -133,6 +133,8 @@ export interface DataBundle {
     input: Record<string, unknown>;
     enabled: boolean;
   }>;
+  /** Stored user-specific settings and API keys; treat the bundle as secret. */
+  settings: Array<{ key: string; value: string }>;
 }
 
 export interface DataImportSummary {
@@ -141,6 +143,7 @@ export interface DataImportSummary {
   deliveryAttachments: number;
   userWorkflows: number;
   jobs: number;
+  settings: number;
 }
 
 export interface ScheduledJob {

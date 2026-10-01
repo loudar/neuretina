@@ -131,6 +131,38 @@ describe("SettingsService", () => {
     expect(service.list().find((setting) => setting.key === "LLM_MODEL")?.source).toBe("default");
   });
 
+  test("exports stored overrides (secrets included) and imports them in one batch", () => {
+    const { service } = setup();
+    service.set("QWEN_TTS_SPEED", "1.5");
+    service.set("LLM_MODEL", "db-model");
+    service.set("LLM_API_KEY", "top-secret");
+
+    const stored = service.exportStored();
+    expect(stored).toEqual([
+      { key: "LLM_API_KEY", value: "top-secret" },
+      { key: "LLM_MODEL", value: "db-model" },
+      { key: "QWEN_TTS_SPEED", value: "1.5" },
+    ]);
+
+    const target = setup();
+    let reloads = 0;
+    target.service.onReload = () => reloads++;
+
+    const applied = target.service.importStored([
+      ...stored,
+      { key: "NOPE", value: "ignored" },
+      { key: "LLM_MODEL", value: 42 },
+      "not-an-entry",
+    ]);
+
+    expect(applied).toBe(3);
+    expect(reloads).toBe(1);
+    expect(target.service.exportStored()).toEqual(stored);
+    expect(target.config.llm.model).toBe("db-model");
+    expect(target.config.llm.apiKey).toBe("top-secret");
+    expect(target.config.qwenTts.speed).toBe(1.5);
+  });
+
   test("emits a value-free settings.updated event and reloads providers", () => {
     const bus = new EventBus(new EventStore(new SqliteDatabase(":memory:")), createLogger("test", { level: "error" }));
     const config = loadConfig({});
