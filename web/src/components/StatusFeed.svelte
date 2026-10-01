@@ -218,9 +218,8 @@
     align-self: flex-start;
     display: inline-flex;
     align-items: center;
-    gap: var(--space-large);
-    margin: 0 0 0 0;
-    padding: 0 var(--space-small) 0 var(--space-large);
+    gap: var(--space-small);
+    padding: var(--space-small);
     border: none;
     border-radius: var(--m3-shape-full);
     background: transparent;
