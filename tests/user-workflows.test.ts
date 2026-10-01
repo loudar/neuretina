@@ -79,7 +79,7 @@ let delivery: StubDeliveryService;
 beforeAll(async () => {
   delivery = new StubDeliveryService();
   kernel = await createKernel({
-    config: testConfig({ DEFAULT_FOLLOWUP_RESEARCH: "false" }),
+    config: testConfig(),
     logger: createLogger("test", { level: "error" }),
     llm: stubLlm((request) => {
       const system = request.messages[0]?.content ?? "";

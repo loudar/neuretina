@@ -137,18 +137,18 @@
   .source-section {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
-    margin-top: 1rem;
+    gap: var(--space-small);
+    margin-top: var(--space-large);
   }
 
   .source-section-head {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-small);
   }
 
   .total {
-    padding: 0.05rem 0.5rem;
+    padding: 0 var(--space-small);
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-surface-container-highest);
     color: var(--m3c-on-surface-variant);
@@ -159,7 +159,7 @@
   .source-groups {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: var(--space-small);
   }
 
   .source-group {
@@ -172,8 +172,8 @@
   .source-group summary {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    padding: 0.5rem 0.75rem;
+    gap: var(--space-small);
+    padding: var(--space-small) var(--space-medium);
     cursor: pointer;
     list-style: none;
     user-select: none;
@@ -202,7 +202,7 @@
     inset: 0;
     width: 100%;
     height: 100%;
-    padding: 0.25rem;
+    padding: var(--space-large);
     box-sizing: border-box;
     border-radius: inherit;
     object-fit: contain;
@@ -223,7 +223,7 @@
 
   .provider-tags {
     display: inline-flex;
-    gap: 0.3rem;
+    gap: var(--space-large);
     margin-left: auto;
   }
 
@@ -240,14 +240,14 @@
   .source-group ul {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--space-small);
     margin: 0;
-    padding: 0 0.4rem 0.4rem;
+    padding: 0 var(--space-small) var(--space-small);
     list-style: none;
   }
 
   .source {
-    padding: 0.5rem 0.6rem;
+    padding: var(--space-small) var(--space-small);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-highest);
   }
@@ -259,7 +259,7 @@
   .source-head {
     display: flex;
     align-items: baseline;
-    gap: 0.5rem;
+    gap: var(--space-small);
     color: var(--m3c-on-surface);
     text-decoration: none;
   }
@@ -299,7 +299,7 @@
   }
 
   .snippet {
-    margin: 0.2rem 0 0;
+    margin: 0 0 0;
     font-size: 0.84rem;
     line-height: 1.45;
     color: var(--m3c-on-surface-variant);
@@ -309,8 +309,8 @@
   .media {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.35rem;
-    margin-top: 0.45rem;
+    gap: var(--space-large);
+    margin-top: var(--space-small);
   }
 
   .media-item {

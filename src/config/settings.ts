@@ -79,40 +79,6 @@ function toSearchDomains(value: string | undefined): string[] {
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
   {
-    key: "AUTH_GLOBAL_PASSWORD",
-    group: "Access",
-    label: "Global password",
-    description:
-      "When set, the whole site asks for this password once per browser. It protects every page and API call; clear it to run without authentication.",
-    kind: "secret",
-    apply: (config, value) => {
-      config.auth.globalPassword = optional(value);
-    },
-  },
-  {
-    key: "AUTH_SESSION_SECRET",
-    group: "Access",
-    label: "Session secret",
-    description:
-      "Optional. Signs login sessions; by default it derives from the global password, so changing the password logs everyone out. Set an explicit secret to keep sessions across password changes.",
-    kind: "secret",
-    apply: (config, value) => {
-      config.auth.sessionSecret = optional(value);
-    },
-  },
-  {
-    key: "AUTH_SESSION_TTL_HOURS",
-    group: "Access",
-    label: "Session lifetime (hours)",
-    description: "How long one login lasts before the password is asked again.",
-    kind: "number",
-    default: "720",
-    apply: (config, value) => {
-      config.auth.sessionTtlHours = Math.max(1, toNumber(value, 720));
-    },
-  },
-
-  {
     key: "LLM_API_KEY",
     group: "LLM",
     label: "API key",
@@ -417,96 +383,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     },
   },
 
-  {
-    key: "DEFAULT_BRIEF_CRON",
-    group: "Research defaults",
-    label: "Default brief cron",
-    description: "Cron of the seeded morning-brief job (only used on first boot).",
-    kind: "string",
-    default: "0 7 * * *",
-    apply: (config, value) => {
-      config.defaults.briefCron = optional(value) ?? "0 7 * * *";
-    },
-  },
-  {
-    key: "DEFAULT_SEARCH_RECENCY",
-    group: "Research defaults",
-    label: "Search window",
-    kind: "enum",
-    options: ["hour", "day", "3days", "week", "month", "year"],
-    default: "3days",
-    apply: (config, value) => {
-      config.defaults.searchRecency = (optional(value) ?? "3days") as SearchRecency;
-    },
-  },
-  {
-    key: "DEFAULT_SEARCH_RESULTS",
-    group: "Research defaults",
-    label: "Results per provider",
-    kind: "number",
-    default: "6",
-    apply: (config, value) => {
-      config.defaults.searchResultsPerProvider = toNumber(value, 6);
-    },
-  },
-  {
-    key: "DEFAULT_BRIEF_LANGUAGE",
-    group: "Research defaults",
-    label: "Language",
-    kind: "string",
-    default: "en",
-    apply: (config, value) => {
-      config.defaults.briefLanguage = optional(value) ?? "en";
-    },
-  },
-  {
-    key: "DEFAULT_FOLLOWUP_RESEARCH",
-    group: "Research defaults",
-    label: "Follow-up research",
-    description:
-      "Dispatch subagents after the first draft: dig into implications and context, then trace claims back to primary sources.",
-    kind: "boolean",
-    default: "true",
-    apply: (config, value) => {
-      config.defaults.followups = toBool(value, true);
-    },
-  },
-  {
-    key: "DEFAULT_EVENT_EXTRACTION",
-    group: "Research defaults",
-    label: "Event extraction",
-    description:
-      "Extract dated events from each finished brief, deduplicate them against stored events and build a timeline artifact for the brief.",
-    kind: "boolean",
-    default: "true",
-    apply: (config, value) => {
-      config.defaults.events = toBool(value, true);
-    },
-  },
-  {
-    key: "EVENTS_TAG_MODEL",
-    group: "Research defaults",
-    label: "Event tag model",
-    description:
-      "Model used to pick event tags from the existing tag list (a small decision model works well). Empty uses the main model.",
-    kind: "string",
-    default: "",
-    apply: (config, value) => {
-      config.defaults.eventTagModel = value?.trim() || undefined;
-    },
-  },
-  {
-    key: "DEFAULT_SEARCH_DOMAINS",
-    group: "Research defaults",
-    label: "Source allowlist",
-    description:
-      "Comma-separated domains (max 20); \".gov\" matches the TLD. \"off\" searches the whole web.",
-    kind: "list",
-    default: DEFAULT_SEARCH_DOMAINS.join(", "),
-    apply: (config, value) => {
-      config.defaults.searchDomains = toSearchDomains(value);
-    },
-  },
 ];
 
 /**

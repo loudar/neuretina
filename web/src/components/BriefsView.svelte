@@ -367,19 +367,19 @@
 <style>
   audio {
     width: 100%;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-medium);
   }
 
   .resend-channels {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-small);
   }
 
   .resend-channel {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-small);
     cursor: pointer;
     user-select: none;
   }
@@ -395,8 +395,8 @@
   }
 
   .timeline {
-    margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
+    margin-bottom: var(--space-large);
+    padding-bottom: var(--space-small);
     border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
@@ -404,10 +404,10 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.3rem;
+    gap: var(--space-large);
     width: 100%;
     box-sizing: border-box;
-    padding: 0.55rem 0.75rem;
+    padding: var(--space-small) var(--space-medium);
     border: none;
     border-radius: var(--m3-shape-medium);
     background: transparent;
@@ -432,15 +432,15 @@
 
   .badges {
     display: inline-flex;
-    gap: 0.35rem;
+    gap: var(--space-large);
     align-items: center;
   }
 
   .badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    padding: 0.1rem 0.5rem;
+    gap: var(--space-large);
+    padding: 0 var(--space-small);
     border-radius: var(--m3-shape-full);
     font-size: 0.72rem;
     line-height: 1.4;

@@ -55,22 +55,6 @@ describe("SettingsService", () => {
     expect(listed?.value).toBe("db-model");
   });
 
-  test("the environment always wins over the database", () => {
-    const kv = new MapKv();
-    kv.set("setting:DEFAULT_BRIEF_LANGUAGE", "db-lang");
-    const { config, service } = setup({ DEFAULT_BRIEF_LANGUAGE: "env-lang" }, kv);
-
-    const info = service.list().find((setting) => setting.key === "DEFAULT_BRIEF_LANGUAGE");
-    expect(info?.source).toBe("env");
-    expect(info?.value).toBe("env-lang");
-    expect(info?.stored).toBe(true);
-    expect(config.defaults.briefLanguage).toBe("env-lang");
-
-    // Storing another override changes nothing while the env var is set.
-    expect(service.set("DEFAULT_BRIEF_LANGUAGE", "other-db").source).toBe("env");
-    expect(config.defaults.briefLanguage).toBe("env-lang");
-  });
-
   test("user-owned settings ignore the environment", () => {
     const { config, service } = setup({
       LLM_MODEL: "env-model",
@@ -119,29 +103,23 @@ describe("SettingsService", () => {
   test("typed settings parse into the config", () => {
     const { config, service } = setup();
 
-    service.set("DEFAULT_SEARCH_RESULTS", "12");
-    expect(config.defaults.searchResultsPerProvider).toBe(12);
-
-    service.set("DEFAULT_FOLLOWUP_RESEARCH", "false");
-    expect(config.defaults.followups).toBe(false);
-
-    service.set("DEFAULT_SEARCH_RECENCY", "week");
-    expect(config.defaults.searchRecency).toBe("week");
-
     service.set("QWEN_TTS_SPEED", "1.25");
     expect(config.qwenTts.speed).toBe(1.25);
 
-    service.set("DEFAULT_SEARCH_DOMAINS", "off");
-    expect(config.defaults.searchDomains).toEqual([]);
+    service.set("QWEN_TTS_FORMAT", "wav");
+    expect(config.qwenTts.outputFormat).toBe("wav");
+
+    service.set("TTS_PROVIDER", "elevenlabs");
+    expect(config.tts.provider).toBe("elevenlabs");
   });
 
   test("rejects malformed values before storing them", () => {
     const { kv, service } = setup();
 
-    expect(() => service.set("DEFAULT_SEARCH_RESULTS", "many")).toThrow();
-    expect(() => service.set("DEFAULT_SEARCH_RECENCY", "fortnight")).toThrow();
+    expect(() => service.set("QWEN_TTS_SPEED", "many")).toThrow();
+    expect(() => service.set("QWEN_TTS_FORMAT", "fortnight")).toThrow();
     expect(() => service.set("NOPE", "1")).toThrow();
-    expect(kv.get("setting:DEFAULT_SEARCH_RESULTS")).toBeNull();
+    expect(kv.get("setting:QWEN_TTS_SPEED")).toBeNull();
   });
 
   test("setting an empty value clears the override", () => {

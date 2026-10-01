@@ -78,13 +78,13 @@
   .workflow-fields {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: var(--space-large);
   }
 
   .field-group {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--space-large);
   }
 
   .group-label {
@@ -95,8 +95,8 @@
   .toggle-list {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
-    padding: 0.1rem;
+    gap: var(--space-small);
+    padding: 0;
   }
 
   .toggle-list.capped {
@@ -107,8 +107,8 @@
   .toggle-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.15rem 0;
+    gap: var(--space-small);
+    padding: 0 0;
     color: var(--m3c-on-surface-variant);
     font-size: 0.85rem;
     cursor: pointer;

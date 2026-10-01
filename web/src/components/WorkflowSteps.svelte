@@ -151,8 +151,8 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.7rem 0.85rem;
+    gap: var(--space-small);
+    padding: var(--space-medium) var(--space-medium);
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-medium);
   }
@@ -160,7 +160,7 @@
   .card h4 {
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: var(--space-small);
     margin: 0;
     font-size: 0.82rem;
     font-weight: 500;
@@ -252,7 +252,7 @@
   .port {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: var(--space-small);
     min-width: 0;
   }
 
@@ -270,7 +270,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.4rem 0.5rem;
+    gap: var(--space-small) var(--space-small);
     min-width: 0;
   }
 
@@ -282,7 +282,7 @@
   .flag {
     display: inline-flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-large);
     flex: none;
     color: var(--m3c-on-surface-variant);
     font-size: 0.78rem;
@@ -304,7 +304,7 @@
   .delivery {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-large);
   }
 
   .delivery-label {
@@ -315,13 +315,13 @@
   .channel-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.2rem 0.9rem;
+    gap: 0 var(--space-large);
   }
 
   .channel {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-large);
     color: var(--m3c-on-surface-variant);
     font-size: 0.8rem;
     cursor: pointer;

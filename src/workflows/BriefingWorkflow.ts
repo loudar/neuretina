@@ -78,10 +78,6 @@ export interface BriefingWorkflowDeps {
     /** Reputable-source allowlist for web search; empty disables the filter. */
     searchDomains: string[];
     language: string;
-    /** Dispatch follow-up subagents after the first draft. */
-    followups: boolean;
-    /** Extract dated events and build a timeline next to the brief. */
-    events: boolean;
     /** Model for the tag decision step; defaults to the provider's model. */
     eventTagModel?: string;
   };
@@ -645,7 +641,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
    * failed pass just leaves the draft as it is (step output stays empty).
    */
   private async followupsStep(ctx: StepContext): Promise<StepResult> {
-    if (!this.deps.defaults.followups) return { outputs: {} };
     const draft = inputValue(ctx, "text") as TextPortValue | undefined;
     if (!draft) return { outputs: {} };
     const research = inputValue(ctx, "research") as TextPortValue | undefined;
@@ -678,9 +673,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const draft = inputValue(ctx, "text") as TextPortValue | undefined;
     if (!draft) return { outputs: {} };
     const sources = sourcesAfterResearch(ctx);
-    if (!this.deps.defaults.followups) {
-      return { outputs: { draft, sources } };
-    }
 
     const upgraded = await this.researchPrimarySources(
       topicNamesOf(ctx),
@@ -762,7 +754,6 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
    * Failures are swallowed — a missing timeline must never lose the brief.
    */
   private async eventsStep(ctx: StepContext): Promise<StepResult> {
-    if (!this.deps.defaults.events) return { outputs: {} };
     const text = inputValue(ctx, "text") as TextPortValue | undefined;
     if (!text) return { outputs: {} };
     const { correlationId, logger } = ctx.run;

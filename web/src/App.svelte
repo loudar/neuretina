@@ -158,14 +158,21 @@
         </Chip>
       </span>
       {#if authState.enabled}
-        <button
-          type="button"
-          class="logout"
-          title="Log out"
-          onclick={() => void authState.logout()}
-        >
-          <Icon icon={iconLogout} size={18} />
-        </button>
+        <div class="account">
+          {#if authState.status?.subject}
+            <span class="username" title={authState.status.subject}>
+              {authState.status.subject}
+            </span>
+          {/if}
+          <button
+            type="button"
+            class="logout"
+            title="Log out"
+            onclick={() => void authState.logout()}
+          >
+            <Icon icon={iconLogout} size={18} />
+          </button>
+        </div>
       {/if}
     </div>
   </NavigationRail>
@@ -206,6 +213,8 @@
   }
 
   /* The M3 rail reserves 44/56px; tighten it to align the pill with the items. */
+  /* Structural: the brand's -2rem margin cancels this padding so the header
+     line lands exactly on the pane header line. */
   .shell :global(.rail.rail) {
     padding-top: 2rem;
     padding-bottom: 1.25rem;
@@ -243,13 +252,30 @@
     border-color: transparent;
   }
 
+  .account {
+    display: flex;
+    align-items: center;
+    gap: var(--space-small);
+    max-width: 100%;
+    margin-top: var(--space-small);
+  }
+
+  .username {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--m3c-on-surface-variant);
+    font-size: 0.78rem;
+  }
+
   .logout {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex: none;
     width: 2.2rem;
     height: 2.2rem;
-    margin-top: 0.5rem;
     padding: 0;
     border: none;
     border-radius: var(--m3-shape-full);

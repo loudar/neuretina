@@ -9,6 +9,8 @@ export interface AuthStatusInfo {
   /** True when at least one mechanism is configured. */
   required: boolean;
   authenticated: boolean;
+  /** Account the current session belongs to, when authenticated. */
+  subject?: string;
   /** Mechanism that authenticated the current session, when any. */
   method?: string;
   /** Configured mechanisms, for the login screen. */
@@ -68,7 +70,7 @@ export class AuthService {
     return {
       required,
       authenticated: !required || session !== null,
-      ...(session ? { method: session.method } : {}),
+      ...(session ? { subject: session.subject, method: session.method } : {}),
       methods: required ? this.methods() : [],
     };
   }

@@ -154,9 +154,9 @@
 
   .row {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-small);
     align-items: flex-start;
-    padding: 0.25rem 0.4rem;
+    padding: var(--space-large) var(--space-small);
     border-radius: var(--m3-shape-small);
   }
 
@@ -220,9 +220,9 @@
     align-self: flex-start;
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    margin: 0.1rem 0 0.1rem 0.1rem;
-    padding: 0.15rem 0.5rem 0.15rem 0.3rem;
+    gap: var(--space-large);
+    margin: 0 0 0 0;
+    padding: 0 var(--space-small) 0 var(--space-large);
     border: none;
     border-radius: var(--m3-shape-full);
     background: transparent;

@@ -331,12 +331,6 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     get language() {
       return config.defaults.briefLanguage;
     },
-    get followups() {
-      return config.defaults.followups;
-    },
-    get events() {
-      return config.defaults.events;
-    },
     get eventTagModel() {
       return config.defaults.eventTagModel;
     },

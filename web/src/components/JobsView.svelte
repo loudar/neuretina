@@ -305,7 +305,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-small);
   }
 
 
@@ -314,6 +314,6 @@
   }
 
   .facts {
-    margin-top: 1.25rem;
+    margin-top: var(--space-large);
   }
 </style>

@@ -114,7 +114,7 @@
 
 <style>
   .filter {
-    padding: 0.25rem 0.25rem 0.6rem;
+    padding: var(--space-large) var(--space-large) var(--space-small);
   }
 
   .event-list {
@@ -125,11 +125,11 @@
 
   .event {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--space-medium);
     align-items: baseline;
     width: 100%;
     box-sizing: border-box;
-    padding: 0.4rem 0.5rem;
+    padding: var(--space-small) var(--space-small);
     border: none;
     border-radius: var(--m3-shape-small);
     background: transparent;
@@ -170,14 +170,14 @@
   .facts {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: var(--space-small);
     max-width: 48rem;
   }
 
   .fact {
     display: flex;
     align-items: baseline;
-    gap: 0.75rem;
+    gap: var(--space-medium);
     font-size: 0.9rem;
   }
 
@@ -189,7 +189,7 @@
 
   pre {
     margin: 0;
-    padding: 0.75rem;
+    padding: var(--space-medium);
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-low);

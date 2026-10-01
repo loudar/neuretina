@@ -153,9 +153,9 @@
   .artifact-actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-small);
     flex-wrap: wrap;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-medium);
   }
 
   audio {
@@ -169,7 +169,7 @@
 
   pre {
     margin: 0;
-    padding: 0.75rem;
+    padding: var(--space-medium);
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-lowest);

@@ -18,6 +18,86 @@
 
   const groups = $derived([...new Set(settings.map((setting) => setting.group))]);
 
+  let layout = $state<HTMLElement | null>(null);
+  let activeGroup = $state<string | null>(null);
+  /** Set while a click-initiated smooth scroll runs; scroll tracking waits. */
+  let scrollTarget = $state<{ group: string; top: number } | null>(null);
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function sectionId(group: string): string {
+    return `settings-${group.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  }
+
+  function scroller(): HTMLElement | null {
+    return layout?.closest<HTMLElement>(".body") ?? null;
+  }
+
+  function sectionTop(container: HTMLElement, section: HTMLElement): number {
+    return (
+      section.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop
+    );
+  }
+
+  function updateActive(): void {
+    const container = scroller();
+    if (!container) return;
+
+    // A click just started a smooth scroll: keep the clicked section
+    // highlighted instead of letting the animation walk the selection.
+    if (scrollTarget) {
+      if (Math.abs(container.scrollTop - scrollTarget.top) >= 2) return;
+      scrollTarget = null;
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+    }
+
+    let current: string | null = null;
+    for (const group of groups) {
+      const section = document.getElementById(sectionId(group));
+      if (section && sectionTop(container, section) - container.scrollTop <= 96) {
+        current = group;
+      }
+    }
+    activeGroup = current ?? groups[0] ?? null;
+  }
+
+  function jump(group: string): void {
+    const container = scroller();
+    const section = document.getElementById(sectionId(group));
+    if (!container || !section) return;
+
+    const top = Math.max(0, sectionTop(container, section) - 12);
+    activeGroup = group;
+    scrollTarget = { group, top };
+    if (settleTimer) clearTimeout(settleTimer);
+    // Fallback for interrupted or instant (reduced-motion) scrolls.
+    settleTimer = setTimeout(() => {
+      scrollTarget = null;
+      updateActive();
+    }, 900);
+    container.scrollTo({ top, behavior: "smooth" });
+  }
+
+  // Track which section is at the top of the settings scroll area.
+  $effect(() => {
+    const container = scroller();
+    if (!container) return;
+    const onScroll = () => updateActive();
+    container.addEventListener("scroll", onScroll, { passive: true });
+    updateActive();
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      if (settleTimer) {
+        clearTimeout(settleTimer);
+        settleTimer = null;
+      }
+    };
+  });
+
   onMount(() => void refresh());
 
   async function refresh(): Promise<void> {
@@ -124,18 +204,28 @@
     <Button variant="text" onclick={() => void refresh()} disabled={loading}>Reload</Button>
   {/snippet}
 
-  <p class="muted intro">
-    Stored in the SQLite database and applied immediately. Values provided by
-    <code>.env</code> always win over the database and are marked with a warning. Boot-time
-    settings (<code>PORT</code>, <code>DB_PATH</code>, <code>TZ</code>, <code>LOG_LEVEL</code>) stay
-    in <code>.env</code>.
-  </p>
-
   {#if loading}
     <p class="muted">Loading settings…</p>
   {:else}
-    {#each groups as group (group)}
-      <section class="group">
+    <div class="settings-layout" bind:this={layout}>
+      <div class="settings-nav-slot">
+        <nav class="settings-nav" aria-label="Settings sections">
+          {#each groups as group (group)}
+            <button
+              type="button"
+              class="nav-item"
+              class:active={activeGroup === group}
+              onclick={() => jump(group)}
+            >
+              {group}
+            </button>
+          {/each}
+        </nav>
+      </div>
+
+      <div class="settings-content">
+        {#each groups as group (group)}
+          <section class="group" id={sectionId(group)}>
         <h3>{group}</h3>
 
         {#each inGroup(group) as setting (setting.key)}
@@ -223,7 +313,9 @@
           </article>
         {/each}
       </section>
-    {/each}
+        {/each}
+      </div>
+    </div>
   {/if}
 
   <Dialog headline="Reset this setting?" bind:open={confirmingReset}>
@@ -241,24 +333,95 @@
 </Pane>
 
 <style>
-  .intro {
-    @apply --m3-body-medium;
-    margin: 0 0 1.25rem;
-    max-width: 44rem;
+  /* The nav is absolutely placed inside the reserved left padding, so it can
+     never overlap the settings content, whatever the width math does. The
+     inner nav sticks while its full-height slot scrolls past. */
+  .settings-layout {
+    position: relative;
+    padding-left: calc(12rem + var(--space-large));
   }
 
-  .intro code {
-    @apply --m3-body-small;
+  .settings-nav-slot {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 12rem;
+  }
+
+  .settings-nav {
+    position: sticky;
+    top: 0;
+    box-sizing: border-box;
+    width: 12rem;
+    display: flex;
+    flex-direction: column;
+    /* Same gap on both sides of the nav. */
+    padding-right: var(--space-large);
+  }
+
+  .nav-item {
+    display: block;
+    width: 100%;
+    padding: var(--space-small) var(--space-medium);
+    border: none;
+    border-radius: var(--m3-shape-small);
+    background: transparent;
+    color: var(--m3c-on-surface-variant);
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1.35;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+
+  .nav-item:hover {
+    background-color: var(--m3c-surface-container-high);
+  }
+
+  .nav-item.active {
+    background-color: var(--m3c-secondary-container);
+    color: var(--m3c-on-secondary-container);
+  }
+
+  .settings-content {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  @media (max-width: 720px) {
+    .settings-layout {
+      padding-left: 0;
+    }
+
+    .settings-nav-slot {
+      position: static;
+      width: 100%;
+    }
+
+    .settings-nav {
+      position: static;
+      width: 100%;
+      flex-direction: row;
+      flex-wrap: wrap;
+      padding: 0 0 var(--space-medium);
+    }
+
+    .nav-item {
+      width: auto;
+    }
   }
 
   .group {
     max-width: 60rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-large);
   }
 
   .group h3 {
     @apply --m3-title-small;
-    margin: 0 0 0.5rem;
+    margin: 0 0 var(--space-small);
     color: var(--m3c-on-surface-variant);
   }
 
@@ -266,8 +429,8 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.7rem 0;
+    gap: var(--space-large);
+    padding: var(--space-medium) 0;
   }
 
   .setting + .setting {
@@ -277,7 +440,6 @@
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -286,7 +448,7 @@
     @apply --m3-body-large;
     display: flex;
     align-items: center;
-    gap: 0.3rem;
+    gap: var(--space-small);
   }
 
   .override {
@@ -314,13 +476,13 @@
     align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-small);
     flex: 0 0 auto;
   }
 
   .buttons {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: var(--space-small);
   }
 </style>

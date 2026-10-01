@@ -57,8 +57,8 @@
   .reading-sizes {
     display: flex;
     justify-content: flex-end;
-    gap: 0.1rem;
-    margin-bottom: 0.15rem;
+    gap: var(--space-small);
+    margin-bottom: 0;
   }
 
   .aa {
@@ -67,7 +67,7 @@
     justify-content: center;
     min-width: 1.8rem;
     height: 1.7rem;
-    padding: 0 0.4rem;
+    padding: 0 var(--space-small);
     border: none;
     border-radius: var(--m3-shape-full);
     background: transparent;
@@ -99,7 +99,7 @@
   }
 
   .markdown {
-    padding: 0.25rem 0;
+    padding: var(--space-large) 0;
     font-size: var(--markdown-font-size, calc(0.95rem + 2px));
     line-height: 1.55;
     text-align: justify;
@@ -112,27 +112,27 @@
   .markdown :global(h2),
   .markdown :global(h3),
   .markdown :global(h4) {
-    margin: 0.9rem 0 0.4rem;
+    margin: var(--space-large) 0 var(--space-small);
     font-size: 1.05rem;
     font-weight: 600;
   }
 
   .markdown :global(p) {
-    margin: 0 0 0.7rem;
+    margin: 0 0 var(--space-medium);
   }
 
   .markdown :global(ul),
   .markdown :global(ol) {
-    margin: 0 0 0.7rem;
+    margin: 0 0 var(--space-medium);
     padding-inline-start: 1.25rem;
   }
 
   .markdown :global(li) {
-    margin-bottom: 0.2rem;
+    margin-bottom: 0;
   }
 
   .markdown :global(blockquote) {
-    margin: 0 0 0.7rem;
+    margin: 0 0 var(--space-medium);
     padding-inline-start: 0.75rem;
     border-inline-start: 3px solid var(--m3c-outline-variant);
     color: var(--m3c-on-surface-variant);
@@ -143,7 +143,7 @@
   }
 
   .markdown :global(code) {
-    padding: 0.05rem 0.3rem;
+    padding: 0 var(--space-large);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-high);
     font-size: 0.85em;

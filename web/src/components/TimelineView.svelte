@@ -248,8 +248,8 @@
   .timeline-head {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: var(--space-small);
+    margin-bottom: var(--space-small);
   }
 
   .timeline-title {
@@ -258,7 +258,7 @@
   }
 
   .timeline-count {
-    padding: 0.05rem 0.5rem;
+    padding: 0 var(--space-small);
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-surface-container-highest);
     color: var(--m3c-on-surface-variant);
@@ -268,7 +268,7 @@
 
   .view-toggle {
     display: inline-flex;
-    gap: 0.1rem;
+    gap: var(--space-small);
     margin-left: auto;
   }
 
@@ -432,7 +432,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.1rem;
+    gap: var(--space-small);
   }
 
   .track.horizontal .labels {
@@ -488,10 +488,10 @@
     left: 0;
     z-index: 90;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: var(--space-small);
     min-width: 15rem;
     max-width: min(28rem, 80vw);
-    padding: 0.55rem 0.7rem;
+    padding: var(--space-small) var(--space-medium);
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-medium);
     background-color: var(--m3c-surface-container-high);
@@ -515,12 +515,12 @@
   .popover-event {
     display: flex;
     flex-direction: column;
-    gap: 0.2rem;
+    gap: var(--space-small);
   }
 
   .popover-event + .popover-event {
-    margin-top: 0.45rem;
-    padding-top: 0.45rem;
+    margin-top: var(--space-small);
+    padding-top: var(--space-small);
     border-top: 1px solid var(--m3c-outline-variant);
   }
 
@@ -528,7 +528,7 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.6rem;
+    gap: var(--space-small);
   }
 
   .popover-title {
@@ -553,7 +553,7 @@
   .popover-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.3rem;
-    margin-top: 0.1rem;
+    gap: var(--space-large);
+    margin-top: 0;
   }
 </style>

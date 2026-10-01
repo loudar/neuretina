@@ -982,7 +982,7 @@
   }
 
   .subhead {
-    padding-inline: 0.25rem;
+    padding-inline: var(--space-large);
   }
 
   .workflow-form {
@@ -997,26 +997,26 @@
   }
 
   .hint {
-    margin-top: 1rem;
+    margin-top: var(--space-large);
     max-width: 36rem;
   }
 
   .preview {
-    margin: 0 0 1rem;
+    margin: 0 0 var(--space-large);
     overflow-wrap: anywhere;
   }
 
   .delivery {
     display: flex;
     align-items: flex-start;
-    gap: 0.6rem;
-    padding: 0.55rem 0.25rem;
+    gap: var(--space-small);
+    padding: var(--space-small) var(--space-large);
   }
 
   .delivery-info {
     display: flex;
     flex-direction: column;
-    gap: 0.1rem;
+    gap: var(--space-small);
     min-width: 0;
     flex: 1 1 auto;
   }

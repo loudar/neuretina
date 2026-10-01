@@ -477,4 +477,11 @@ h3 {
   color: var(--m3c-on-tertiary-container);
 }
 
+/* One spacing scale for every margin, padding and gap. */
+:root {
+  --space-small: 0.5rem;
+  --space-medium: 0.75rem;
+  --space-large: 1rem;
+}
+
 

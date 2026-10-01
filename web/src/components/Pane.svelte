@@ -181,10 +181,10 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-medium);
     height: 3.5rem;
     flex: none;
-    padding: 0 1rem;
+    padding: 0 var(--space-large);
     border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
@@ -192,7 +192,7 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 0;
+    gap: var(--space-small);
     min-width: 0;
   }
 
@@ -216,7 +216,7 @@
   .head-actions {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-small);
     flex-shrink: 0;
   }
 
@@ -225,11 +225,11 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 1rem;
+    padding: var(--space-large);
   }
 
   .pane.list .body {
-    padding: 0.5rem 0.75rem 1.5rem;
+    padding: var(--space-small) var(--space-medium) var(--space-large);
   }
 
   .resizer {

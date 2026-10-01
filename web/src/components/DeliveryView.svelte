@@ -519,18 +519,18 @@
 <style>
   .intro {
     @apply --m3-body-medium;
-    margin: 0 0 1.25rem;
+    margin: 0 0 var(--space-large);
     max-width: 44rem;
   }
 
   .group {
     max-width: 60rem;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-large);
   }
 
   .group h3 {
     @apply --m3-title-small;
-    margin: 0 0 0.5rem;
+    margin: 0 0 var(--space-small);
     color: var(--m3c-on-surface-variant);
   }
 
@@ -538,14 +538,14 @@
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.7rem 0;
+    gap: var(--space-large);
+    padding: var(--space-medium) 0;
   }
 
   .info {
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: var(--space-small);
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -554,7 +554,7 @@
     @apply --m3-body-large;
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-small);
   }
 
   .desc {
@@ -567,14 +567,14 @@
     align-items: center;
     justify-content: flex-end;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-small);
     flex: 0 0 auto;
   }
 
   .secure-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-small);
     color: var(--m3c-on-surface-variant);
     font-size: 0.85rem;
     cursor: pointer;
@@ -584,7 +584,7 @@
   .type-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-small);
   }
 
   .hint {
@@ -594,7 +594,7 @@
   .channel-form {
     display: flex;
     flex-direction: column;
-    gap: 0.9rem;
+    gap: var(--space-large);
     width: min(24rem, 100%);
   }
 </style>

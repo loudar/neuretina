@@ -55,16 +55,16 @@
     display: grid;
     place-items: center;
     min-height: 100dvh;
-    padding: 1rem;
+    padding: var(--space-large);
     background-color: var(--m3c-surface);
   }
 
   .panel {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-medium);
     width: min(22rem, 100%);
-    padding: 1.5rem;
+    padding: var(--space-large);
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-large);
     background-color: var(--m3c-surface-container-low);

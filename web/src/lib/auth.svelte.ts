@@ -10,6 +10,8 @@ export interface AuthMethodInfo {
 export interface AuthStatusInfo {
   required: boolean;
   authenticated: boolean;
+  /** Account the current session belongs to. */
+  subject?: string;
   method?: string;
   methods: AuthMethodInfo[];
 }
@@ -63,10 +65,11 @@ class AuthState {
             : "Wrong password.";
         return false;
       }
+      const body = (await response.json().catch(() => ({}))) as { subject?: string };
       const status = this.status;
       this.status = status
-        ? { ...status, authenticated: true, method }
-        : { required: true, authenticated: true, method, methods: [] };
+        ? { ...status, authenticated: true, method, subject: body.subject }
+        : { required: true, authenticated: true, method, subject: body.subject, methods: [] };
       return true;
     } catch {
       this.error = "Could not reach the server.";
