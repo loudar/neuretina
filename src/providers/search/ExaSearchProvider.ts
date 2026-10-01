@@ -1,5 +1,6 @@
 import { ConfigurationError } from "../../core/errors.ts";
 import { requestJson } from "../../infra/http/request.ts";
+import { hostnameOf, recencySinceIso } from "./searchSupport.ts";
 import type {
   SearchProvider,
   SearchQuery,
@@ -62,7 +63,7 @@ export class ExaSearchProvider implements SearchProvider {
       type: "auto",
       contents: { text: { maxCharacters: 1000 } },
     };
-    const since = recencyStart(query.recency);
+    const since = recencySinceIso(query.recency);
     if (since) payload.startPublishedDate = since;
     // Exa takes exact domains only (no TLDs, paths or wildcards).
     const domains = (query.domains ?? []).filter(
@@ -96,27 +97,5 @@ export class ExaSearchProvider implements SearchProvider {
 
   private headers(): Record<string, string> {
     return { "x-api-key": this.options.apiKey ?? "", "Content-Type": "application/json" };
-  }
-}
-
-const RECENCY_DAYS: Record<SearchRecency, number> = {
-  hour: 1,
-  day: 1,
-  "3days": 3,
-  week: 7,
-  month: 30,
-  year: 365,
-};
-
-function recencyStart(recency: SearchRecency | undefined): string | undefined {
-  if (!recency) return undefined;
-  return new Date(Date.now() - RECENCY_DAYS[recency] * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "web";
   }
 }

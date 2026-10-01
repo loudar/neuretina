@@ -1,5 +1,6 @@
 import { ConfigurationError } from "../../core/errors.ts";
 import { requestJson } from "../../infra/http/request.ts";
+import { hostnameOf } from "./searchSupport.ts";
 import type {
   SearchProvider,
   SearchQuery,
@@ -136,14 +137,6 @@ function reportedCostUsd(usage: unknown): number | undefined {
     if (typeof value === "number" && Number.isFinite(value)) return value;
   }
   return undefined;
-}
-
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "web";
-  }
 }
 
 /** Perplexity expects MM/DD/YYYY for date filters. */
