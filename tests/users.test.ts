@@ -4,19 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "../src/core/logger.ts";
 import { createKernel } from "../src/kernel/Kernel.ts";
-import { StubTts, completion, stubLlm, stubSearch, testConfig } from "./support.ts";
+import { StubTts, completion, createTestKernel, stubLlm, stubSearch, testConfig } from "./support.ts";
 
 describe("per-user runtimes", () => {
   test("each account only sees its own data", async () => {
     const dir = mkdtempSync(join(tmpdir(), "neuretina-users-"));
-    const kernel = await createKernel({
-      config: testConfig({ DB_PATH: join(dir, "app.db") }),
-      logger: createLogger("test", { level: "error" }),
-      llm: stubLlm(() => completion("ok")),
-      webSearch: stubSearch("perplexity", "web"),
-      socialSearch: stubSearch("bluesky", "social"),
-      tts: new StubTts(),
-    });
+    const kernel = await createTestKernel({ config: testConfig({ DB_PATH: join(dir, "app.db") }) });
 
     try {
       expect(kernel.adminUser).toBe("admin");

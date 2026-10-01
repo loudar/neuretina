@@ -1,4 +1,10 @@
 import { loadConfig, type AppConfig } from "../src/config/env.ts";
+import { createLogger } from "../src/core/logger.ts";
+import {
+  createKernel,
+  type Kernel,
+  type KernelOverrides,
+} from "../src/kernel/Kernel.ts";
 import type { EventBus } from "../src/core/events/EventBus.ts";
 import type { DomainEvent } from "../src/core/events/types.ts";
 import type {
@@ -34,6 +40,19 @@ export function testConfig(overrides: Record<string, string | undefined> = {}): 
     PORT: "0",
     LOG_LEVEL: "error",
     STARTUP_CHECK: "false",
+    ...overrides,
+  });
+}
+
+/** A kernel wired with the standard test stubs; override anything as needed. */
+export async function createTestKernel(overrides: KernelOverrides = {}): Promise<Kernel> {
+  return createKernel({
+    config: overrides.config ?? testConfig(),
+    logger: createLogger("test", { level: "error" }),
+    llm: stubLlm(() => completion("ok")),
+    webSearch: stubSearch("perplexity", "web"),
+    socialSearch: stubSearch("bluesky", "social"),
+    tts: new StubTts(),
     ...overrides,
   });
 }

@@ -6,6 +6,7 @@ import {
   StubDeliveryService,
   StubTts,
   completion,
+  createTestKernel,
   stubLlm,
   stubSearch,
   stubWorkflow,
@@ -19,15 +20,7 @@ let delivery: StubDeliveryService;
 
 beforeAll(async () => {
   delivery = new StubDeliveryService();
-  kernel = await createKernel({
-    config: testConfig(),
-    logger: createLogger("test", { level: "error" }),
-    llm: stubLlm(() => completion("ok")),
-    webSearch: stubSearch("perplexity", "web"),
-    socialSearch: stubSearch("bluesky", "social"),
-    tts: new StubTts(),
-    delivery,
-  });
+  kernel = await createTestKernel({ delivery });
   base = `http://127.0.0.1:${kernel.api.port}`;
 });
 

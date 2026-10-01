@@ -3,7 +3,7 @@ import { AuthService } from "../src/auth/AuthService.ts";
 import { RateLimiter } from "../src/auth/RateLimiter.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { createKernel, type Kernel } from "../src/kernel/Kernel.ts";
-import { StubTts, completion, stubLlm, stubSearch, testConfig } from "./support.ts";
+import { StubTts, completion, createTestKernel, stubLlm, stubSearch, testConfig } from "./support.ts";
 
 describe("AuthService", () => {
   test("issues a session for the right password, not the wrong one", () => {
@@ -109,14 +109,7 @@ describe("password-protected gateway", () => {
   let base: string;
 
   beforeAll(async () => {
-    kernel = await createKernel({
-      config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }),
-      logger: createLogger("test", { level: "error" }),
-      llm: stubLlm(() => completion("ok")),
-      webSearch: stubSearch("perplexity", "web"),
-      socialSearch: stubSearch("bluesky", "social"),
-      tts: new StubTts(),
-    });
+    kernel = await createTestKernel({ config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }) });
     base = `http://127.0.0.1:${kernel.api.port}`;
   });
 
@@ -187,14 +180,7 @@ describe("login rate limiting", () => {
   // A dedicated kernel: the limiter is per server and per client address, so
   // the other tests' login calls must not count against this window.
   beforeAll(async () => {
-    kernel = await createKernel({
-      config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }),
-      logger: createLogger("test", { level: "error" }),
-      llm: stubLlm(() => completion("ok")),
-      webSearch: stubSearch("perplexity", "web"),
-      socialSearch: stubSearch("bluesky", "social"),
-      tts: new StubTts(),
-    });
+    kernel = await createTestKernel({ config: testConfig({ AUTH_GLOBAL_PASSWORD: "hunter2" }) });
     base = `http://127.0.0.1:${kernel.api.port}`;
   });
 
