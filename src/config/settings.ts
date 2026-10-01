@@ -77,30 +77,41 @@ function toSearchDomains(value: string | undefined): string[] {
     .slice(0, 20);
 }
 
-export const SETTING_DEFINITIONS: SettingDefinition[] = [
+interface SettingSpec {
+  key: string;
+  group: string;
+  label: string;
+  description?: string;
+  kind: SettingKind;
+  options?: string[];
+  default?: string;
+  userOnly?: boolean;
+  /** Dotted path into AppConfig the effective value is written to. */
+  path: string;
+}
+
+/** One row per setting; the definition's behavior is derived from this. */
+const SETTING_SPECS: SettingSpec[] = [
   {
     key: "LLM_API_KEY",
     group: "LLM",
     label: "API key",
     description:
-      "Key for your OpenAI-compatible endpoint (OpenCode Go, OpenAI, a local vLLM, etc). OpenCode endpoints get their session header automatically.",
+      "Key for your OpenAI-compatible endpoint (OpenCode Go, OpenAI, a local vLLM, …). OpenCode endpoints get their session header automatically.",
     kind: "secret",
     userOnly: true,
-    apply: (config, value) => {
-      config.llm.apiKey = optional(value);
-    },
+    path: "llm.apiKey",
   },
   {
     key: "LLM_BASE_URL",
     group: "LLM",
     label: "Base URL",
-    description: "OpenAI-compatible endpoint, e.g. https://opencode.ai/zen/go/v1 or https://api.openai.com/v1.",
+    description:
+      "OpenAI-compatible endpoint, e.g. https://opencode.ai/zen/go/v1 or https://api.openai.com/v1.",
     kind: "string",
     default: "https://opencode.ai/zen/go/v1",
     userOnly: true,
-    apply: (config, value) => {
-      config.llm.baseUrl = optional(value) ?? "https://opencode.ai/zen/go/v1";
-    },
+    path: "llm.baseUrl",
   },
   {
     key: "LLM_MODEL",
@@ -109,9 +120,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "deepseek-v4.1-flash",
     userOnly: true,
-    apply: (config, value) => {
-      config.llm.model = optional(value) ?? "deepseek-v4.1-flash";
-    },
+    path: "llm.model",
   },
 
   {
@@ -121,9 +130,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     description: "Used for web search and the finance lookup tool.",
     kind: "secret",
     userOnly: true,
-    apply: (config, value) => {
-      config.perplexity.apiKey = optional(value);
-    },
+    path: "perplexity.apiKey",
   },
   {
     key: "PERPLEXITY_BASE_URL",
@@ -132,9 +139,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "https://api.perplexity.ai",
     userOnly: true,
-    apply: (config, value) => {
-      config.perplexity.baseUrl = optional(value) ?? "https://api.perplexity.ai";
-    },
+    path: "perplexity.baseUrl",
   },
   {
     key: "PERPLEXITY_FINANCE_MODEL",
@@ -144,9 +149,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "perplexity/glm-5.3-flash",
     userOnly: true,
-    apply: (config, value) => {
-      config.perplexity.financeModel = optional(value) ?? "perplexity/glm-5.3-flash";
-    },
+    path: "perplexity.financeModel",
   },
   {
     key: "KEY_EXA",
@@ -155,9 +158,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     description: "Adds a second web search tool (search.exa) for neural and keyword search.",
     kind: "secret",
     userOnly: true,
-    apply: (config, value) => {
-      config.exa.apiKey = optional(value);
-    },
+    path: "exa.apiKey",
   },
   {
     key: "EXA_BASE_URL",
@@ -166,9 +167,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "https://api.exa.ai",
     userOnly: true,
-    apply: (config, value) => {
-      config.exa.baseUrl = optional(value) ?? "https://api.exa.ai";
-    },
+    path: "exa.baseUrl",
   },
 
   {
@@ -181,118 +180,99 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     options: ["qwen", "elevenlabs"],
     default: "qwen",
     userOnly: true,
-    apply: (config, value) => {
-      config.tts.provider = value === "elevenlabs" ? "elevenlabs" : "qwen";
-    },
+    path: "tts.provider",
   },
 
   {
     key: "QWEN_TTS_BASE_URL",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Base URL",
     description:
       "Local OpenAI-compatible TTS server including /v1, e.g. http://127.0.0.1:8880/v1. Speech is skipped when empty.",
     kind: "string",
-    apply: (config, value) => {
-      config.qwenTts.baseUrl = value ?? "";
-    },
+    default: "",
+    userOnly: true,
+    path: "qwenTts.baseUrl",
   },
   {
     key: "QWEN_TTS_MODEL",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Model",
     description: "Most local servers accept and ignore the model name.",
     kind: "string",
     default: "tts-1",
-    apply: (config, value) => {
-      config.qwenTts.model = optional(value) ?? "tts-1";
-    },
+    userOnly: true,
+    path: "qwenTts.model",
   },
   {
     key: "QWEN_TTS_VOICE",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Voice",
-    description: "Preset speaker (Ryan, vivian, etc) or an OpenAI alias (alloy, nova, etc).",
+    description: "Preset speaker (Ryan, vivian, …) or an OpenAI alias (alloy, nova, …).",
     kind: "string",
     default: "Ryan",
-    apply: (config, value) => {
-      config.qwenTts.voiceId = optional(value) ?? "Ryan";
-    },
+    userOnly: true,
+    path: "qwenTts.voiceId",
   },
   {
     key: "QWEN_TTS_FORMAT",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Output format",
     description: "opus renders as a voice message; wav/mp3/flac/aac/pcm also work.",
     kind: "enum",
     options: ["opus", "wav", "mp3", "flac", "aac", "pcm"],
     default: "opus",
-    apply: (config, value) => {
-      config.qwenTts.outputFormat = optional(value) ?? "opus";
-    },
+    userOnly: true,
+    path: "qwenTts.outputFormat",
   },
   {
     key: "QWEN_TTS_REQUEST_FORMAT",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Server request format",
     description:
       "What to ask the server for. Set wav for strict GGML servers that reject opus; the engine converts the response to the output format locally with ffmpeg. Empty asks for the output format directly.",
     kind: "enum",
     options: ["opus", "wav", "mp3", "flac", "aac", "pcm"],
-    apply: (config, value) => {
-      config.qwenTts.requestFormat = optional(value);
-    },
+    userOnly: true,
+    path: "qwenTts.requestFormat",
   },
   {
     key: "QWEN_TTS_SPEED",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Speed",
     kind: "number",
     default: "1",
-    apply: (config, value) => {
-      config.qwenTts.speed = toNumber(value, 1);
-    },
+    userOnly: true,
+    path: "qwenTts.speed",
   },
   {
     key: "QWEN_TTS_LANGUAGE",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Language",
     description: "Optional language hint for multilingual servers, e.g. English.",
     kind: "string",
-    apply: (config, value) => {
-      config.qwenTts.language = optional(value);
-    },
+    userOnly: true,
+    path: "qwenTts.language",
   },
   {
     key: "QWEN_TTS_API_KEY",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "API key",
     description: "Only needed when the local server enforces auth.",
     kind: "secret",
-    apply: (config, value) => {
-      config.qwenTts.apiKey = optional(value);
-    },
+    userOnly: true,
+    path: "qwenTts.apiKey",
   },
   {
     key: "QWEN_TTS_TIMEOUT_MS",
-    userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Synthesis timeout (ms)",
     description:
       "Per-attempt limit for one synthesis request. CPU inference needs minutes per brief; GPU servers answer in seconds.",
     kind: "number",
     default: "600000",
-    apply: (config, value) => {
-      config.qwenTts.timeoutMs = toNumber(value, 600_000);
-    },
+    userOnly: true,
+    path: "qwenTts.timeoutMs",
   },
 
   {
@@ -301,9 +281,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     label: "API key",
     kind: "secret",
     userOnly: true,
-    apply: (config, value) => {
-      config.elevenlabs.apiKey = optional(value);
-    },
+    path: "elevenlabs.apiKey",
   },
   {
     key: "ELEVENLABS_VOICE_ID",
@@ -312,9 +290,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "JBFqnCBsd6RMkjVDRZzb",
     userOnly: true,
-    apply: (config, value) => {
-      config.elevenlabs.voiceId = optional(value) ?? "JBFqnCBsd6RMkjVDRZzb";
-    },
+    path: "elevenlabs.voiceId",
   },
   {
     key: "ELEVENLABS_MODEL_ID",
@@ -323,9 +299,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "eleven_v4",
     userOnly: true,
-    apply: (config, value) => {
-      config.elevenlabs.modelId = optional(value) ?? "eleven_v4";
-    },
+    path: "elevenlabs.modelId",
   },
   {
     key: "ELEVENLABS_SPEED",
@@ -334,9 +308,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "number",
     default: "1.15",
     userOnly: true,
-    apply: (config, value) => {
-      config.elevenlabs.speed = toNumber(value, 1.15);
-    },
+    path: "elevenlabs.speed",
   },
 
   {
@@ -346,9 +318,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     description: "Account handle used to authenticate search (recommended).",
     kind: "string",
     userOnly: true,
-    apply: (config, value) => {
-      config.bluesky.identifier = optional(value);
-    },
+    path: "bluesky.identifier",
   },
   {
     key: "BLUESKY_APP_PASSWORD",
@@ -356,9 +326,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     label: "App password",
     kind: "secret",
     userOnly: true,
-    apply: (config, value) => {
-      config.bluesky.appPassword = optional(value);
-    },
+    path: "bluesky.appPassword",
   },
   {
     key: "BLUESKY_PDS_URL",
@@ -367,9 +335,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     description: "Leave empty to auto-discover the PDS from the account's DID document.",
     kind: "string",
     userOnly: true,
-    apply: (config, value) => {
-      config.bluesky.pdsUrl = optional(value);
-    },
+    path: "bluesky.pdsUrl",
   },
   {
     key: "BLUESKY_PUBLIC_URL",
@@ -379,12 +345,38 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     kind: "string",
     default: "https://public.api.bsky.app",
     userOnly: true,
-    apply: (config, value) => {
-      config.bluesky.publicUrl = optional(value) ?? "https://public.api.bsky.app";
-    },
+    path: "bluesky.publicUrl",
   },
-
 ];
+
+export const SETTING_DEFINITIONS: SettingDefinition[] = SETTING_SPECS.map((spec) => ({
+  key: spec.key,
+  group: spec.group,
+  label: spec.label,
+  description: spec.description,
+  kind: spec.kind,
+  options: spec.options,
+  default: spec.default,
+  userOnly: spec.userOnly,
+  apply: (config, value) => setPath(config, spec.path, parseSetting(spec, value)),
+}));
+
+/** Parses a raw setting value into the shape its config path expects. */
+function parseSetting(spec: SettingSpec, value: string | undefined): unknown {
+  if (spec.kind === "number") return toNumber(value, Number(spec.default ?? 0));
+  if (spec.default !== undefined) return optional(value) ?? spec.default;
+  return optional(value);
+}
+
+/** Writes a dotted path ("llm.apiKey") on the config object. */
+function setPath(target: object, path: string, value: unknown): void {
+  const parts = path.split(".");
+  const last = parts.pop();
+  if (!last) return;
+  let node = target as Record<string, unknown>;
+  for (const part of parts) node = node[part] as Record<string, unknown>;
+  node[last] = value;
+}
 
 /**
  * Settings live in the SQLite key/value store and can be edited in the UI.
