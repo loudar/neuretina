@@ -253,7 +253,7 @@
   }
 
   .timeline-title {
-    font-size: 0.95rem;
+    font-size: var(--font-medium);
     font-weight: 600;
   }
 
@@ -262,7 +262,7 @@
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-surface-container-highest);
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
     line-height: 1.5;
   }
 
@@ -377,7 +377,7 @@
   .scale-label {
     white-space: nowrap;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.68rem;
+    font-size: var(--font-small);
     line-height: 1.3;
   }
 
@@ -456,7 +456,7 @@
     background: transparent;
     color: var(--m3c-on-surface);
     font: inherit;
-    font-size: 0.84rem;
+    font-size: var(--font-medium);
     line-height: 1.4;
     text-align: left;
     overflow: hidden;
@@ -497,7 +497,7 @@
     background-color: var(--m3c-surface-container-high);
     box-shadow: var(--m3-elevation-3);
     color: var(--m3c-on-surface);
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
     font-weight: 400;
     line-height: 1.45;
     text-align: start;
@@ -532,7 +532,7 @@
   }
 
   .popover-title {
-    font-size: 0.92rem;
+    font-size: var(--font-medium);
     font-weight: 600;
     line-height: 1.35;
   }
@@ -540,13 +540,13 @@
   .popover-when {
     flex: none;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.72rem;
+    font-size: var(--font-small);
     white-space: nowrap;
   }
 
   .popover-description {
     color: var(--m3c-on-surface-variant);
-    font-size: 0.83rem;
+    font-size: var(--font-medium);
     white-space: pre-wrap;
   }
 

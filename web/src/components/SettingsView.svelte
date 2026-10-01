@@ -469,7 +469,7 @@
     background: transparent;
     color: var(--m3c-on-surface-variant);
     font: inherit;
-    font-size: 1rem;
+    font-size: var(--font-medium);
     line-height: 1.35;
     text-align: left;
     white-space: normal;

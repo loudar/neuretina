@@ -152,7 +152,7 @@
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-surface-container-highest);
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
     line-height: 1.5;
   }
 
@@ -210,7 +210,7 @@
 
   .domain {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: var(--font-medium);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -218,7 +218,7 @@
 
   .count {
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
   }
 
   .provider-tags {
@@ -274,7 +274,7 @@
     border-radius: var(--m3-shape-full);
     background-color: var(--m3c-tertiary-container);
     color: var(--m3c-on-tertiary-container);
-    font-size: 0.68rem;
+    font-size: var(--font-small);
     font-weight: 600;
     line-height: 1;
   }
@@ -282,7 +282,7 @@
   .title {
     flex: 1;
     min-width: 0;
-    font-size: 0.88rem;
+    font-size: var(--font-medium);
     line-height: 1.35;
   }
 
@@ -300,7 +300,7 @@
 
   .snippet {
     margin: 0 0 0;
-    font-size: 0.84rem;
+    font-size: var(--font-medium);
     line-height: 1.45;
     color: var(--m3c-on-surface-variant);
     white-space: pre-wrap;

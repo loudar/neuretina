@@ -79,7 +79,7 @@
     display: block;
     margin-bottom: var(--space-small);
     color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
     font-weight: 600;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -87,7 +87,7 @@
 
   h1 {
     margin: 0 0 var(--space-small);
-    font-size: 1.4rem;
+    font-size: var(--font-large);
     font-weight: 600;
     line-height: 1.4;
   }

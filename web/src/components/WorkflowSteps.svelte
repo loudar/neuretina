@@ -162,7 +162,7 @@
     align-items: center;
     gap: var(--space-small);
     margin: 0;
-    font-size: 0.82rem;
+    font-size: var(--font-medium);
     font-weight: 500;
     color: var(--m3c-on-surface-variant);
   }
@@ -176,7 +176,7 @@
     border-radius: 50%;
     background-color: var(--m3c-secondary-container);
     color: var(--m3c-on-secondary-container);
-    font-size: 0.7rem;
+    font-size: var(--font-small);
   }
 
   /* Horizontal connectors: inputs → action → outputs. */
@@ -285,20 +285,20 @@
     gap: var(--space-large);
     flex: none;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.78rem;
+    font-size: var(--font-small);
     white-space: nowrap;
     user-select: none;
   }
 
   .description {
     margin: 0;
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
     line-height: 1.4;
   }
 
   .empty {
     margin: 0;
-    font-size: 0.82rem;
+    font-size: var(--font-medium);
   }
 
   .delivery {
@@ -309,7 +309,7 @@
 
   .delivery-label {
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
   }
 
   .channel-list {
@@ -323,7 +323,7 @@
     align-items: center;
     gap: var(--space-large);
     color: var(--m3c-on-surface-variant);
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
     cursor: pointer;
     user-select: none;
   }

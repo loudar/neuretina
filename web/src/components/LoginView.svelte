@@ -84,7 +84,7 @@
 
   h1 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: var(--font-large);
     font-weight: 600;
   }
 
@@ -94,6 +94,6 @@
 
   .error {
     color: var(--m3c-error);
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
   }
 </style>

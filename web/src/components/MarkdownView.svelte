@@ -87,20 +87,20 @@
   }
 
   .aa.small {
-    font-size: 0.72rem;
+    font-size: var(--font-small);
   }
 
   .aa.medium {
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
   }
 
   .aa.large {
-    font-size: 1rem;
+    font-size: var(--font-large);
   }
 
   .markdown {
     padding: var(--space-large) 0;
-    font-size: var(--markdown-font-size, calc(0.95rem + 2px));
+    font-size: var(--markdown-font-size, calc(var(--font-medium) + 2px));
     line-height: 1.55;
     text-align: justify;
   }
@@ -113,7 +113,7 @@
   .markdown :global(h3),
   .markdown :global(h4) {
     margin: var(--space-large) 0 var(--space-small);
-    font-size: 1.05rem;
+    font-size: var(--font-large);
     font-weight: 600;
   }
 

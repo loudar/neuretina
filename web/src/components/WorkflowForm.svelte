@@ -110,7 +110,7 @@
     gap: var(--space-small);
     padding: 0 0;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
     cursor: pointer;
     user-select: none;
   }
@@ -120,6 +120,6 @@
   }
 
   .spec-note {
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
   }
 </style>

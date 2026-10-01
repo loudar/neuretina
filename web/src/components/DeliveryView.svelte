@@ -568,7 +568,7 @@ import DataList from "./DataList.svelte";
     align-items: center;
     gap: var(--space-small);
     color: var(--m3c-on-surface-variant);
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
     cursor: pointer;
     user-select: none;
   }

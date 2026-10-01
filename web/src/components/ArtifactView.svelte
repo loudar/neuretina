@@ -168,7 +168,7 @@ import MarkdownView from "./MarkdownView.svelte";
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-lowest);
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;

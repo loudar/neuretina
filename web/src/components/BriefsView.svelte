@@ -422,7 +422,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.95rem;
+    font-size: var(--font-medium);
     font-weight: 500;
   }
 
@@ -438,7 +438,7 @@
     gap: var(--space-small);
     padding: 0 var(--space-small);
     border-radius: var(--m3-shape-full);
-    font-size: 0.72rem;
+    font-size: var(--font-small);
     line-height: 1.4;
     white-space: nowrap;
   }

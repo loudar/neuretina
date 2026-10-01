@@ -197,7 +197,7 @@
   }
 
   .titles h2 {
-    font-size: 1rem;
+    font-size: var(--font-medium);
     font-weight: 600;
     line-height: 1.4;
     overflow: hidden;
@@ -206,7 +206,7 @@
   }
 
   .titles small {
-    font-size: 0.72rem;
+    font-size: var(--font-small);
     line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;

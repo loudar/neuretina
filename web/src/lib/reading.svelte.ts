@@ -9,9 +9,9 @@ export const READING_SIZES: ReadingSize[] = ["small", "medium", "large"];
 const STORAGE_KEY = "briefs.readingSize";
 
 const READING_SIZE_CSS: Record<ReadingSize, string> = {
-  small: "0.95rem",
-  medium: "calc(0.95rem + 2px)",
-  large: "calc(0.95rem + 4px)",
+  small: "var(--font-medium)",
+  medium: "calc(var(--font-medium) + 2px)",
+  large: "calc(var(--font-medium) + 4px)",
 };
 
 function readStoredSize(): ReadingSize {

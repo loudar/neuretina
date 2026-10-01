@@ -188,7 +188,7 @@
   .time {
     margin-inline-start: auto;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -196,7 +196,7 @@
   .cost {
     flex: none;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.72rem;
+    font-size: var(--font-small);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     margin-inline-start: 0.5rem;
@@ -225,7 +225,7 @@
     background: transparent;
     color: var(--m3c-on-surface-variant);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: var(--font-small);
     cursor: pointer;
     opacity: 0.75;
   }

@@ -252,7 +252,7 @@
   }
 
   .brand h2 {
-    font-size: 1rem;
+    font-size: var(--font-medium);
     font-weight: 600;
     line-height: 1.4;
   }
@@ -283,7 +283,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.78rem;
+    font-size: var(--font-small);
   }
 
   .logout {

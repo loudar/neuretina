@@ -147,7 +147,7 @@
 
   .time {
     color: var(--m3c-on-surface-variant);
-    font-size: 0.75rem;
+    font-size: var(--font-small);
     white-space: nowrap;
   }
 
@@ -157,7 +157,7 @@
   }
 
   .topic {
-    font-size: 0.85rem;
+    font-size: var(--font-medium);
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -175,13 +175,13 @@
     display: flex;
     align-items: baseline;
     gap: var(--space-medium);
-    font-size: 0.9rem;
+    font-size: var(--font-medium);
   }
 
   .fact .label {
     min-width: 6.5rem;
     color: var(--m3c-on-surface-variant);
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
   }
 
   pre {
@@ -190,7 +190,7 @@
     border: 1px solid var(--m3c-outline-variant);
     border-radius: var(--m3-shape-small);
     background-color: var(--m3c-surface-container-low);
-    font-size: 0.8rem;
+    font-size: var(--font-medium);
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
