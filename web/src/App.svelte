@@ -212,8 +212,11 @@
   }
 
   /* Matches the pane headings: same height, type and hairline, with the
-     negative margins cancelling the rail padding so the line continues. */
+     negative margins cancelling the rail padding so the line continues.
+     The rail lives in an .m3-container, which forces border-box sizing; the
+     panes are content-box, so opt out to keep the same total height. */
   .brand {
+    box-sizing: content-box;
     display: flex;
     align-items: center;
     height: 3.5rem;
