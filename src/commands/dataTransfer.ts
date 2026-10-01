@@ -1,4 +1,5 @@
 import { ValidationError } from "../core/errors.ts";
+import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import type { Scheduler } from "../core/scheduler/Scheduler.ts";
 import {
@@ -10,6 +11,7 @@ import type { TopicStore } from "../domain/topics/TopicRepository.ts";
 import type { UserWorkflowStore } from "../domain/workflows/UserWorkflowRepository.ts";
 
 const BUNDLE_VERSION = 1;
+const SOURCE = "data-import";
 
 export interface DataBundle {
   version: number;
@@ -60,6 +62,7 @@ export interface DataTransferDeps {
   deliveries: DeliveryStore;
   jobs: JobStore;
   scheduler: Scheduler;
+  bus: EventBus;
   logger: Logger;
 }
 
@@ -67,7 +70,9 @@ export interface DataTransferDeps {
  * Portable snapshot of everything that is configured by hand (topics,
  * workflows, delivery channels + assignments, schedules). Import merges into
  * the current account: records are matched by name (channels by type + name),
- * and topic references inside workflows and jobs are remapped to the local ids.
+ * topic references inside workflows and jobs are remapped to the local ids,
+ * and every imported record publishes the event the UI and the workflow
+ * registry already listen to — so nothing needs a restart.
  */
 export class DataTransfer {
   constructor(private readonly deps: DataTransferDeps) {}
@@ -151,6 +156,16 @@ export class DataTransfer {
         contextId: topic.contextId,
       });
       if (topic.muted) this.deps.topics.update(created.id, { muted: true });
+      this.deps.bus.publish(
+        "topic.created",
+        {
+          id: created.id,
+          name: created.name,
+          description: created.description,
+          muted: topic.muted,
+        },
+        { source: SOURCE },
+      );
       existing.set(created.name.toLowerCase(), created.id);
       ids.set(topic.id, created.id);
       summary.topics += 1;
@@ -179,6 +194,7 @@ export class DataTransfer {
         config: channel.config,
         enabled: channel.enabled,
       });
+      this.deps.bus.publish("delivery.updated", { action: "create" }, { source: SOURCE });
       existing.set(key, created.id);
       ids.set(channel.id, created.id);
       summary.deliveryChannels += 1;
@@ -198,6 +214,7 @@ export class DataTransfer {
         { workflow: attachment.workflow, step: attachment.step, output: attachment.output },
         channelId,
       );
+      this.deps.bus.publish("delivery.updated", { action: "attach" }, { source: SOURCE });
       summary.deliveryAttachments += 1;
     }
   }
@@ -214,6 +231,12 @@ export class DataTransfer {
         name: workflow.name,
         inputs: remapTopicIds(workflow.inputs, topicIds),
       });
+      // Registers the workflow in the running registry (and refreshes the UI).
+      this.deps.bus.publish(
+        "workflow.user.changed",
+        { action: "update", workflowId: workflow.id },
+        { source: SOURCE },
+      );
       summary.userWorkflows += 1;
     }
   }
@@ -230,14 +253,19 @@ export class DataTransfer {
       const input = remapTopicIds(job.input, topicIds);
       const match = existing.get(job.name.toLowerCase());
       if (match) {
-        this.deps.jobs.update(match, {
+        const saved = this.deps.jobs.update(match, {
           cron: job.cron,
           timezone: job.timezone,
           input,
           enabled: job.enabled,
         });
+        this.deps.bus.publish(
+          "job.updated",
+          { id: saved.id, name: saved.name },
+          { source: SOURCE },
+        );
       } else {
-        this.deps.jobs.create({
+        const created = this.deps.jobs.create({
           name: job.name,
           cron: job.cron,
           timezone: job.timezone,
@@ -246,6 +274,12 @@ export class DataTransfer {
           input,
           enabled: job.enabled,
         });
+        this.deps.bus.publish(
+          "job.created",
+          { id: created.id, name: created.name, cron: created.cron, workflow: created.workflow },
+          { source: SOURCE },
+        );
+        existing.set(created.name.toLowerCase(), created.id);
       }
       summary.jobs += 1;
     }

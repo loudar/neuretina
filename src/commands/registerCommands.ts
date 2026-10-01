@@ -807,6 +807,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     deliveries,
     jobs,
     scheduler,
+    bus,
     logger: logger.child("data"),
   });
 
