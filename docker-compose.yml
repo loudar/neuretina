@@ -1,0 +1,20 @@
+# Runs the image published by .github/workflows/docker.yml.
+#
+# Coolify: create a Docker Compose resource from this repository, keep this
+# compose file, define the variables from .env.example in the UI (Coolify
+# writes them to .env next to this file) and make sure /mnt/neuretina-data
+# exists on the host.
+#
+# Locally: cp .env.example .env && docker compose up -d
+services:
+  neuretina:
+    image: ghcr.io/loudar/neuretina:latest
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "${NEURETINA_PORT:-8080}:8080"
+    volumes:
+      # SQLite database and everything the app persists (DB_PATH=/app/data/app.db).
+      - /mnt/neuretina-data:/app/data
+    env_file:
+      - .env

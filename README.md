@@ -596,3 +596,15 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
 docker build -t briefing-engine .
 docker run --rm -p 8080:8080 -v briefing-data:/app/data --env-file .env briefing-engine
 ```
+
+To run the published image instead, use the bundled `docker-compose.yml`; it pulls
+`ghcr.io/loudar/neuretina:latest` and keeps the database in `/mnt/neuretina-data` on the host:
+
+```bash
+cp .env.example .env   # fill in the values
+docker compose up -d
+```
+
+On Coolify, create a Docker Compose resource from this repository: define the variables from
+`.env.example` in the UI (Coolify writes them to `.env` next to the compose file) and create
+`/mnt/neuretina-data` on the host.

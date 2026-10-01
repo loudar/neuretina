@@ -2,16 +2,18 @@
 
 FROM oven/bun:1-slim AS build
 WORKDIR /app
-COPY package.json ./
+COPY package.json bun.lock ./
 RUN bun install
 COPY tsconfig.json ./
+# The web build imports shared code from src/ (e.g. the markdown renderer).
+COPY src ./src
 COPY web ./web
 RUN bun run build:web
 
 FROM oven/bun:1-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json ./
+COPY package.json bun.lock ./
 RUN bun install --production
 COPY tsconfig.json ./
 COPY src ./src
