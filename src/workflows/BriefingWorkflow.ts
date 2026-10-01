@@ -1,5 +1,6 @@
 import { Agent, AGENT_STEP_LIMIT_MESSAGE } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
+import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import { BriefGetTool } from "../agents/tools/BriefGetTool.ts";
 import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
@@ -1009,22 +1010,15 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         ? this.deps.searchProviders
         : [this.deps.webSearch];
     const tools = [
-      ...providers.map(
-        (provider) =>
-          new SearchTool({
-            provider,
-            toolName: `search.${provider.name}`,
-            defaultLimit: this.deps.defaults.resultsPerProvider,
-            defaultRecency: this.deps.defaults.recency,
-            defaultLanguage: this.deps.defaults.language,
-            domains: this.deps.defaults.searchDomains,
-          }),
-      ),
-      new SearchTool({
-        provider: this.deps.socialSearch,
-        toolName: "search.bluesky",
-        defaultLimit: this.deps.defaults.resultsPerProvider,
-        defaultRecency: this.deps.defaults.recency,
+      ...createWebSearchTools(providers, {
+        limit: this.deps.defaults.resultsPerProvider,
+        recency: this.deps.defaults.recency,
+        language: this.deps.defaults.language,
+        domains: this.deps.defaults.searchDomains,
+      }),
+      createSocialSearchTool(this.deps.socialSearch, {
+        limit: this.deps.defaults.resultsPerProvider,
+        recency: this.deps.defaults.recency,
       }),
       new BriefSearchTool(this.deps.briefs, contextId),
       new BriefGetTool(this.deps.briefs),

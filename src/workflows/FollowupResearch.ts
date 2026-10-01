@@ -1,5 +1,6 @@
 import { Agent } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
+import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
 import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
@@ -260,22 +261,15 @@ export class FollowupResearch {
         allowScope: false,
         defaultLimit: 5,
       }),
-      ...providers.map(
-        (provider) =>
-          new SearchTool({
-            provider,
-            toolName: `search.${provider.name}`,
-            defaultLimit: defaults.resultsPerProvider,
-            defaultRecency: defaults.recency,
-            defaultLanguage: defaults.language,
-            domains: defaults.searchDomains,
-          }),
-      ),
-      new SearchTool({
-        provider: this.deps.socialSearch,
-        toolName: "search.bluesky",
-        defaultLimit: defaults.resultsPerProvider,
-        defaultRecency: defaults.recency,
+      ...createWebSearchTools(providers, {
+        limit: defaults.resultsPerProvider,
+        recency: defaults.recency,
+        language: defaults.language,
+        domains: defaults.searchDomains,
+      }),
+      createSocialSearchTool(this.deps.socialSearch, {
+        limit: defaults.resultsPerProvider,
+        recency: defaults.recency,
       }),
       new BriefSearchTool(this.deps.briefs, this.deps.contextId),
     ];
