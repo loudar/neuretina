@@ -259,7 +259,7 @@ export class MatrixClient {
             type: "m.login.password",
             identifier: { type: "m.id.user", user: username.trim() },
             password,
-            initial_device_display_name: "briefing-engine",
+            initial_device_display_name: "neuretina",
           }),
         },
       );

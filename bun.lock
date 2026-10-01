@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "briefing-engine",
+      "name": "neuretina",
       "dependencies": {
         "nodemailer": "^10.0.13",
         "openai": "^7.23.0",

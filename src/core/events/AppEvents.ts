@@ -153,6 +153,11 @@ export interface AppEvents {
 
   "settings.updated": { key: string; action: "set" | "cleared" };
 
+  /** Authentication activity; payloads never carry credentials. */
+  "auth.login": { method: string; subject: string };
+  "auth.login.failed": { method: string };
+  "auth.logout": { method: string; subject: string };
+
   /** Any channel/attachment change; consumers refetch the delivery state. */
   "delivery.updated": { action: "create" | "update" | "delete" | "attach" | "detach" };
   /** One delivery attempt through a channel, from recording to settlement. */

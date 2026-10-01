@@ -77,6 +77,40 @@ function toSearchDomains(value: string | undefined): string[] {
 
 export const SETTING_DEFINITIONS: SettingDefinition[] = [
   {
+    key: "AUTH_GLOBAL_PASSWORD",
+    group: "Access",
+    label: "Global password",
+    description:
+      "When set, the whole site asks for this password once per browser. It protects every page and API call; clear it to run without authentication.",
+    kind: "secret",
+    apply: (config, value) => {
+      config.auth.globalPassword = optional(value);
+    },
+  },
+  {
+    key: "AUTH_SESSION_SECRET",
+    group: "Access",
+    label: "Session secret",
+    description:
+      "Optional. Signs login sessions; by default it derives from the global password, so changing the password logs everyone out. Set an explicit secret to keep sessions across password changes.",
+    kind: "secret",
+    apply: (config, value) => {
+      config.auth.sessionSecret = optional(value);
+    },
+  },
+  {
+    key: "AUTH_SESSION_TTL_HOURS",
+    group: "Access",
+    label: "Session lifetime (hours)",
+    description: "How long one login lasts before the password is asked again.",
+    kind: "number",
+    default: "720",
+    apply: (config, value) => {
+      config.auth.sessionTtlHours = Math.max(1, toNumber(value, 720));
+    },
+  },
+
+  {
     key: "OPENCODE_API_KEY",
     group: "LLM",
     label: "API key",

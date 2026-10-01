@@ -84,7 +84,7 @@ export class EmailDeliveryChannel implements DeliveryChannelSender {
     const info = await this.transporter.sendMail({
       from: this.from,
       to: this.to,
-      subject: subjectFrom(input.text, "Briefing Engine update"),
+      subject: subjectFrom(input.text, "Neuretina update"),
       text: input.text,
       ...(input.html ? { html: input.html } : {}),
     });
@@ -95,7 +95,7 @@ export class EmailDeliveryChannel implements DeliveryChannelSender {
     const info = await this.transporter.sendMail({
       from: this.from,
       to: this.to,
-      subject: input.caption || subjectFrom(input.text, "Briefing Engine audio"),
+      subject: input.caption || subjectFrom(input.text, "Neuretina audio"),
       text: input.text,
       attachments: [
         {

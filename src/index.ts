@@ -21,7 +21,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-kernel.logger.info("briefing engine started", {
+  kernel.logger.info("neuretina started", {
   port: kernel.api.port,
   jobs: kernel.scheduler.registeredCount,
   workflows: kernel.workflows.list().map((workflow) => workflow.id),

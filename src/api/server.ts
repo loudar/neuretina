@@ -1,5 +1,6 @@
 import { join, normalize, resolve } from "node:path";
 import type { AppConfig } from "../config/env.ts";
+import type { AuthService, AuthSession } from "../auth/AuthService.ts";
 import { AppError, NotFoundError, ValidationError, errorMessage } from "../core/errors.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
@@ -12,6 +13,7 @@ export interface ApiDeps {
   bus: EventBus;
   commands: CommandRouter;
   statuses: StatusHub;
+  auth: AuthService;
   logger: Logger;
 }
 
@@ -27,6 +29,7 @@ export interface InboundMessage {
 }
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
+const SESSION_COOKIE = "neuretina_session";
 
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
@@ -48,20 +51,40 @@ export function createApiServer(deps: ApiDeps): ApiServer {
     hostname: "0.0.0.0",
     maxRequestBodySize: 32 * 1024 * 1024,
     routes: {
+      // The login endpoints themselves stay reachable without a session.
+      "/api/auth/status": {
+        GET: guard((request) =>
+          jsonResponse(deps.auth.status(readCookie(request, SESSION_COOKIE))),
+        ),
+      },
+      "/api/auth/login": {
+        POST: guard((request, server) => handleLogin(request, server, deps)),
+      },
+      "/api/auth/logout": {
+        POST: guard((request) => handleLogout(request, deps)),
+      },
+
       "/api/webhook": {
+        // The bare probe stays public: it is the container healthcheck and
+        // only advertises the service, while POSTs run commands.
         GET: () =>
           jsonResponse({
             ok: true,
-            service: "briefing-engine",
+            service: "neuretina",
+            auth: deps.auth.enabled ? "required" : "open",
             ingress: "POST a message { type, payload?, correlationId? } to this path",
             commands: deps.commands.list(),
           }),
-        POST: guard((request: Bun.BunRequest<"/api/webhook">, server: Bun.Server<undefined>) =>
-          processMessage(request, deps, server),
-        ),
+        POST: guard((request: Bun.BunRequest<"/api/webhook">, server: Bun.Server<undefined>) => {
+          const denied = requireSession(request, deps);
+          if (denied) return denied;
+          return processMessage(request, deps, server);
+        }),
       },
 
       "/api/ws": (request: Bun.BunRequest<"/api/ws">, server: Bun.Server<undefined>) => {
+        const denied = requireSession(request, deps);
+        if (denied) return denied;
         if (server.upgrade(request)) return undefined;
         return jsonResponse({ error: "WebSocket upgrade required" }, 426);
       },
@@ -100,6 +123,122 @@ export function createApiServer(deps: ApiDeps): ApiServer {
       server.stop(true);
     },
   };
+}
+
+function readCookie(request: Request, name: string): string | undefined {
+  const header = request.headers.get("cookie");
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    if (part.slice(0, separator).trim() === name) {
+      const value = part.slice(separator + 1).trim();
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** `Secure` only behind TLS: the proxy terminates it and forwards the scheme. */
+function isSecureRequest(request: Request): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) return forwarded.split(",")[0]?.trim() === "https";
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function sessionCookieHeader(token: string, maxAgeSeconds: number, secure: boolean): string {
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${
+    secure ? "; Secure" : ""
+  }`;
+}
+
+function clearSessionCookieHeader(secure: boolean): string {
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${
+    secure ? "; Secure" : ""
+  }`;
+}
+
+function currentSession(request: Request, deps: ApiDeps): AuthSession | null {
+  return deps.auth.verify(readCookie(request, SESSION_COOKIE));
+}
+
+/** Blocks the request with a 401 when the site is protected and unauthenticated. */
+function requireSession(request: Request, deps: ApiDeps): Response | null {
+  if (!deps.auth.enabled) return null;
+  if (currentSession(request, deps)) return null;
+  return jsonResponse({ ok: false, error: "Authentication required", code: "UNAUTHORIZED" }, 401);
+}
+
+async function handleLogin(
+  request: Request,
+  server: Bun.Server<undefined>,
+  deps: ApiDeps,
+): Promise<Response> {
+  const key = server.requestIP(request)?.address ?? "unknown";
+  if (deps.auth.blocked(key)) {
+    return jsonResponse(
+      { ok: false, error: "Too many attempts; try again later", code: "TOO_MANY_ATTEMPTS" },
+      429,
+    );
+  }
+
+  const body = await readJson<{ method?: unknown; password?: unknown }>(request);
+  const method = typeof body.method === "string" ? body.method : undefined;
+  const result = deps.auth.login(method, body as Record<string, unknown>);
+  if (!result) {
+    deps.auth.recordFailure(key);
+    deps.bus.publish("auth.login.failed", { method: method ?? "password" }, { source: "auth" });
+    return jsonResponse({ ok: false, error: "Invalid credentials", code: "UNAUTHORIZED" }, 401);
+  }
+
+  deps.auth.clearFailures(key);
+  deps.bus.publish(
+    "auth.login",
+    { method: result.session.method, subject: result.session.subject },
+    { source: "auth" },
+  );
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      method: result.session.method,
+      subject: result.session.subject,
+      expiresAt: result.session.expiresAt,
+    }),
+    {
+      status: 200,
+      headers: {
+        ...JSON_HEADERS,
+        "Set-Cookie": sessionCookieHeader(
+          result.token,
+          result.maxAgeSeconds,
+          isSecureRequest(request),
+        ),
+      },
+    },
+  );
+}
+
+function handleLogout(request: Request, deps: ApiDeps): Response {
+  const session = currentSession(request, deps);
+  if (session) {
+    deps.bus.publish(
+      "auth.logout",
+      { method: session.method, subject: session.subject },
+      { source: "auth" },
+    );
+  }
+  return new Response(JSON.stringify({ ok: true }), {
+    status: 200,
+    headers: { ...JSON_HEADERS, "Set-Cookie": clearSessionCookieHeader(isSecureRequest(request)) },
+  });
 }
 
 async function processMessage(

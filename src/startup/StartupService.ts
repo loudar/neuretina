@@ -75,7 +75,7 @@ export class StartupService {
             return { status: "skipped", detail: "KEY_PERPLEXITY not set" };
           }
           if (isVerifiable(webSearch)) return { status: "ok", detail: await webSearch.verify() };
-          const response = await webSearch.search({ query: "briefing engine startup check", limit: 1 });
+          const response = await webSearch.search({ query: "neuretina startup check", limit: 1 });
           return {
             status: "ok",
             detail: `${response.provider} returned ${response.results.length} result(s)`,
@@ -111,7 +111,7 @@ export class StartupService {
           if (!config.perplexity.apiKey) {
             return { status: "skipped", detail: "search provider not configured" };
           }
-          const response = await webSearch.search({ query: "briefing engine startup check", limit: 1 });
+          const response = await webSearch.search({ query: "neuretina startup check", limit: 1 });
           return { status: "ok", detail: `${response.provider} returned ${response.results.length} result(s)` };
         },
       },
@@ -178,7 +178,7 @@ export interface StartupReportMeta {
 export function formatStartupReport(report: StartupReport, meta: StartupReportMeta): string {
   const stamp = new Date(report.startedAt).toISOString().replace("T", " ").slice(0, 16);
   const lines: string[] = [
-    `Briefing Engine started – ${stamp} UTC (TZ ${meta.timezone})`,
+    `Neuretina started – ${stamp} UTC (TZ ${meta.timezone})`,
     "",
   ];
 

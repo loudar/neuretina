@@ -38,6 +38,15 @@ export interface AppConfig {
   webDist: string | null;
   timezone: string;
   logLevel: LogLevel;
+  /** Site protection; no mechanism configured means the site is open. */
+  auth: {
+    /** Shared password for the whole site; empty disables authentication. */
+    globalPassword?: string;
+    /** Signs login sessions; empty derives it from the global password. */
+    sessionSecret?: string;
+    /** How long a login lasts before the password is asked again. */
+    sessionTtlHours: number;
+  };
   startup: {
     enabled: boolean;
     /** Send the validation summary to Matrix on boot (off by default). */
@@ -162,6 +171,11 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     webDist: str(env, "WEB_DIST") ?? null,
     timezone: str(env, "TZ", "UTC")!,
     logLevel: str(env, "LOG_LEVEL", "info") as LogLevel,
+    auth: {
+      globalPassword: str(env, "AUTH_GLOBAL_PASSWORD"),
+      sessionSecret: str(env, "AUTH_SESSION_SECRET"),
+      sessionTtlHours: num(env, "AUTH_SESSION_TTL_HOURS", 720),
+    },
     startup: {
       enabled: bool(env, "STARTUP_CHECK", true),
       announce: bool(env, "STARTUP_ANNOUNCE", false),

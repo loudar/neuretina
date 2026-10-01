@@ -8,6 +8,7 @@
   import iconError from "@ktibow/iconset-material-symbols/error";
   import iconHistory from "@ktibow/iconset-material-symbols/history";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
+  import iconLogout from "@ktibow/iconset-material-symbols/logout";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import iconSettings from "@ktibow/iconset-material-symbols/settings";
@@ -16,8 +17,10 @@
   import { statusFeed } from "./lib/statuses.svelte";
   import { configState } from "./lib/config.svelte";
   import { mountHoverPopovers } from "./lib/hoverPopover";
+  import { authState } from "./lib/auth.svelte";
   import { paths, router } from "./lib/router.svelte";
   import BriefsView from "./components/BriefsView.svelte";
+  import LoginView from "./components/LoginView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
   import JobsView from "./components/JobsView.svelte";
   import WorkflowsView from "./components/WorkflowsView.svelte";
@@ -91,10 +94,25 @@
           : "",
   );
 
-  onMount(() => {
+  // The backend rejects every data call until the site is unlocked, so the
+  // feeds only run while a session exists.
+  $effect(() => {
+    if (authState.loading || authState.locked) {
+      eventStream.stop();
+      statusFeed.stop();
+      return;
+    }
     eventStream.start();
     statusFeed.start();
     void configState.load();
+    return () => {
+      eventStream.stop();
+      statusFeed.stop();
+    };
+  });
+
+  onMount(() => {
+    void authState.load();
     const stopHoverPopovers = mountHoverPopovers();
     return () => {
       eventStream.stop();
@@ -104,11 +122,16 @@
   });
 </script>
 
+{#if authState.loading}
+  <div class="boot"><p class="muted">Loading…</p></div>
+{:else if authState.locked}
+  <LoginView />
+{:else}
 <div class="shell">
   <NavigationRail collapse="no" open>
     {#snippet fab()}
       <div class="brand">
-        <h2>Briefing Engine</h2>
+        <h2>Neuretina</h2>
       </div>
     {/snippet}
 
@@ -134,6 +157,16 @@
           {health.label}
         </Chip>
       </span>
+      {#if authState.enabled}
+        <button
+          type="button"
+          class="logout"
+          title="Log out"
+          onclick={() => void authState.logout()}
+        >
+          <Icon icon={iconLogout} size={18} />
+        </button>
+      {/if}
     </div>
   </NavigationRail>
 
@@ -155,10 +188,17 @@
     <EventsView />
   {/if}
 </div>
+{/if}
 
 <Snackbar />
 
 <style>
+  .boot {
+    display: grid;
+    place-items: center;
+    height: 100dvh;
+  }
+
   .shell {
     display: flex;
     height: 100dvh;
@@ -171,15 +211,21 @@
     padding-bottom: 1.25rem;
   }
 
+  /* Matches the pane headings: same height, type and hairline, with the
+     negative margins cancelling the rail padding so the line continues. */
   .brand {
     display: flex;
-    flex-direction: column;
-    padding-bottom: 0.25rem;
+    align-items: center;
+    height: 3.5rem;
+    margin: -2rem -20px 0;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
   .brand h2 {
-    font-size: 1.05rem;
-    line-height: 1.25;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
   }
 
   .rail-footer {
@@ -192,5 +238,24 @@
 
   .health :global(button.m3-container) {
     border-color: transparent;
+  }
+
+  .logout {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    margin-top: 0.5rem;
+    padding: 0;
+    border: none;
+    border-radius: var(--m3-shape-full);
+    background: transparent;
+    color: var(--m3c-on-surface-variant);
+    cursor: pointer;
+  }
+
+  .logout:hover {
+    background-color: var(--m3c-surface-container-high);
   }
 </style>

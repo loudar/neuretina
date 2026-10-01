@@ -51,7 +51,7 @@ export class PerplexitySearchProvider implements SearchProvider {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          query: "briefing engine startup check",
+          query: "neuretina startup check",
           max_results: 1,
           search_type: "fast",
         }),

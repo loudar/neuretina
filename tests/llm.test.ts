@@ -58,7 +58,7 @@ describe("OpenAiCompatibleLlmProvider", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toContain("/chat/completions");
     expect(calls[0]!.headers.get("x-opencode-session")).toBe("run-123");
-    expect(calls[0]!.headers.get("user-agent")).toContain("briefing-engine/");
+    expect(calls[0]!.headers.get("user-agent")).toContain("neuretina/");
   });
 
   test("falls back to a stable configured session id", async () => {

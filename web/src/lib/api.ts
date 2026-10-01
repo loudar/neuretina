@@ -1,3 +1,5 @@
+import { notifyUnauthorized } from "./authGate";
+
 export interface Topic {
   id: string;
   name: string;
@@ -329,6 +331,11 @@ export async function send<T = unknown>(
     body = (await response.json()) as typeof body;
   } catch {
     // keep empty body
+  }
+
+  if (response.status === 401) {
+    notifyUnauthorized();
+    throw new Error(body.error ?? "Authentication required");
   }
 
   if (!response.ok) {

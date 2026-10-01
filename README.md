@@ -1,4 +1,4 @@
-# Briefing Engine
+# Neuretina
 
 A modular, event-driven TypeScript service that periodically researches topics you care about,
 compiles a neutral morning brief, turns it into speech, and delivers it as a voice message.
@@ -576,6 +576,22 @@ persisted in SQLite (`events` table) and read back through the webhook via `even
 Known topics are typed in `src/core/events/AppEvents.ts`. Arbitrary topics (e.g. inbound hooks)
 are supported.
 
+## Authentication
+
+The site is open until `AUTH_GLOBAL_PASSWORD` is set, either in the environment or in the UI
+(Settings → Access). With a password configured, every data API call requires it; the UI still
+loads its (data-free) shell so it can show the login gate, and the browser keeps an HttpOnly,
+SameSite=Lax session cookie signed with `AUTH_SESSION_SECRET`. Without an explicit secret the
+signing key derives from the password, so changing the password logs everyone out.
+`AUTH_SESSION_TTL_HOURS` controls the session lifetime (default 720 = 30 days). Failed logins are
+throttled per client address (10 attempts per 5 minutes).
+
+Mechanisms are pluggable providers (`src/auth/AuthProvider.ts`); the global password is the only
+one implemented so far. OIDC and per-user accounts (separate users, config and data per user) will
+plug in as additional providers and put the user id into the session's `subject` — today everything
+is one global principal. The `GET /api/webhook` probe stays public so container healthchecks work;
+all POSTs, the WebSocket feed and every other API endpoint are gated.
+
 ## Deployment (Coolify + Pangolin)
 
 The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
@@ -593,8 +609,8 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
   (`latest` tracks `main`; pull requests only build, they don't push).
 
 ```bash
-docker build -t briefing-engine .
-docker run --rm -p 8080:8080 -v briefing-data:/app/data --env-file .env briefing-engine
+docker build -t neuretina .
+docker run --rm -p 8080:8080 -v neuretina-data:/app/data --env-file .env neuretina
 ```
 
 To run the published image instead, use the bundled `docker-compose.yml`; it pulls

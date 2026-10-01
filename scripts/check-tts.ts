@@ -35,7 +35,7 @@ try {
 try {
   const started = Date.now();
   const speech = await provider.synthesize({
-    text: "The briefing engine speech check is running.",
+    text: "The Neuretina speech check is running.",
   });
   const seconds = speech.durationMs ? `, ${(speech.durationMs / 1000).toFixed(1)}s audio` : "";
   console.log(

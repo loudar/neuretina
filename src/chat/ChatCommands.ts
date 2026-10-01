@@ -152,7 +152,7 @@ export function createChatCommandHandler(
 
   function helpText(): string {
     return [
-      "Briefing Engine commands:",
+      "Neuretina commands:",
       "/start <task id or name> — run a scheduled task now",
       "/list — show tasks and workflows",
       "/status — integration configuration status",

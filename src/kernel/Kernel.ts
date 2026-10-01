@@ -1,5 +1,6 @@
 import { loadConfig, type AppConfig, type Env, LEGACY_MATRIX_KEYS } from "../config/env.ts";
 import { SettingsService } from "../config/settings.ts";
+import { AuthService } from "../auth/AuthService.ts";
 import { createLogger, type Logger } from "../core/logger.ts";
 import { errorMessage } from "../core/errors.ts";
 import { EventBus } from "../core/events/EventBus.ts";
@@ -118,6 +119,8 @@ export interface Kernel {
   userWorkflows: UserWorkflowStore;
   /** Dated events extracted from briefs. */
   events: TimelineEventStore;
+  /** Site protection: configured mechanisms, login and session verification. */
+  auth: AuthService;
   settings: SettingsService;
   workflows: WorkflowRegistry;
   runner: WorkflowRunner;
@@ -511,11 +514,16 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
   };
   settings.onReload = refreshProviders;
 
+  // Reads the live config, so enabling or changing the password from the
+  // settings UI takes effect without a restart.
+  const auth = new AuthService({ config });
+
   const api = createApiServer({
     config,
     bus,
     commands,
     statuses,
+    auth,
     logger,
   });
 
@@ -578,6 +586,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     deliveries,
     userWorkflows,
     events: timelineEvents,
+    auth,
     settings,
     workflows,
     runner,

@@ -90,7 +90,7 @@ describe("formatStartupReport", () => {
       { jobs: 1, workflows: ["briefing"], timezone: "Europe/Berlin" },
     );
 
-    expect(text).toContain("Briefing Engine started – 2026-09-29 07:00 UTC");
+    expect(text).toContain("Neuretina started – 2026-09-29 07:00 UTC");
     expect(text).toContain("[ok] llm: reachable, 3 models");
     expect(text).toContain("[failed] matrix: M_FORBIDDEN");
     expect(text).toContain("Startup validation: 1 check(s) failed (matrix)");
