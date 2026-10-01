@@ -26,7 +26,7 @@ export interface StartRunOptions {
   contextId?: string;
   trigger: TriggerKind;
   input?: Record<string, unknown>;
-  /** Trigger-specific origin, recorded on the run (job id, matrix event, â€¦). */
+  /** Trigger-specific origin, recorded on the run (job id, matrix event, etc). */
   detail?: Record<string, unknown>;
   /** Reuse a known id (the scheduler passes its correlation id). */
   runId?: string;

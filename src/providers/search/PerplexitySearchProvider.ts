@@ -16,6 +16,8 @@ interface PerplexitySearchResponse {
     last_updated?: string | null;
   }>;
   id: string;
+  /** Exact charge for the request; `cost.total_cost` on current responses. */
+  usage?: unknown;
 }
 
 export interface PerplexitySearchOptions {
@@ -107,8 +109,33 @@ export class PerplexitySearchProvider implements SearchProvider {
       source: hostnameOf(item.url),
     }));
 
-    return { query: query.query, provider: this.name, kind: this.kind, results };
+    const costUsd = reportedCostUsd(response.usage);
+    return {
+      query: query.query,
+      provider: this.name,
+      kind: this.kind,
+      results,
+      ...(costUsd !== undefined ? { usage: { costUsd } } : {}),
+    };
   }
+}
+
+/**
+ * Perplexity meters each response: current responses carry
+ * `usage.cost.total_cost` (with `request_cost`); older ones a flat
+ * `usage.cost` or `usage.total_cost`.
+ */
+function reportedCostUsd(usage: unknown): number | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  const record = usage as Record<string, unknown>;
+  const nested =
+    record.cost && typeof record.cost === "object"
+      ? (record.cost as Record<string, unknown>).total_cost
+      : undefined;
+  for (const value of [record.cost, record.total_cost, nested, record.request_cost]) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return undefined;
 }
 
 function hostnameOf(url: string): string {

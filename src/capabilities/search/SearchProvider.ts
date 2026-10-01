@@ -45,6 +45,11 @@ export interface SearchResponse {
   provider: string;
   kind: SearchKind;
   results: SearchResult[];
+  /** Provider-reported usage, when the provider returns it (Perplexity does). */
+  usage?: {
+    /** Exact cost in USD for this request. */
+    costUsd?: number;
+  };
 }
 
 export interface SearchProvider {

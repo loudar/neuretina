@@ -125,10 +125,12 @@ describe("agent cost collection", () => {
           result: {
             toolUsages: [
               { tool: "perplexity_finance", usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 } },
+              { tool: "search.perplexity", usage: { costUsd: 0.005 } },
             ],
           },
         },
         { tool: "perplexity_finance", result: { usage: { costUsd: 0.002 } } },
+        { tool: "search.perplexity", result: { usage: { costUsd: 0.005 } } },
       ],
     });
 
@@ -136,6 +138,30 @@ describe("agent cost collection", () => {
       { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
       { costUsd: 0.002 },
     ]);
+  });
+
+  test("prices searches when the provider reports a cost", () => {
+    const tracker = new CostTracker();
+    const result = agentResult({
+      usage: { costUsd: 0.01 },
+      invocations: [
+        {
+          tool: "run_code",
+          result: {
+            toolCallsByTool: { "search.perplexity": 2 },
+            toolUsages: [{ tool: "search.perplexity", usage: { costUsd: 0.005 } }],
+          },
+        },
+      ],
+    });
+
+    addAgentCost(tracker, "Research", result);
+    const report = tracker.report();
+    const search = report.lines.find((line) => line.provider === "perplexity");
+    expect(search?.detail).toBe("2 searches");
+    expect(search?.usd).toBeCloseTo(0.005, 6);
+    // The second search came back without a reported cost.
+    expect(report.complete).toBe(false);
   });
 
   test("records an agent run into the tracker", () => {

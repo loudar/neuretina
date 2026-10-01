@@ -117,7 +117,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     group: "LLM",
     label: "API key",
     description:
-      "Key for your OpenAI-compatible endpoint (OpenCode Go, OpenAI, a local vLLM, â€¦). OpenCode endpoints get their session header automatically.",
+      "Key for your OpenAI-compatible endpoint (OpenCode Go, OpenAI, a local vLLM, etc). OpenCode endpoints get their session header automatically.",
     kind: "secret",
     userOnly: true,
     apply: (config, value) => {
@@ -234,7 +234,7 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     userOnly: true,
     group: "Speech (Qwen3-TTS)",
     label: "Voice",
-    description: "Preset speaker (Ryan, vivian, â€¦) or an OpenAI alias (alloy, nova, â€¦).",
+    description: "Preset speaker (Ryan, vivian, etc) or an OpenAI alias (alloy, nova, etc).",
     kind: "string",
     default: "Ryan",
     apply: (config, value) => {

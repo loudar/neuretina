@@ -11,6 +11,8 @@ const WEB_SEARCH_TOOLS = new Set([
   "web_search",
 ]);
 
+const FINANCE_TOOL = "perplexity_finance";
+
 /** Records an agent run's LLM usage, paid searches and finance lookups. */
 export function addAgentCost(
   tracker: CostTracker | undefined,
@@ -19,28 +21,74 @@ export function addAgentCost(
 ): number {
   if (!tracker) return 0;
   let usd = tracker.addLlm(step, result.usage, Math.max(1, result.steps.length));
-  const requests = countWebSearches(result);
-  if (requests > 0) usd += tracker.addPerplexitySearch(step, requests);
+
+  const search = collectSearchUsage(result);
+  if (search.reported > 0) usd += tracker.addPerplexitySearch(step, search.reported, search.costUsd);
+  if (search.unpriced > 0) usd += tracker.addPerplexitySearch(step, search.unpriced);
+
   for (const usage of collectFinanceUsage(result)) usd += tracker.addFinance(step, usage);
   return usd;
 }
 
-export function countWebSearches(result: AgentRunResult): number {
-  let count = 0;
+export interface SearchUsageSummary {
+  /** Search calls that ran. */
+  requests: number;
+  /** Calls whose provider reported a cost. */
+  reported: number;
+  /** Calls the provider left unpriced. */
+  unpriced: number;
+  /** Sum of the reported costs. */
+  costUsd: number;
+}
+
+/**
+ * Attributes web-search calls to their provider-reported costs: Perplexity
+ * returns `usage.cost.total_cost`, so those calls are priced exactly while the
+ * rest (e.g. Exa, Wikipedia, Bluesky) stay unpriced.
+ */
+export function collectSearchUsage(result: AgentRunResult): SearchUsageSummary {
+  const summary: SearchUsageSummary = { requests: 0, reported: 0, unpriced: 0, costUsd: 0 };
   for (const step of result.steps) {
     for (const invocation of step.invocations) {
-      const byTool = (invocation.result as { toolCallsByTool?: unknown } | undefined)
-        ?.toolCallsByTool;
+      const response = invocation.result as
+        | { toolCallsByTool?: unknown; toolUsages?: unknown; usage?: unknown }
+        | undefined;
+      const byTool = response?.toolCallsByTool;
       if (byTool && typeof byTool === "object") {
         for (const [tool, calls] of Object.entries(byTool)) {
-          if (WEB_SEARCH_TOOLS.has(tool) && typeof calls === "number") count += calls;
+          if (WEB_SEARCH_TOOLS.has(tool) && typeof calls === "number") summary.requests += calls;
         }
       } else if (WEB_SEARCH_TOOLS.has(invocation.tool)) {
-        count += 1;
+        summary.requests += 1;
+      }
+
+      if (Array.isArray(response?.toolUsages)) {
+        for (const entry of response.toolUsages) {
+          if (!entry || typeof entry !== "object") continue;
+          const record = entry as { tool?: unknown; usage?: unknown };
+          if (typeof record.tool !== "string" || !WEB_SEARCH_TOOLS.has(record.tool)) continue;
+          const costUsd = costOf(record.usage);
+          if (costUsd === undefined) continue;
+          summary.reported += 1;
+          summary.costUsd += costUsd;
+        }
+      }
+
+      if (WEB_SEARCH_TOOLS.has(invocation.tool)) {
+        const costUsd = costOf(response?.usage);
+        if (costUsd !== undefined) {
+          summary.reported += 1;
+          summary.costUsd += costUsd;
+        }
       }
     }
   }
-  return count;
+  summary.unpriced = Math.max(0, summary.requests - summary.reported);
+  return summary;
+}
+
+export function countWebSearches(result: AgentRunResult): number {
+  return collectSearchUsage(result).requests;
 }
 
 export function collectFinanceUsage(result: AgentRunResult): FinanceUsage[] {
@@ -50,17 +98,23 @@ export function collectFinanceUsage(result: AgentRunResult): FinanceUsage[] {
       const response = invocation.result as
         | { usage?: unknown; toolUsages?: unknown }
         | undefined;
-      collectUsage(response?.usage, usages);
+      if (invocation.tool === FINANCE_TOOL) collectUsage(response?.usage, usages);
       if (Array.isArray(response?.toolUsages)) {
         for (const entry of response.toolUsages) {
-          if (entry && typeof entry === "object") {
-            collectUsage((entry as { usage?: unknown }).usage, usages);
-          }
+          if (!entry || typeof entry !== "object") continue;
+          const record = entry as { tool?: unknown; usage?: unknown };
+          if (record.tool !== FINANCE_TOOL) continue;
+          collectUsage(record.usage, usages);
         }
       }
     }
   }
   return usages;
+}
+
+function costOf(usage: unknown): number | undefined {
+  if (!usage || typeof usage !== "object") return undefined;
+  return finiteNumber((usage as Record<string, unknown>).costUsd);
 }
 
 function collectUsage(usage: unknown, out: FinanceUsage[]): void {
@@ -76,5 +130,3 @@ function collectUsage(usage: unknown, out: FinanceUsage[]): void {
     ...(costUsd !== undefined ? { costUsd } : {}),
   });
 }
-
-

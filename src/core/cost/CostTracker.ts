@@ -28,7 +28,8 @@ interface Accumulator {
   inputTokens: number;
   outputTokens: number;
   usd: number;
-  priced: boolean;
+  /** Usage entries whose provider did not report a cost. */
+  unpriced: number;
 }
 
 /**
@@ -47,18 +48,23 @@ export class CostTracker {
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
     if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
 
-    if (usage.costUsd === undefined) return 0;
-    entry.priced = true;
+    if (usage.costUsd === undefined) {
+      entry.unpriced += calls;
+      return 0;
+    }
     entry.usd += usage.costUsd;
     return usage.costUsd;
   }
 
-  addPerplexitySearch(step: string, requests: number): number {
+  addPerplexitySearch(step: string, requests: number, costUsd?: number): number {
     const entry = this.entry(step, "perplexity");
     entry.requests += requests;
-    // The search API does not report a per-request cost; the usage stays
-    // unpriced and the report is marked incomplete.
-    return 0;
+    if (costUsd === undefined) {
+      entry.unpriced += requests;
+      return 0;
+    }
+    entry.usd += costUsd;
+    return costUsd;
   }
 
   addFinance(step: string, usage: FinanceUsage): number {
@@ -66,19 +72,19 @@ export class CostTracker {
     entry.lookups += 1;
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
     if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
-    if (usage.costUsd !== undefined) {
-      entry.usd += usage.costUsd;
-      entry.priced = true;
-      return usage.costUsd;
+    if (usage.costUsd === undefined) {
+      entry.unpriced += 1;
+      return 0;
     }
-    return 0;
+    entry.usd += usage.costUsd;
+    return usage.costUsd;
   }
 
   report(): CostReport {
     const accumulators = [...this.accumulators.values()];
     const lines = accumulators.map(toLine);
     const totalUsd = round(lines.reduce((sum, line) => sum + line.usd, 0));
-    return { totalUsd, complete: accumulators.every((entry) => entry.priced), lines };
+    return { totalUsd, complete: accumulators.every((entry) => entry.unpriced === 0), lines };
   }
 
   private entry(step: string, provider: string): Accumulator {
@@ -94,7 +100,7 @@ export class CostTracker {
         inputTokens: 0,
         outputTokens: 0,
         usd: 0,
-        priced: false,
+        unpriced: 0,
       };
       this.accumulators.set(key, entry);
     }
