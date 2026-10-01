@@ -7,5 +7,28 @@ services:
       - "${NEURETINA_PORT:-8080}:8080"
     volumes:
       - /mnt/neuretina-data:/app/data
-    env_file:
-      - .env
+    environment:
+      # --- Server ---
+      TZ: Europe/Berlin # cron and brief dates
+      LOG_LEVEL: info
+      STARTUP_CHECK: "true"
+      STARTUP_ANNOUNCE: "false"
+
+      # --- Access (empty password runs the site without authentication) ---
+      AUTH_GLOBAL_PASSWORD: ""
+      # Optional: signs sessions; empty derives the key from the password.
+      AUTH_SESSION_SECRET: ""
+      AUTH_SESSION_TTL_HOURS: "720"
+
+      # --- LLM (required for research and compiling) ---
+      OPENCODE_API_KEY: ""
+
+      # --- Web search + finance (required for research) ---
+      KEY_PERPLEXITY: ""
+
+      # --- Speech (optional; empty disables voice messages) ---
+      QWEN_TTS_BASE_URL: ""
+
+      # --- Bluesky (optional; anonymous public search without credentials) ---
+      BLUESKY_IDENTIFIER: ""
+      BLUESKY_APP_PASSWORD: ""

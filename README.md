@@ -601,9 +601,10 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
 - **Volume:** mount a volume at `/app/data` (SQLite database, `DB_PATH=/app/data/app.db`).
 - **Env:** all variables from `.env.example` (`TZ` controls cron and brief dates; `STARTUP_CHECK`
   controls the boot validation + startup message).
-- **Pangolin:** the app has no built-in auth — Pangolin handles that. The UI's event feed uses
-  `event.wait` long-polls (≤ ~30 s per request); make sure the proxy's read/response timeout for
-  `/api/webhook` is above that (Pangolin's default is fine). No WebSocket or SSE support needed.
+- **Pangolin:** `AUTH_GLOBAL_PASSWORD` can protect the site directly (see Authentication); Pangolin
+  can add its own layer on top. The UI's event feed uses `event.wait` long-polls (≤ ~30 s per
+  request); make sure the proxy's read/response timeout for `/api/webhook` is above that (Pangolin's
+  default is fine). No WebSocket or SSE support needed.
 - **CI image:** `.github/workflows/docker.yml` builds a multi-arch image (`linux/amd64`,
   `linux/arm64`) and publishes it to `ghcr.io/<owner>/<repo>` on pushes to `main` and `v*` tags
   (`latest` tracks `main`; pull requests only build, they don't push).
@@ -614,13 +615,13 @@ docker run --rm -p 8080:8080 -v neuretina-data:/app/data --env-file .env neureti
 ```
 
 To run the published image instead, use the bundled `docker-compose.yml`; it pulls
-`ghcr.io/loudar/neuretina:latest` and keeps the database in `/mnt/neuretina-data` on the host:
+`ghcr.io/loudar/neuretina:latest`, keeps the database in `/mnt/neuretina-data` on the host and
+carries the whole environment in the service definition (no `.env` file needed):
 
 ```bash
-cp .env.example .env   # fill in the values
+# fill in the empty secrets in docker-compose.yml first
 docker compose up -d
 ```
 
-On Coolify, create a Docker Compose resource from this repository: define the variables from
-`.env.example` in the UI (Coolify writes them to `.env` next to the compose file) and create
-`/mnt/neuretina-data` on the host.
+On Coolify, create a Docker Compose resource from this repository, set the same values in the
+compose file (Coolify lets you edit it) and create `/mnt/neuretina-data` on the host.
