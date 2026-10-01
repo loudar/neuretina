@@ -88,6 +88,50 @@ export interface TimelineEvent {
   updatedAt: number;
 }
 
+/** Portable configuration bundle (topics, workflows, channels, schedules). */
+export interface DataBundle {
+  version: number;
+  exportedAt: number;
+  topics: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    muted: boolean;
+    contextId?: string;
+  }>;
+  userWorkflows: Array<{ id: string; name: string; inputs: Record<string, unknown> }>;
+  deliveryChannels: Array<{
+    id: string;
+    type: string;
+    name: string;
+    config: Record<string, unknown>;
+    enabled: boolean;
+  }>;
+  deliveryAttachments: Array<{
+    workflow: string;
+    step: string;
+    output: string;
+    channelId: string;
+  }>;
+  jobs: Array<{
+    name: string;
+    cron: string;
+    timezone?: string;
+    workflow: string;
+    contextId?: string;
+    input: Record<string, unknown>;
+    enabled: boolean;
+  }>;
+}
+
+export interface DataImportSummary {
+  topics: number;
+  deliveryChannels: number;
+  deliveryAttachments: number;
+  userWorkflows: number;
+  jobs: number;
+}
+
 export interface ScheduledJob {
   id: string;
   name: string;
@@ -482,6 +526,13 @@ export const commands = {
   timeline: {
     /** Dated events by id (the ones a timeline artifact references). */
     events: (ids?: string[]) => send<TimelineEvent[]>("timeline.event.list", { ids }),
+  },
+
+  data: {
+    /** Snapshot of the hand-configured parts of this account. */
+    export: () => send<DataBundle>("data.export"),
+    /** Merges a bundle into this account; returns what was imported. */
+    import: (bundle: DataBundle) => send<DataImportSummary>("data.import", { bundle }),
   },
 };
 

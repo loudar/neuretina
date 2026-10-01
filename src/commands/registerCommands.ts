@@ -39,6 +39,7 @@ import type {
 } from "../domain/delivery/DeliveryRepository.ts";
 import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
+import { DataTransfer } from "./dataTransfer.ts";
 
 export interface CommandDeps {
   config: AppConfig;
@@ -798,6 +799,25 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return { ok: true, artifactId: artifact.id, kind: artifact.kind };
   });
 
+  // Portable snapshot of the hand-configured parts (topics, workflows,
+  // delivery channels, schedules) for moving an installation.
+  const dataTransfer = new DataTransfer({
+    topics,
+    userWorkflows,
+    deliveries,
+    jobs,
+    scheduler,
+    logger: logger.child("data"),
+  });
+
+  router.register("data.export", () => dataTransfer.export());
+
+  router.register("data.import", (payload) => {
+    const summary = dataTransfer.import(asRecord(payload).bundle);
+    bus.publish("data.imported", summary, { source: "commands" });
+    return summary;
+  });
+
   router.register("event.pull", (payload) => {
     const record = asRecord(payload);
     const since = typeof record.since === "number" ? record.since : 0;
@@ -856,6 +876,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "artifact.search",
     "artifact.content",
     "artifact.data",
+    "data.export",
     "delivery.channel.list",
     "delivery.workflows",
     "delivery.list",

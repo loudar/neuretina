@@ -172,6 +172,21 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
   },
 
   {
+    key: "TTS_PROVIDER",
+    group: "Speech",
+    label: "Provider",
+    description:
+      "Both providers speak the same TTS protocol; pick which one synthesizes voice messages.",
+    kind: "enum",
+    options: ["qwen", "elevenlabs"],
+    default: "qwen",
+    userOnly: true,
+    apply: (config, value) => {
+      config.tts.provider = value === "elevenlabs" ? "elevenlabs" : "qwen";
+    },
+  },
+
+  {
     key: "QWEN_TTS_BASE_URL",
     userOnly: true,
     group: "Speech (Qwen3-TTS)",
@@ -280,20 +295,6 @@ export const SETTING_DEFINITIONS: SettingDefinition[] = [
     },
   },
 
-  {
-    key: "TTS_PROVIDER",
-    group: "Speech",
-    label: "Provider",
-    description:
-      "Both providers speak the same TTS protocol; pick which one synthesizes voice messages.",
-    kind: "enum",
-    options: ["qwen", "elevenlabs"],
-    default: "qwen",
-    userOnly: true,
-    apply: (config, value) => {
-      config.tts.provider = value === "elevenlabs" ? "elevenlabs" : "qwen";
-    },
-  },
   {
     key: "KEY_ELEVENLABS",
     group: "Speech (ElevenLabs)",

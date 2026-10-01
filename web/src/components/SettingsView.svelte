@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Button, Dialog, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import iconDownload from "@ktibow/iconset-material-symbols/download";
   import iconSave from "@ktibow/iconset-material-symbols/save";
   import iconUndo from "@ktibow/iconset-material-symbols/undo";
+  import iconUpload from "@ktibow/iconset-material-symbols/upload";
   import iconWarning from "@ktibow/iconset-material-symbols/warning";
-  import { commands, type SettingInfo } from "../lib/api";
+  import { commands, type DataBundle, type DataImportSummary, type SettingInfo } from "../lib/api";
   import { configState } from "../lib/config.svelte";
   import { reportError, reportSuccess } from "../lib/feedback";
   import Pane from "./Pane.svelte";
@@ -17,6 +19,58 @@
   let confirmingReset = $state(false);
 
   const groups = $derived([...new Set(settings.map((setting) => setting.group))]);
+
+  /** The data transfer panel is not a setting; it leads the section nav. */
+  const DATA_GROUP = "Data transfer";
+  const navGroups = $derived([DATA_GROUP, ...groups]);
+
+  let exporting = $state(false);
+  let importing = $state(false);
+  let importSummary = $state<DataImportSummary | null>(null);
+  let fileInput = $state<HTMLInputElement | null>(null);
+
+  async function exportData(): Promise<void> {
+    exporting = true;
+    try {
+      const bundle = await commands.data.export();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `neuretina-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      reportSuccess("Configuration exported");
+    } catch (error) {
+      reportError(error);
+    } finally {
+      exporting = false;
+    }
+  }
+
+  async function importData(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+
+    importing = true;
+    importSummary = null;
+    try {
+      const bundle = JSON.parse(await file.text()) as DataBundle;
+      const summary = await commands.data.import(bundle);
+      importSummary = summary;
+      await configState.load();
+      reportSuccess(
+        `Imported ${summary.topics} topic(s), ${summary.userWorkflows} workflow(s), ` +
+          `${summary.deliveryChannels} channel(s), ${summary.jobs} schedule(s)`,
+      );
+    } catch (error) {
+      reportError(error);
+    } finally {
+      importing = false;
+    }
+  }
 
   let layout = $state<HTMLElement | null>(null);
   let activeGroup = $state<string | null>(null);
@@ -56,13 +110,13 @@
     }
 
     let current: string | null = null;
-    for (const group of groups) {
+    for (const group of navGroups) {
       const section = document.getElementById(sectionId(group));
       if (section && sectionTop(container, section) - container.scrollTop <= 96) {
         current = group;
       }
     }
-    activeGroup = current ?? groups[0] ?? null;
+    activeGroup = current ?? navGroups[0] ?? null;
   }
 
   function jump(group: string): void {
@@ -209,8 +263,8 @@
   {:else}
     <div class="settings-layout" bind:this={layout}>
       <div class="settings-nav-slot">
-        <nav class="settings-nav" aria-label="Settings sections">
-          {#each groups as group (group)}
+      <nav class="settings-nav" aria-label="Settings sections">
+        {#each navGroups as group (group)}
             <button
               type="button"
               class="nav-item"
@@ -224,6 +278,55 @@
       </div>
 
       <div class="settings-content">
+        <section class="group" id={sectionId(DATA_GROUP)}>
+          <h3>{DATA_GROUP}</h3>
+
+          <article class="setting">
+            <div class="info">
+              <div class="name"><span>Import / export configuration</span></div>
+              <p class="desc muted">
+                Move topics, workflows, delivery channels and schedules to another installation.
+                Channels keep their credentials, so treat the exported file as a secret.
+              </p>
+              {#if importSummary}
+                <span class="source">
+                  Last import: {importSummary.topics} topic(s), {importSummary.userWorkflows}
+                  workflow(s), {importSummary.deliveryChannels} channel(s), {importSummary.jobs}
+                  schedule(s)
+                </span>
+              {/if}
+            </div>
+
+            <div class="control">
+              <div class="buttons">
+                <Button
+                  variant="filled"
+                  iconType="left"
+                  onclick={() => void exportData()}
+                  disabled={exporting}
+                >
+                  <Icon icon={iconDownload} /> {exporting ? "Exporting…" : "Export"}
+                </Button>
+                <Button
+                  variant="outlined"
+                  iconType="left"
+                  onclick={() => fileInput?.click()}
+                  disabled={importing}
+                >
+                  <Icon icon={iconUpload} /> {importing ? "Importing…" : "Import"}
+                </Button>
+              </div>
+              <input
+                bind:this={fileInput}
+                class="file"
+                type="file"
+                accept="application/json,.json"
+                onchange={(event) => void importData(event)}
+              />
+            </div>
+          </article>
+        </section>
+
         {#each groups as group (group)}
           <section class="group" id={sectionId(group)}>
         <h3>{group}</h3>
@@ -363,13 +466,13 @@
   .nav-item {
     display: block;
     width: 100%;
-    padding: var(--space-small) var(--space-medium);
+    padding: var(--space-medium) var(--space-medium);
     border: none;
     border-radius: var(--m3-shape-small);
     background: transparent;
     color: var(--m3c-on-surface-variant);
     font: inherit;
-    font-size: 0.85rem;
+    font-size: 1rem;
     line-height: 1.35;
     text-align: left;
     white-space: normal;
@@ -484,5 +587,9 @@
     display: flex;
     align-items: center;
     gap: var(--space-small);
+  }
+
+  .file {
+    display: none;
   }
 </style>

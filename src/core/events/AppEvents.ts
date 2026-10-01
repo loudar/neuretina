@@ -153,6 +153,15 @@ export interface AppEvents {
 
   "settings.updated": { key: string; action: "set" | "cleared" };
 
+  /** A portable data bundle was imported into this account. */
+  "data.imported": {
+    topics: number;
+    deliveryChannels: number;
+    deliveryAttachments: number;
+    userWorkflows: number;
+    jobs: number;
+  };
+
   /** Authentication activity; payloads never carry credentials. */
   "auth.login": { method: string; subject: string };
   "auth.login.failed": { method: string };
