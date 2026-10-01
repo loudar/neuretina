@@ -503,7 +503,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         correlationId: context.correlationId,
       });
       try {
-        const summary = buildBriefMessage(brief.markdown, brief.sources, { appUrl: config.appUrl, briefId: brief.id });
+        const summary = buildBriefMessage(brief.markdown, brief.sources, {
+          appUrl: config.appUrl,
+          briefId: brief.id,
+          shareToken: briefs.shareToken(brief.id),
+        });
         // The brief's workflow owns the routing: voice goes to the channels
         // assigned to the TTS output of that workflow.
         const voiceTarget = deliveryTargetForKind(
@@ -565,7 +569,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const brief = briefs.get(id);
     const audio = briefs.getAudio(id);
 
-    const text = buildBriefMessage(brief.markdown, brief.sources, { appUrl: config.appUrl, briefId: brief.id });
+    const text = buildBriefMessage(brief.markdown, brief.sources, {
+      appUrl: config.appUrl,
+      briefId: brief.id,
+      shareToken: briefs.shareToken(brief.id),
+    });
     const results = await deps.delivery.deliver({
       briefId: id,
       runId: context.correlationId,
@@ -731,6 +739,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("artifact.delete", (payload, context) => {
     const artifact = artifacts.remove(requireString(asRecord(payload), "id"));
+    if (artifact.kind === "brief") briefs.forgetShare(artifact.id);
     publish(bus, "artifact.deleted", { artifactId: artifact.id, kind: artifact.kind }, context);
     return { ok: true, artifactId: artifact.id, kind: artifact.kind };
   });

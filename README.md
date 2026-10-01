@@ -439,6 +439,9 @@ the Workflows tab.
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
   TTS-aware (speakable sentences, symbols written out, everyday expressions kept neutral) and the
   narration is derived from the summary itself, so the audio reads the same text minus the links.
+- **Anonymous brief links:** delivered summaries append a "View this Brief" link carrying a
+  per-brief token (`APP_URL/briefs/<id>?token=…`). Recipients without an account open that brief
+  in a read-only view with no navigation; the token unlocks that one brief only.
 - **Inline citations:** the compiler receives the numbered source list together with the research
   notes and cites every factual claim with a marker like `[4]`. The UI renders those markers as
   small clickable numbered pills linking to the source, and the Matrix text message turns them

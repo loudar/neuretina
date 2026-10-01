@@ -7,6 +7,7 @@ import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
+import type { Brief } from "../domain/briefs/BriefRepository.ts";
 import { eventWaitTimeoutMs } from "../commands/registerCommands.ts";
 
 export interface ApiDeps {
@@ -19,6 +20,14 @@ export interface ApiDeps {
   adminUser: string;
   /** The logged-in account's runtime: its stores, feeds and command router. */
   runtimeFor(username: string): ApiRuntime;
+  /** Resolves an anonymous brief share token across every account's data. */
+  sharedBrief(token: string): SharedBriefResult | null;
+}
+
+/** A brief reachable through its anonymous share token. */
+export interface SharedBriefResult {
+  brief: Brief;
+  audio(): { audio: Uint8Array; mimeType: string } | null;
 }
 
 /** The per-user slice the HTTP layer needs. */
@@ -73,6 +82,19 @@ export function createApiServer(deps: ApiDeps): ApiServer {
       },
       "/api/auth/logout": {
         POST: guard((request) => handleLogout(request, deps)),
+      },
+
+      // Anonymous, read-only brief access: the token in a delivery link is
+      // the only credential, so these stay outside the session guard.
+      "/api/share/brief/:token": {
+        GET: guard((request: Bun.BunRequest<"/api/share/brief/:token">) =>
+          handleSharedBrief(request, deps),
+        ),
+      },
+      "/api/share/brief/:token/audio": {
+        GET: guard((request: Bun.BunRequest<"/api/share/brief/:token/audio">) =>
+          handleSharedBriefAudio(request, deps),
+        ),
       },
 
       "/api/webhook": {
@@ -278,6 +300,46 @@ function handleLogout(request: Request, deps: ApiDeps): Response {
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: { ...JSON_HEADERS, "Set-Cookie": clearSessionCookieHeader(isSecureRequest(request)) },
+  });
+}
+
+/** Public payload for the read-only view; exactly what it renders. */
+function handleSharedBrief(
+  request: Bun.BunRequest<"/api/share/brief/:token">,
+  deps: ApiDeps,
+): Response {
+  const found = deps.sharedBrief(request.params.token);
+  if (!found) return jsonResponse({ ok: false, error: "Brief not found" }, 404);
+  const { brief } = found;
+  return jsonResponse({
+    ok: true,
+    brief: {
+      id: brief.id,
+      createdAt: brief.createdAt,
+      topics: brief.topics,
+      markdown: brief.markdown,
+      narration: brief.narration,
+      sources: brief.sources,
+      hasAudio: brief.hasAudio,
+      audioMime: brief.audioMime,
+      audioDurationMs: brief.audioDurationMs,
+    },
+  });
+}
+
+/** Audio of a shared brief, playable without a session. */
+function handleSharedBriefAudio(
+  request: Bun.BunRequest<"/api/share/brief/:token/audio">,
+  deps: ApiDeps,
+): Response {
+  const audio = deps.sharedBrief(request.params.token)?.audio();
+  if (!audio) return jsonResponse({ ok: false, error: "Audio not found" }, 404);
+  return new Response(audio.audio, {
+    headers: {
+      "Content-Type": audio.mimeType,
+      "Content-Disposition": "inline",
+      "Cache-Control": "private, max-age=3600",
+    },
   });
 }
 

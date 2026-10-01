@@ -21,6 +21,7 @@
   import { paths, router } from "./lib/router.svelte";
   import BriefsView from "./components/BriefsView.svelte";
   import LoginView from "./components/LoginView.svelte";
+  import SharedBriefView from "./components/SharedBriefView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
   import JobsView from "./components/JobsView.svelte";
   import WorkflowsView from "./components/WorkflowsView.svelte";
@@ -31,6 +32,12 @@
 
   const tab = $derived(router.current.tab);
   const config = $derived(configState.value);
+
+  // A delivery link carries a brief's anonymous token; without a session it
+  // renders as a bare read-only view instead of the login gate.
+  const sharedToken = $derived(
+    router.current.tab === "briefs" ? (router.current.query.token ?? null) : null,
+  );
 
   const nav = [
     { label: "Briefs", value: "briefs", icon: iconArticle },
@@ -125,7 +132,11 @@
 {#if authState.loading}
   <div class="boot"><p class="muted">Loading…</p></div>
 {:else if authState.locked}
-  <LoginView />
+  {#if sharedToken}
+    <SharedBriefView token={sharedToken} />
+  {:else}
+    <LoginView />
+  {/if}
 {:else}
 <div class="shell">
   <NavigationRail collapse="no" open>

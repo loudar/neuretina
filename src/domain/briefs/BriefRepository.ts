@@ -2,6 +2,7 @@ import type { SearchMedia } from "../../capabilities/search/SearchProvider.ts";
 import { NotFoundError } from "../../core/errors.ts";
 import { numberField, stringField } from "../../core/records.ts";
 import type { Artifact, ArtifactStore } from "../artifacts/ArtifactRepository.ts";
+import type { BriefShareStore } from "./BriefShareRepository.ts";
 
 export interface BriefSource {
   title: string;
@@ -73,10 +74,22 @@ export interface BriefStore {
   search(query: string | undefined, limit?: number, contextId?: string): Brief[];
   latest(contextId?: string): Brief | null;
   remove(id: string): Brief;
+  /**
+   * Token for anonymous read-only access to the brief, created on first use.
+   * Undefined when no share store is wired (tests with stubbed stores).
+   */
+  shareToken(id: string): string | undefined;
+  /** Resolves a share token to its brief; null for unknown or deleted ones. */
+  findByShareToken(token: string): Brief | null;
+  /** Drops the brief's share token after a delete outside remove(). */
+  forgetShare(id: string): void;
 }
 
 export class BriefRepository implements BriefStore {
-  constructor(private readonly artifacts: ArtifactStore) {}
+  constructor(
+    private readonly artifacts: ArtifactStore,
+    private readonly shares?: BriefShareStore,
+  ) {}
 
   create(input: CreateBriefInput): Brief {
     const artifact = this.artifacts.create({
@@ -93,6 +106,7 @@ export class BriefRepository implements BriefStore {
       correlationId: input.correlationId,
       contextId: input.contextId,
     });
+    this.shares?.tokenFor(artifact.id);
     return toBrief(artifact);
   }
 
@@ -174,7 +188,26 @@ export class BriefRepository implements BriefStore {
   remove(id: string): Brief {
     const brief = toBrief(this.loadBriefArtifact(id));
     this.artifacts.remove(id);
+    this.shares?.remove(id);
     return brief;
+  }
+
+  shareToken(id: string): string | undefined {
+    return this.shares?.tokenFor(id);
+  }
+
+  findByShareToken(token: string): Brief | null {
+    const briefId = this.shares?.briefIdFor(token);
+    if (!briefId) return null;
+    try {
+      return this.get(briefId);
+    } catch {
+      return null;
+    }
+  }
+
+  forgetShare(id: string): void {
+    this.shares?.remove(id);
   }
 
   private loadBriefArtifact(id: string): Artifact {

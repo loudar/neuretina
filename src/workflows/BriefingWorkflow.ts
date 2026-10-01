@@ -470,6 +470,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const summary = buildBriefMessage(brief.markdown, brief.sources, {
       appUrl: this.deps.appUrl,
       briefId: brief.id,
+      shareToken: this.deps.briefs.shareToken(brief.id),
     });
     return {
       kinds: ["text"],

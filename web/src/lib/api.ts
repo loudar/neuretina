@@ -71,6 +71,19 @@ export interface BriefAudio {
   durationMs: number | null;
 }
 
+/** A brief fetched through its anonymous share token (no session needed). */
+export interface SharedBrief {
+  id: string;
+  createdAt: number;
+  topics: string[];
+  markdown: string;
+  narration: string;
+  sources: BriefSource[];
+  hasAudio: boolean;
+  audioMime?: string;
+  audioDurationMs?: number;
+}
+
 /** A dated event extracted from a brief; the rows behind timeline artifacts. */
 export interface TimelineEvent {
   id: string;
@@ -387,6 +400,19 @@ export async function send<T = unknown>(
   }
 
   return body.result as T;
+}
+
+/** Fetches a shared brief without a session; the token is the credential. */
+export async function fetchSharedBrief(token: string): Promise<SharedBrief> {
+  const response = await fetch(`/api/share/brief/${encodeURIComponent(token)}`);
+  const body = (await response.json().catch(() => ({}))) as {
+    brief?: SharedBrief;
+    error?: string;
+  };
+  if (!response.ok || !body.brief) {
+    throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+  }
+  return body.brief;
 }
 
 export const commands = {

@@ -3,9 +3,11 @@ import type { BriefSource } from "./BriefRepository.ts";
 export interface BriefMessageOptions {
   /** Cap on highlighted source links (default 6). */
   maxSources?: number;
-  /** Public app URL; with `briefId` appends a "View this Brief" link. */
+  /** Public app URL; with `briefId` and `shareToken` appends a "View this Brief" link. */
   appUrl?: string;
   briefId?: string;
+  /** Anonymous read-only token for the brief; recipients have no account. */
+  shareToken?: string;
 }
 
 /**
@@ -38,9 +40,12 @@ export function buildBriefMessage(
 }
 
 function briefLink(options: BriefMessageOptions): string | undefined {
-  if (!options.appUrl || !options.briefId) return undefined;
+  if (!options.appUrl || !options.briefId || !options.shareToken) return undefined;
   const base = options.appUrl.replace(/\/+$/, "");
-  return `[View this Brief on Neuretina](${base}/briefs/${options.briefId})`;
+  const url = `${base}/briefs/${encodeURIComponent(options.briefId)}?token=${encodeURIComponent(
+    options.shareToken,
+  )}`;
+  return `[View this Brief on Neuretina](${url})`;
 }
 
 /** Keeps [n] citation markers clickable in Matrix clients. */

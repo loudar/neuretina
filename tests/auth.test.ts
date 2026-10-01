@@ -171,6 +171,32 @@ describe("password-protected gateway", () => {
     expect(logout.status).toBe(200);
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
   });
+
+  test("serves a brief anonymously through its share token", async () => {
+    const brief = kernel.briefs.create({
+      topics: ["Rust"],
+      markdown: "# Shared brief",
+      narration: "spoken",
+      sources: [],
+    });
+    const token = kernel.briefs.shareToken(brief.id)!;
+    kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg");
+
+    // No session cookie: the token is the only credential.
+    const response = await fetch(`${base}/api/share/brief/${token}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { brief: { id: string; markdown: string } };
+    expect(body.brief.id).toBe(brief.id);
+    expect(body.brief.markdown).toBe("# Shared brief");
+
+    const audio = await fetch(`${base}/api/share/brief/${token}/audio`);
+    expect(audio.status).toBe(200);
+    expect(audio.headers.get("content-type")).toBe("audio/ogg");
+    expect(new Uint8Array(await audio.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+
+    expect((await fetch(`${base}/api/share/brief/unknown`)).status).toBe(404);
+    expect((await fetch(`${base}/api/share/brief/unknown/audio`)).status).toBe(404);
+  });
 });
 
 describe("login rate limiting", () => {

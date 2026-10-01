@@ -321,6 +321,19 @@ export const migrations: Migration[] = [
       UPDATE workflow_runs SET context_id = 'default' WHERE context_id = 'morning-briefing';
     `,
   },
+  {
+    // Anonymous, read-only access to a single brief: the token in a delivery
+    // link resolves to its brief without a session.
+    id: 19,
+    name: "brief_shares",
+    sql: `
+      CREATE TABLE IF NOT EXISTS brief_shares (
+        token      TEXT PRIMARY KEY,
+        brief_id   TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

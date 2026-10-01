@@ -35,4 +35,25 @@ describe("buildBriefMessage", () => {
 
     expect(message).toContain("Up 12 percent [2](https://a.com/2).");
   });
+
+  test("appends the share link with the anonymous token", () => {
+    const message = buildBriefMessage("# Brief", [], {
+      appUrl: "https://briefs.test/",
+      briefId: "brief-1",
+      shareToken: "abc123",
+    });
+
+    expect(message).toContain(
+      "[View this Brief on Neuretina](https://briefs.test/briefs/brief-1?token=abc123)",
+    );
+  });
+
+  test("omits the link when no share token exists", () => {
+    const message = buildBriefMessage("# Brief", [], {
+      appUrl: "https://briefs.test",
+      briefId: "brief-1",
+    });
+
+    expect(message).not.toContain("View this Brief");
+  });
 });

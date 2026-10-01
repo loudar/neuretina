@@ -17,6 +17,7 @@ import { TriggerDispatcher } from "../core/workflow/Triggers.ts";
 import type { SqliteDatabase } from "../infra/db/SqliteDatabase.ts";
 import { ArtifactRepository, type ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
 import { BriefRepository, type BriefStore } from "../domain/briefs/BriefRepository.ts";
+import { BriefShareRepository } from "../domain/briefs/BriefShareRepository.ts";
 import {
   ContextRepository,
   DEFAULT_CONTEXT_ID,
@@ -175,7 +176,7 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
   const runs = overridden.runs ?? new WorkflowRunRepository(sqlite());
   const artifacts = overridden.artifacts ?? new ArtifactRepository(sqlite());
   const topics = overridden.topics ?? new TopicRepository(sqlite());
-  const briefs = overridden.briefs ?? new BriefRepository(artifacts);
+  const briefs = overridden.briefs ?? new BriefRepository(artifacts, new BriefShareRepository(sqlite()));
   const jobs = overridden.jobs ?? new JobRepository(sqlite());
   const kv = overridden.kv ?? new KeyValueRepository(sqlite());
   const deliveries = overridden.deliveries ?? new DeliveryRepository(sqlite());

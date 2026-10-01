@@ -120,6 +120,14 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     bus: adminRuntime.bus,
     adminUser,
     runtimeFor: (username) => runtimeFor(username),
+    // Share tokens are per account; find the runtime that owns the brief.
+    sharedBrief: (token) => {
+      for (const runtime of runtimes.values()) {
+        const brief = runtime.briefs.findByShareToken(token);
+        if (brief) return { brief, audio: () => runtime.briefs.getAudio(brief.id) };
+      }
+      return null;
+    },
   });
 
   adminRuntime.bus.publish(
