@@ -31,3 +31,8 @@ export function textSimilarity(a: string, b: string): number {
   if (longest === 0) return 1;
   return 1 - levenshteinDistance(left, right) / longest;
 }
+
+/** Whitespace-delimited word count, used for length checks. */
+export function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}

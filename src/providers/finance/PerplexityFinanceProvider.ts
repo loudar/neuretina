@@ -1,3 +1,4 @@
+import { hostnameOf } from "../search/searchSupport.ts";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
 import { requestJson } from "../../infra/http/request.ts";
 import type {
@@ -195,10 +196,4 @@ function clip(text: string, maxChars: number): string {
   return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
 }
 
-function hostnameOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "perplexity";
-  }
-}
+/** Finance sources share the search-result hostname helper. */

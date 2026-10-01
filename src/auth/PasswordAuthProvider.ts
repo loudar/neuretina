@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeStringEqual } from "./session.ts";
 import type { AuthIdentity, AuthProvider } from "./AuthProvider.ts";
 
 /**
@@ -21,8 +21,4 @@ export const passwordAuthProvider: AuthProvider = {
   },
 };
 
-function timingSafeStringEqual(first: string, second: string): boolean {
-  const left = Buffer.from(first, "utf8");
-  const right = Buffer.from(second, "utf8");
-  return left.length === right.length && timingSafeEqual(left, right);
-}
+

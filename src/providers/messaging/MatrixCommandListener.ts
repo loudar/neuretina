@@ -147,13 +147,13 @@ export class MatrixCommandListener implements ChatCommandSource {
           await this.initialSync().catch(() => undefined);
         }
 
-        await sleep(RETRY_DELAY_MS);
+        await Bun.sleep(RETRY_DELAY_MS);
       }
 
       // Guard against tight loops if a server answers syncs instantly.
       const elapsed = Date.now() - startedAt;
       if (this.running && elapsed < MIN_SYNC_INTERVAL_MS) {
-        await sleep(MIN_SYNC_INTERVAL_MS - elapsed);
+        await Bun.sleep(MIN_SYNC_INTERVAL_MS - elapsed);
       }
     }
   }
@@ -452,6 +452,4 @@ export function parseChatCommand(text: string): { command: string; args: string 
   return { command: match[1].toLowerCase(), args: (match[2] ?? "").trim() };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+

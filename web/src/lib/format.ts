@@ -14,6 +14,11 @@ export function formatListDate(ts: number | undefined, fallback = "–"): string
   });
 }
 
+/** Local wall-clock time for activity feeds. */
+export function formatTime(ts: number): string {
+  return new Date(ts).toLocaleTimeString();
+}
+
 /** Relative time like "5 minutes ago" or "yesterday". */
 export function formatRelativeTime(
   ts: number | undefined,

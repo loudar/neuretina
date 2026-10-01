@@ -79,7 +79,7 @@ function sign(encoded: string, secret: Buffer): string {
   return createHmac("sha256", secret).update(encoded).digest("base64url");
 }
 
-function timingSafeStringEqual(first: string, second: string): boolean {
+export function timingSafeStringEqual(first: string, second: string): boolean {
   const left = Buffer.from(first, "utf8");
   const right = Buffer.from(second, "utf8");
   return left.length === right.length && timingSafeEqual(left, right);

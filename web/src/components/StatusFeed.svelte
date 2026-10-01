@@ -1,3 +1,4 @@
+  import { formatTime } from "../lib/format";
 <script lang="ts">
   import { Card, Chip, Icon } from "m3-svelte";
   import iconCheck from "@ktibow/iconset-material-symbols/check-circle";
@@ -57,9 +58,6 @@
     flat.filter((entry) => entry.state === "running").length,
   );
 
-  function formatTime(ts: number): string {
-    return new Date(ts).toLocaleTimeString();
-  }
 
   function formatCost(value: number): string {
     return value >= 0.01 ? `$${value.toFixed(2)}` : `$${value.toFixed(4)}`;

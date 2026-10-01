@@ -1,3 +1,4 @@
+import { wordCount } from "../core/text.ts";
 import { Agent } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
@@ -242,6 +243,3 @@ export function isAcceptableRevision(
   return true;
 }
 
-function wordCount(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}

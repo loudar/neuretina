@@ -1,3 +1,4 @@
+  import { formatTime } from "../lib/format";
 <script lang="ts">
   import { Button, TextFieldOutlined } from "m3-svelte";
   import { eventStream } from "../lib/events.svelte";
@@ -45,10 +46,6 @@
   const selected = $derived(
     eventStream.events.find((event) => event.id === selectedId) ?? null,
   );
-
-  function formatTime(ts: number): string {
-    return new Date(ts).toLocaleTimeString();
-  }
 </script>
 
 <Pane variant="list" title="Live events">

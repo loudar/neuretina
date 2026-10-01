@@ -1,3 +1,4 @@
+import { wordCount } from "../core/text.ts";
 import { Agent, AGENT_STEP_LIMIT_MESSAGE } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
@@ -1367,9 +1368,6 @@ const WORD_BUDGET = 150;
 /** Drafts longer than this get one compression pass. */
 const HARD_WORD_CEILING = 170;
 
-export function wordCount(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}
 
 function buildResearchPrompt(topics: Topic[], recency: string): string {
   const list = topics

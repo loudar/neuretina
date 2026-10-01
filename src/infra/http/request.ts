@@ -37,7 +37,7 @@ export async function requestRaw(
       const error = new ProviderError(provider, `network request failed: ${url}`, { cause });
       if (attempt < retries) {
         lastError = error;
-        await sleep(baseDelayMs * (attempt + 1));
+        await Bun.sleep(baseDelayMs * (attempt + 1));
         continue;
       }
       throw error;
@@ -54,7 +54,7 @@ export async function requestRaw(
 
     if (attempt < retries && retryStatuses.includes(response.status)) {
       lastError = error;
-      await sleep(baseDelayMs * (attempt + 1));
+      await Bun.sleep(baseDelayMs * (attempt + 1));
       continue;
     }
 
@@ -109,6 +109,4 @@ function describeBody(body: string): string {
   return ` — ${text.replace(/\s+/g, " ").slice(0, 200)}`;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+
