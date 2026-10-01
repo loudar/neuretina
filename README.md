@@ -645,7 +645,7 @@ docker run --rm -p 8080:8080 -v neuretina-data:/app/data --env-file .env neureti
 ```
 
 To run the published image instead, use the bundled `docker-compose.yml`; it pulls
-`ghcr.io/loudar/neuretina:latest`, keeps the database in `/mnt/neuretina-data` on the host and
+`ghcr.io/targoninc/neuretina:latest`, keeps the database in `/mnt/neuretina-data` on the host and
 carries the whole environment in the service definition (no `.env` file needed):
 
 ```bash

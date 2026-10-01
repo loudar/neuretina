@@ -1,6 +1,6 @@
 services:
   neuretina:
-    image: ghcr.io/loudar/neuretina:latest
+    image: ghcr.io/targoninc/neuretina:latest
     pull_policy: always
     restart: unless-stopped
     ports:
