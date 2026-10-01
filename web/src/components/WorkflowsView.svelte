@@ -526,17 +526,24 @@
     return workflow.user ? workflow.title : workflow.id;
   }
 
-  /** List supporting text; user workflows show no summary line. */
+  /**
+   * List supporting text: triggers only, never the description. Workflows
+   * without a manual or scheduled trigger (e.g. the Matrix follow-up) show
+   * nothing at all.
+   */
   function workflowSupporting(workflow: WorkflowInfo): string {
-    if (!workflow.user) {
-      return `${workflow.description} · triggers ${workflow.triggers.join(", ") || "none"}`;
+    if (workflow.user) return "";
+    if (!workflow.triggers.some((trigger) => trigger === "manual" || trigger === "schedule")) {
+      return "";
     }
-    return "";
+    return `triggers ${workflow.triggers.join(", ") || "none"}`;
   }
 
   /** Details header subtitle with the workflow's configured inputs. */
   function workflowSummary(workflow: WorkflowInfo): string {
-    if (!workflow.user) return workflowSupporting(workflow);
+    if (!workflow.user) {
+      return `${workflow.description} · triggers ${workflow.triggers.join(", ") || "none"}`;
+    }
     const topicIds = workflow.inputValues?.topics;
     const topicCount = Array.isArray(topicIds) ? topicIds.length : 0;
     const channelCount = attachments.get(workflow.id)?.length ?? 0;

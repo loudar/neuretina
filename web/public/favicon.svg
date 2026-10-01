@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Neuretina">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0d1b3a" />
+      <stop offset="1" stop-color="#04060c" />
+    </linearGradient>
+    <linearGradient id="sclera" x1="0" y1="16" x2="0" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f4f8ff" />
+      <stop offset="1" stop-color="#c3d8f7" />
+    </linearGradient>
+    <linearGradient id="iris" x1="0" y1="20" x2="0" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#63a8ff" />
+      <stop offset="1" stop-color="#1b53c9" />
+    </linearGradient>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="url(#bg)" />
+
+  <!-- Eye: lens-shaped sclera, blue iris, dark pupil, highlight -->
+  <path d="M6 32Q19 17 32 17Q45 17 58 32Q45 47 32 47Q19 47 6 32Z" fill="url(#sclera)" />
+  <circle cx="32" cy="32" r="11" fill="url(#iris)" />
+  <circle cx="32" cy="32" r="11" fill="none" stroke="#0b2a66" stroke-width="1.5" opacity="0.6" />
+  <circle cx="32" cy="32" r="4.6" fill="#04060c" />
+  <circle cx="28.2" cy="27.8" r="2.2" fill="#eaf2ff" opacity="0.9" />
+</svg>
