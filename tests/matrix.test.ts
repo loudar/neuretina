@@ -170,7 +170,7 @@ describe("MatrixMessagingProvider", () => {
       roomId: "!room:example.org",
     });
 
-    await expect(provider.send(voice)).rejects.toThrow(/MATRIX_ACCESS_TOKEN/);
+    await expect(provider.send(voice)).rejects.toThrow(/credentials missing/);
   });
 
   test("verify() logs in, checks identity and room membership", async () => {

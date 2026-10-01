@@ -64,7 +64,7 @@ export class MatrixMessagingProvider implements MessagingProvider {
 
   private assertConfigured(roomId?: string): void {
     if (!this.options.roomId && !roomId) {
-      throw new ConfigurationError("Matrix room is not configured. Set MATRIX_ROOM_ID.");
+      throw new ConfigurationError("Matrix room is not configured. Add the room ID to the delivery channel.");
     }
     this.client.assertConfigured(roomId);
   }

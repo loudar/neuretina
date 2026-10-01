@@ -31,8 +31,17 @@ export class MatrixClient {
   readonly name = "matrix";
   private cachedToken: string | null = null;
   private userId: string | null = null;
+  private readonly options: MatrixClientOptions;
 
-  constructor(private readonly options: MatrixClientOptions) {}
+  constructor(options: MatrixClientOptions) {
+    // Whitespace from copy-paste or env parsing must never break a login.
+    this.options = {
+      ...(options.homeserverUrl !== undefined ? { homeserverUrl: options.homeserverUrl.trim() } : {}),
+      ...(options.accessToken !== undefined ? { accessToken: options.accessToken.trim() } : {}),
+      ...(options.username !== undefined ? { username: options.username.trim() } : {}),
+      ...(options.password !== undefined ? { password: options.password.trim() } : {}),
+    };
+  }
 
   get configured(): boolean {
     return Boolean(
@@ -224,14 +233,14 @@ export class MatrixClient {
 
   assertConfigured(roomId?: string): void {
     if (!this.homeserver) {
-      throw new ConfigurationError("Matrix is not configured. Set MATRIX_HOMESERVER_URL.");
+      throw new ConfigurationError("Matrix is not configured. Add the homeserver URL to the delivery channel.");
     }
     if (roomId !== undefined && !roomId) {
-      throw new ConfigurationError("Matrix room is not configured. Set MATRIX_ROOM_ID.");
+      throw new ConfigurationError("Matrix room is not configured. Add the room ID to the delivery channel.");
     }
     if (!this.options.accessToken && !(this.options.username && this.options.password)) {
       throw new ConfigurationError(
-        "Matrix credentials missing. Set MATRIX_ACCESS_TOKEN, or MATRIX_USERNAME + MATRIX_PASSWORD.",
+        "Matrix credentials missing. Add an access token, or a username and password, to the delivery channel.",
       );
     }
   }
@@ -244,7 +253,7 @@ export class MatrixClient {
     const homeserverUrl = this.homeserver;
     if (!homeserverUrl || !username || !password) {
       throw new ConfigurationError(
-        "Matrix credentials missing. Set MATRIX_ACCESS_TOKEN, or MATRIX_USERNAME + MATRIX_PASSWORD.",
+        "Matrix credentials missing. Add an access token, or a username and password, to the delivery channel.",
       );
     }
 
@@ -271,9 +280,7 @@ export class MatrixClient {
         const serverError = extractMatrixError(error);
         throw new ConfigurationError(
           `Matrix login failed${serverError ? ` (${serverError})` : ""}. ` +
-            "Check MATRIX_USERNAME and MATRIX_PASSWORD, or use MATRIX_ACCESS_TOKEN. " +
-            'Hint: in .env, "$" must be escaped as "\\$" and values containing "#" must be quoted, ' +
-            "otherwise the .env parser alters the password.",
+            "Check the delivery channel's username and password, or use an access token.",
           { status: 403 },
         );
       }
