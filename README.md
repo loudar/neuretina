@@ -178,20 +178,26 @@ bun test
 
 ## Integrations setup
 
-### OpenCode Go (LLM)
+LLM, web-search and Bluesky credentials are **per-user settings** (Settings in the UI) and cannot
+be set through the deployment environment; the notes below say what to obtain and where to paste it.
 
-- Subscribe to Go at https://opencode.ai/auth and copy the API key → `OPENCODE_API_KEY`.
-- Defaults: `LLM_BASE_URL=https://opencode.ai/zen/go/v1`, `LLM_MODEL=deepseek-v4.1-flash`
-  (OpenAI-compatible `/chat/completions`).
-- OpenCode Go requires a client user agent and a stable `x-opencode-session` id per conversation.
-  The engine sends both automatically: the session id is the id of the workflow run (agent tool
-  loop and compiler share one conversation), falling back to `LLM_SESSION_ID` if set, then to a
-  per-process uuid. Pin `LLM_SESSION_ID` if you want one routing/cache session across runs.
+### LLM (OpenAI-compatible)
+
+- Any OpenAI-compatible endpoint works. For OpenCode Go subscribe at https://opencode.ai/auth and
+  paste the key in **Settings → LLM**; point the base URL at another provider (OpenAI, vLLM, …) and
+  the engine adapts.
+- Defaults: base URL `https://opencode.ai/zen/go/v1`, model `deepseek-v4.1-flash`.
+- OpenCode endpoints require a client user agent and a stable `x-opencode-session` id per
+  conversation; the engine detects `opencode.ai`/`opencode.com` and sends both automatically. Other
+  endpoints only get the user agent.
 - `bun run check:llm` sends one tiny completion to verify the key/endpoint end-to-end.
 
-### Perplexity (web + finance)
+### Web search (Perplexity, Exa)
 
-- Create an API key → `KEY_PERPLEXITY`.
+- Perplexity: create an API key and paste it in **Settings → Web search & finance (Perplexity)**.
+- Exa: paste a key in **Settings → Web search (Exa)** to add a second, independent index. When both
+  are configured the researcher gets `search.perplexity` and `search.exa` as separate tools; Bluesky
+  is always available as `search.bluesky`.
 - **Web search:** the agent calls `POST https://api.perplexity.ai/search` and receives raw ranked
   results (`title`, `url`, `snippet`, `date`) — no LLM answer in the loop. Searches are limited to
   the last 3 days (`DEFAULT_SEARCH_RECENCY`, one of `hour`/`day`/`3days`/`week`/`month`/`year`; the
@@ -218,9 +224,14 @@ bun test
   enabled for your key; if a lookup fails the researcher continues with web/social results and the
   error is visible in the activity feed.
 
-### Qwen3-TTS (speech, local)
+### Speech (Qwen3-TTS or ElevenLabs)
 
-Speech is synthesized by a **local Qwen3-TTS server** speaking the OpenAI `POST /audio/speech`
+Speech is a per-user choice: **Settings → Speech → Provider** picks `qwen` (local) or
+`elevenlabs`. Both implement the same `TextToSpeechProvider` protocol, so workflows, delivery and
+the UI are provider-agnostic. All speech settings below are per-user UI settings; the environment
+cannot set them.
+
+**Qwen (local, default):** a local Qwen3-TTS server speaking the OpenAI `POST /audio/speech`
 interface — no text leaves the machine. Any of the common servers works: vLLM-Omni
 (`vllm serve Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice --omni`), Qwen3-TTS-Openai-Fastapi,
 qwen3-tts-server, or a similar wrapper.
@@ -251,6 +262,10 @@ qwen3-tts-server, or a similar wrapper.
   fails, the compiled brief is **delivered as a text message instead** — a flaky TTS call never
   throws away a good brief.
 
+**ElevenLabs:** set the provider to `elevenlabs` and add `KEY_ELEVENLABS` (plus optionally
+`ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL_ID`, `ELEVENLABS_SPEED`) in the same settings group. The
+provider speaks the same protocol, so nothing else changes.
+
 The ElevenLabs provider module is kept in the repo but unused; its `ELEVENLABS_*` settings are
 ignored.
 
@@ -258,10 +273,11 @@ ignored.
 
 What you need:
 
-1. A Bluesky account (a dedicated bot account is fine) and its **handle** → `BLUESKY_IDENTIFIER`.
-2. An **app password** for that account → `BLUESKY_APP_PASSWORD`.
+1. A Bluesky account (a dedicated bot account is fine) and its **handle** — paste it in
+   **Settings → Bluesky**.
+2. An **app password** for that account — same settings group.
    Create it in Bluesky: *Settings → App Passwords → Add App Password* (format `xxxx-xxxx-xxxx-xxxx`).
-3. **No PDS URL needed.** Leave `BLUESKY_PDS_URL` empty and the provider auto-discovers the PDS
+3. **No PDS URL needed.** Leave it empty and the provider auto-discovers the PDS
    from the account's DID document (`plc.directory` / `did:web`). This works whether the account is
    hosted on `bsky.social`, on a shard like `*.host.bsky.network`, or on a third-party PDS. Set it
    explicitly only if you want to pin a specific host.
@@ -575,6 +591,19 @@ persisted in SQLite (`events` table) and read back through the webhook via `even
 
 Known topics are typed in `src/core/events/AppEvents.ts`. Arbitrary topics (e.g. inbound hooks)
 are supported.
+
+## Accounts and per-user data
+
+Everything is scoped to the logged-in account. The admin account (`ADMIN_USERNAME`, default
+`admin`) owns the original database (`DB_PATH`); every other account gets its own SQLite file under
+`<DB_PATH dir>/users/<username>.db`. Stores, providers, settings, event log, status feed, Matrix
+channel and scheduler all come from that per-user runtime, so one account can never read another's
+data. Today the shared `AUTH_GLOBAL_PASSWORD` logs in as the admin; per-user auth methods (OIDC)
+will resolve other accounts into the same runtime mechanism.
+
+Provider credentials (LLM, search, Bluesky) are user-owned settings and are ignored if set in the
+deployment environment. Other defaults (`TZ`, cron, search window, TTS endpoint, …) remain
+deployment-level and can still be overridden per account in the UI.
 
 ## Authentication
 

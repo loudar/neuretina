@@ -1,15 +1,6 @@
 import type { FinanceUsage } from "../../capabilities/finance/FinanceProvider.ts";
 import type { LlmUsage } from "../../capabilities/llm/LlmProvider.ts";
 
-export interface CostPricing {
-  /** USD per 1M input tokens; 0 = unknown (tokens are recorded but unpriced). */
-  llmInputPerMillion: number;
-  /** USD per 1M output tokens; 0 = unknown. */
-  llmOutputPerMillion: number;
-  /** USD per Perplexity search request; 0 = unknown. */
-  perplexitySearchPerRequest: number;
-}
-
 export interface CostLine {
   /** Workflow step the cost belongs to, e.g. "Research". */
   step: string;
@@ -23,16 +14,10 @@ export interface CostLine {
 
 export interface CostReport {
   totalUsd: number;
-  /** False when at least one line has no known price. */
+  /** False when at least one line has no provider-reported price. */
   complete: boolean;
   lines: CostLine[];
 }
-
-export const ZERO_PRICING: CostPricing = {
-  llmInputPerMillion: 0,
-  llmOutputPerMillion: 0,
-  perplexitySearchPerRequest: 0,
-};
 
 interface Accumulator {
   step: string;
@@ -49,12 +34,12 @@ interface Accumulator {
 /**
  * Per-run cost accumulator. Every workflow step reports its LLM usage, paid
  * searches and finance lookups here; the runner stores the resulting report on
- * the run record.
+ * the run record. Prices are never configured: a line is priced only when the
+ * provider reports the cost with the response (LLM/finance usage), otherwise
+ * the usage is recorded as unpriced.
  */
 export class CostTracker {
   private readonly accumulators = new Map<string, Accumulator>();
-
-  constructor(private readonly pricing: CostPricing = ZERO_PRICING) {}
 
   addLlm(step: string, usage: LlmUsage, calls = 1): number {
     const entry = this.entry(step, "llm");
@@ -62,29 +47,17 @@ export class CostTracker {
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
     if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
 
-    let added = 0;
-    if (usage.costUsd !== undefined) {
-      added = usage.costUsd;
-      entry.priced = true;
-    } else if (this.pricing.llmInputPerMillion > 0 || this.pricing.llmOutputPerMillion > 0) {
-      added =
-        ((usage.inputTokens ?? 0) / 1_000_000) * this.pricing.llmInputPerMillion +
-        ((usage.outputTokens ?? 0) / 1_000_000) * this.pricing.llmOutputPerMillion;
-      entry.priced = true;
-    }
-    entry.usd += added;
-    return added;
+    if (usage.costUsd === undefined) return 0;
+    entry.priced = true;
+    entry.usd += usage.costUsd;
+    return usage.costUsd;
   }
 
   addPerplexitySearch(step: string, requests: number): number {
     const entry = this.entry(step, "perplexity");
     entry.requests += requests;
-    if (this.pricing.perplexitySearchPerRequest > 0) {
-      const added = requests * this.pricing.perplexitySearchPerRequest;
-      entry.usd += added;
-      entry.priced = true;
-      return added;
-    }
+    // The search API does not report a per-request cost; the usage stays
+    // unpriced and the report is marked incomplete.
     return 0;
   }
 

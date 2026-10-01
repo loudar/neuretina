@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
-import { ZERO_PRICING } from "../src/core/cost/CostTracker.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { Scheduler } from "../src/core/scheduler/Scheduler.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
@@ -34,7 +33,6 @@ function setup(workflow: Workflow) {
     bus,
     logger: log,
     statuses: new StatusHub(),
-    pricing: ZERO_PRICING,
   });
   const scheduler = new Scheduler({ jobs, runner, bus, logger: log });
   activeScheduler = scheduler;

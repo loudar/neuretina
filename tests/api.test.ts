@@ -203,8 +203,8 @@ describe("webhook gateway", () => {
   });
 
   test("never persists secret setting values in the event log", async () => {
-    await call("settings.set", { key: "OPENCODE_API_KEY", value: "sekrit-value" });
-    await call("settings.clear", { key: "OPENCODE_API_KEY" });
+    await call("settings.set", { key: "LLM_API_KEY", value: "sekrit-value" });
+    await call("settings.clear", { key: "LLM_API_KEY" });
 
     const log = JSON.stringify(kernel.bus.replayAfter(0, 5000));
     expect(log).not.toContain("sekrit-value");

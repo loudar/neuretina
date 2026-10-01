@@ -4,7 +4,12 @@ import { finiteNumber } from "../records.ts";
 import type { CostTracker } from "./CostTracker.ts";
 
 /** Sandbox tools that run against the paid Perplexity web search. */
-const WEB_SEARCH_TOOLS = new Set(["perplexity_search", "wikipedia_search", "web_search"]);
+const WEB_SEARCH_TOOLS = new Set([
+  "search.perplexity",
+  "perplexity_search",
+  "wikipedia_search",
+  "web_search",
+]);
 
 /** Records an agent run's LLM usage, paid searches and finance lookups. */
 export function addAgentCost(

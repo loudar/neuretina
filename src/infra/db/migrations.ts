@@ -295,6 +295,19 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_timeline_events_date ON timeline_events (date);
     `,
   },
+  {
+    // Accounts. The admin account owns the original database; every other
+    // account gets its own database file under data/users/.
+    id: 17,
+    name: "users",
+    sql: `
+      CREATE TABLE IF NOT EXISTS users (
+        id           TEXT PRIMARY KEY,
+        display_name TEXT,
+        created_at   INTEGER NOT NULL
+      );
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

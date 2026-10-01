@@ -62,7 +62,7 @@ interface SetupOptions {
     upgrades: Array<{ for: number; title: string; url: string }>;
   };
   /** Every stub completion reports this usage (for cost tracking tests). */
-  llmUsage?: { inputTokens?: number; outputTokens?: number };
+  llmUsage?: { inputTokens?: number; outputTokens?: number; costUsd?: number };
   /** Enable event extraction and the timeline step. */
   events?: boolean;
   /** The event suggestion call waits until speech generation has started. */
@@ -160,7 +160,7 @@ function setup(options: SetupOptions = {}) {
               code: `async () => {
                 const [wiki, web] = await Promise.all([
                   wikipedia_search({ query: "Rust" }),
-                  perplexity_search({ query: "Rust implications" }),
+                  search.perplexity({ query: "Rust implications" }),
                 ]);
                 return { wiki: wiki.results.length, web: web.results.length };
               }`,
@@ -191,8 +191,8 @@ function setup(options: SetupOptions = {}) {
           }`
         : `async () => {
             const [web, social] = await Promise.all([
-              perplexity_search({ query: "t" }),
-              bluesky_search({ query: "t" }),
+              search.perplexity({ query: "t" }),
+              search.bluesky({ query: "t" }),
             ]);
             return { web: web.results.length, social: social.results.length };
           }`;
@@ -699,15 +699,11 @@ describe("BriefingWorkflow", () => {
 
   test("meters LLM and Perplexity usage per workflow step", async () => {
     const { workflow, topics, bus, statuses } = setup({
-      llmUsage: { inputTokens: 1000, outputTokens: 500 },
+      llmUsage: { inputTokens: 1000, outputTokens: 500, costUsd: 0.01 },
     });
     topics.add({ name: "Rust" });
 
-    const cost = new CostTracker({
-      llmInputPerMillion: 3,
-      llmOutputPerMillion: 15,
-      perplexitySearchPerRequest: 0.005,
-    });
+    const cost = new CostTracker();
     const output = await workflow.run(
       { deliver: false, generateAudio: false },
       { correlationId: "c21", bus, logger: log, statuses, cost },
@@ -720,7 +716,7 @@ describe("BriefingWorkflow", () => {
       (line) => line.step === "Research" && line.provider === "perplexity",
     );
     expect(search?.detail).toBe("1 search");
-    expect(search?.usd).toBeCloseTo(0.005, 6);
+    expect(search?.usd).toBe(0);
 
     const researchLlm = report.lines.find(
       (line) => line.step === "Research" && line.provider === "llm",
@@ -728,10 +724,12 @@ describe("BriefingWorkflow", () => {
     expect(researchLlm?.detail).toBe("2 calls · 2,000 in / 1,000 out tokens");
 
     const compilation = report.lines.find((line) => line.step === "Compilation");
-    expect(compilation?.usd).toBeCloseTo(0.0105, 6);
+    expect(compilation?.usd).toBeCloseTo(0.01, 6);
 
-    expect(report.complete).toBe(true);
-    expect(report.totalUsd).toBeCloseTo(0.0365, 6);
+    // Search requests carry no provider-reported price, so the report is
+    // marked incomplete even though every LLM call reported its cost.
+    expect(report.complete).toBe(false);
+    expect(report.totalUsd).toBeCloseTo(0.03, 6);
   });
 
   test("collects finance lookup sources alongside search results", async () => {

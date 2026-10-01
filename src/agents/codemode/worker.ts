@@ -149,22 +149,39 @@ for (const key of [
 (globalThis as Record<string, unknown>).console = sandboxConsole;
 
 async function runProgram(job: Job): Promise<void> {
-  const functions = job.tools.map((name) => (args: unknown) => callTool(name, args));
+  // Dotted tool names (e.g. search.perplexity) become namespaced objects so
+  // the program can call them naturally; plain names stay top-level functions.
+  const plain: Array<[string, (args: unknown) => unknown]> = [];
+  const namespaces = new Map<string, Record<string, (args: unknown) => unknown>>();
+  for (const name of job.tools) {
+    const call = (args: unknown) => callTool(name, args);
+    const dot = name.indexOf(".");
+    if (dot > 0) {
+      const namespace = name.slice(0, dot);
+      const bucket = namespaces.get(namespace) ?? {};
+      bucket[name.slice(dot + 1)] = call;
+      namespaces.set(namespace, bucket);
+    } else {
+      plain.push([name, call]);
+    }
+  }
+  const params = [...plain.map(([name]) => name), ...namespaces.keys()];
+  const values = [...plain.map(([, call]) => call), ...namespaces.values()];
 
   let program: (...values: unknown[]) => Promise<unknown>;
   try {
-    const factory = new AsyncFunction(...job.tools, `"use strict"; return (${job.code}\n);`);
-    const candidate = await factory(...functions);
+    const factory = new AsyncFunction(...params, `"use strict"; return (${job.code}\n);`);
+    const candidate = await factory(...values);
     if (typeof candidate !== "function") throw new Error("not a function");
     program = candidate as (...values: unknown[]) => Promise<unknown>;
   } catch {
     // Not an expression yielding a function: treat the code as the function body.
-    program = new AsyncFunction(...job.tools, `"use strict";\n${job.code}`) as unknown as (
+    program = new AsyncFunction(...params, `"use strict";\n${job.code}`) as unknown as (
       ...values: unknown[]
     ) => Promise<unknown>;
   }
 
-  const result = await program(...functions);
+  const result = await program(...values);
   writeLine({ type: "done", result: toJsonSafe(result), logs });
 }
 

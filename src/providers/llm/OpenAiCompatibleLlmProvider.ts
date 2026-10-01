@@ -30,6 +30,8 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   private readonly apiKey?: string;
   private readonly baseUrl: string;
   private readonly client: OpenAI | null;
+  /** OpenCode endpoints require their routing/session header; others don't. */
+  private readonly openCode: boolean;
 
   constructor(options: OpenAiCompatibleLlmOptions) {
     this.name = options.name ?? "openai-compatible";
@@ -38,6 +40,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
     this.baseUrl = options.baseUrl;
     this.sessionId = options.sessionId ?? crypto.randomUUID();
     this.userAgent = options.userAgent ?? APP_USER_AGENT;
+    this.openCode = isOpenCodeEndpoint(options.baseUrl);
     this.client = options.apiKey
       ? new OpenAI({
           apiKey: options.apiKey,
@@ -55,7 +58,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   async verify(): Promise<string> {
     if (!this.apiKey) {
       throw new ConfigurationError(
-        "LLM provider is not configured. Set OPENCODE_API_KEY to a valid OpenCode Go API key.",
+        "LLM provider is not configured. Add an API key for your OpenAI-compatible endpoint in Settings.",
       );
     }
 
@@ -65,7 +68,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
       {
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
-          "x-opencode-session": this.sessionId,
+          ...(this.openCode ? { "x-opencode-session": this.sessionId } : {}),
           "user-agent": this.userAgent,
         },
       },
@@ -78,7 +81,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   async complete(request: LlmCompletionRequest): Promise<LlmCompletionResult> {
     if (!this.client) {
       throw new ConfigurationError(
-        "LLM provider is not configured. Set OPENCODE_API_KEY to a valid OpenCode Go API key.",
+        "LLM provider is not configured. Add an API key for your OpenAI-compatible endpoint in Settings.",
       );
     }
 
@@ -107,7 +110,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
         },
         {
           headers: {
-            "x-opencode-session": request.sessionId ?? this.sessionId,
+            ...(this.openCode ? { "x-opencode-session": request.sessionId ?? this.sessionId } : {}),
             "user-agent": this.userAgent,
           },
           ...(request.signal ? { signal: request.signal } : {}),
@@ -153,6 +156,17 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 function numericField(value: unknown, key: string): number | undefined {
   if (!value || typeof value !== "object") return undefined;
   return numberField(value as Record<string, unknown>, key);
+}
+
+/** OpenCode's gateway (opencode.ai / opencode.com and subdomains). */
+function isOpenCodeEndpoint(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname.toLowerCase();
+    return host === "opencode.ai" || host.endsWith(".opencode.ai") ||
+      host === "opencode.com" || host.endsWith(".opencode.com");
+  } catch {
+    return false;
+  }
 }
 
 function costOf(usage: unknown): number | undefined {

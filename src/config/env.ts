@@ -40,6 +40,8 @@ export interface AppConfig {
   logLevel: LogLevel;
   /** Site protection; no mechanism configured means the site is open. */
   auth: {
+    /** Account that owns the main database and the global password login. */
+    adminUsername: string;
     /** Shared password for the whole site; empty disables authentication. */
     globalPassword?: string;
     /** Signs login sessions; empty derives it from the global password. */
@@ -66,12 +68,6 @@ export interface AppConfig {
     eventTagModel?: string;
     briefLanguage: string;
   };
-  /** Price table for metered providers; 0 means unknown (usage is still recorded). */
-  costs: {
-    llmInputPerMillion: number;
-    llmOutputPerMillion: number;
-    perplexitySearchPerRequest: number;
-  };
   llm: {
     apiKey?: string;
     baseUrl: string;
@@ -83,6 +79,11 @@ export interface AppConfig {
     baseUrl: string;
     /** Model used by the Agent API finance_search tool. */
     financeModel: string;
+  };
+  /** Optional second web search provider (neural/keyword search). */
+  exa: {
+    apiKey?: string;
+    baseUrl: string;
   };
   /** Local OpenAI-compatible Qwen3-TTS server (the active speech provider). */
   qwenTts: {
@@ -108,6 +109,10 @@ export interface AppConfig {
     /** Speaking rate for models that support it (Eleven v4 ignores this). */
     speed: number;
     maxCharsPerRequest: number;
+  };
+  /** Active speech provider; both implement the shared TTS protocol. */
+  tts: {
+    provider: "qwen" | "elevenlabs";
   };
   bluesky: {
     identifier?: string;
@@ -172,6 +177,7 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
     timezone: str(env, "TZ", "UTC")!,
     logLevel: str(env, "LOG_LEVEL", "info") as LogLevel,
     auth: {
+      adminUsername: str(env, "ADMIN_USERNAME", "admin")!,
       globalPassword: str(env, "AUTH_GLOBAL_PASSWORD"),
       sessionSecret: str(env, "AUTH_SESSION_SECRET"),
       sessionTtlHours: num(env, "AUTH_SESSION_TTL_HOURS", 720),
@@ -190,54 +196,57 @@ export function loadConfig(env: Env = Bun.env): AppConfig {
       eventTagModel: str(env, "EVENTS_TAG_MODEL", "") || undefined,
       briefLanguage: str(env, "DEFAULT_BRIEF_LANGUAGE", "en")!,
     },
-    costs: {
-      llmInputPerMillion: num(env, "LLM_PRICE_INPUT_PER_M", 0.3),
-      llmOutputPerMillion: num(env, "LLM_PRICE_OUTPUT_PER_M", 1.2),
-      perplexitySearchPerRequest: num(env, "PERPLEXITY_PRICE_PER_SEARCH", 0.005),
-    },
     llm: {
-      apiKey: str(env, "OPENCODE_API_KEY"),
-      baseUrl: str(env, "LLM_BASE_URL", "https://opencode.ai/zen/go/v1")!,
-      model: str(env, "LLM_MODEL", "deepseek-v4.1-flash")!,
-      sessionId: str(env, "LLM_SESSION_ID"),
+      // Provider credentials are user-owned: they can only be set in the UI,
+      // never through the deployment environment.
+      apiKey: undefined,
+      baseUrl: "https://opencode.ai/zen/go/v1",
+      model: "deepseek-v4.1-flash",
+      sessionId: undefined,
     },
     perplexity: {
-      apiKey: str(env, "KEY_PERPLEXITY"),
-      baseUrl: str(env, "PERPLEXITY_BASE_URL", "https://api.perplexity.ai")!,
-      financeModel: str(
-        env,
-        "PERPLEXITY_FINANCE_MODEL",
-        "perplexity/glm-5.3-flash",
-      )!,
+      apiKey: undefined,
+      baseUrl: "https://api.perplexity.ai",
+      financeModel: "perplexity/glm-5.3-flash",
+    },
+    exa: {
+      apiKey: undefined,
+      baseUrl: "https://api.exa.ai",
     },
     qwenTts: {
-      baseUrl: str(env, "QWEN_TTS_BASE_URL") ?? "",
-      model: str(env, "QWEN_TTS_MODEL", "tts-1")!,
-      voiceId: str(env, "QWEN_TTS_VOICE", "Ryan")!,
-      outputFormat: str(env, "QWEN_TTS_FORMAT", "opus")!,
-      requestFormat: str(env, "QWEN_TTS_REQUEST_FORMAT"),
-      language: str(env, "QWEN_TTS_LANGUAGE"),
-      speed: num(env, "QWEN_TTS_SPEED", 1),
-      apiKey: str(env, "QWEN_TTS_API_KEY"),
+      // User-owned settings: UI only.
+      baseUrl: "",
+      model: "tts-1",
+      voiceId: "Ryan",
+      outputFormat: "opus",
+      requestFormat: undefined,
+      language: undefined,
+      speed: 1,
+      apiKey: undefined,
       // Local CPU inference runs several times slower than real time, so the
-      // default leaves room for a minute of narration (GPU servers answer
-      // in seconds and never come close to this bound).
-      timeoutMs: num(env, "QWEN_TTS_TIMEOUT_MS", 600_000),
+      // default leaves room for a minute of narration.
+      timeoutMs: 600_000,
     },
     elevenlabs: {
-      apiKey: str(env, "KEY_ELEVENLABS"),
-      baseUrl: str(env, "ELEVENLABS_BASE_URL", "https://api.elevenlabs.io")!,
-      modelId: str(env, "ELEVENLABS_MODEL_ID", "eleven_v4")!,
-      voiceId: str(env, "ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")!,
-      outputFormat: str(env, "ELEVENLABS_OUTPUT_FORMAT", "opus_48000_128")!,
-      speed: num(env, "ELEVENLABS_SPEED", 1.15),
-      maxCharsPerRequest: num(env, "ELEVENLABS_MAX_CHARS", 2600),
+      // User-owned settings: UI only.
+      apiKey: undefined,
+      baseUrl: "https://api.elevenlabs.io",
+      modelId: "eleven_v4",
+      voiceId: "JBFqnCBsd6RMkjVDRZzb",
+      outputFormat: "opus_48000_128",
+      speed: 1.15,
+      maxCharsPerRequest: 2600,
+    },
+    /** Active speech provider; both speak the shared TTS protocol. */
+    tts: {
+      provider: "qwen",
     },
     bluesky: {
-      identifier: str(env, "BLUESKY_IDENTIFIER"),
-      appPassword: str(env, "BLUESKY_APP_PASSWORD"),
-      pdsUrl: str(env, "BLUESKY_PDS_URL"),
-      publicUrl: str(env, "BLUESKY_PUBLIC_URL", "https://public.api.bsky.app")!,
+      // User-owned credentials: UI settings only.
+      identifier: undefined,
+      appPassword: undefined,
+      pdsUrl: undefined,
+      publicUrl: "https://public.api.bsky.app",
     },
   };
 }
@@ -263,7 +272,10 @@ export function configStatus(config: AppConfig): ConfigStatus {
   return {
     llm: Boolean(config.llm.apiKey),
     perplexity: Boolean(config.perplexity.apiKey),
-    tts: Boolean(config.qwenTts.baseUrl),
+    tts:
+      config.tts.provider === "elevenlabs"
+        ? Boolean(config.elevenlabs.apiKey)
+        : Boolean(config.qwenTts.baseUrl),
     bluesky:
       config.bluesky.identifier && config.bluesky.appPassword ? "authenticated" : "public",
   };

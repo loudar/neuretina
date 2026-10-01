@@ -526,17 +526,9 @@
     return workflow.user ? workflow.title : workflow.id;
   }
 
-  /**
-   * List supporting text: triggers only, never the description. Workflows
-   * without a manual or scheduled trigger (e.g. the Matrix follow-up) show
-   * nothing at all.
-   */
-  function workflowSupporting(workflow: WorkflowInfo): string {
-    if (workflow.user) return "";
-    if (!workflow.triggers.some((trigger) => trigger === "manual" || trigger === "schedule")) {
-      return "";
-    }
-    return `triggers ${workflow.triggers.join(", ") || "none"}`;
+  /** The list shows names only: no descriptions, no trigger lines. */
+  function workflowSupporting(): string {
+    return "";
   }
 
   /** Details header subtitle with the workflow's configured inputs. */
@@ -635,7 +627,7 @@
             onclick={() => openWorkflow(workflow.id)}
             overline={workflowOverline(workflow)}
             headline={workflowHeadline(workflow)}
-            supporting={workflowSupporting(workflow)}
+            supporting={workflowSupporting()}
           >
             {#snippet leading()}
               <Icon icon={iconSchedule} />

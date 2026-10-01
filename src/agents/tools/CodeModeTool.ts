@@ -53,8 +53,8 @@ Tool calls never throw: a failed call resolves to { error: string, results: [], 
 Example:
 async () => {
   const [web, social] = await Promise.all([
-    perplexity_search({ query: "Rust 1.90 release", limit: 6 }),
-    bluesky_search({ query: "Rust 1.90", limit: 10 }),
+    search.perplexity({ query: "Rust 1.90 release", limit: 6 }),
+    search.bluesky({ query: "Rust 1.90", limit: 10 }),
   ]);
   return {
     web: web.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet.slice(0, 200) })),
@@ -66,6 +66,12 @@ Only the functions above are available: no imports, no network, no filesystem. I
 
 /** Model-facing docs per sandbox function; the description lists what is provided. */
 const TOOL_DOCS: Record<string, string> = {
+  "search.perplexity": `search.perplexity({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
+  Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).`,
+  "search.exa": `search.exa({ query, limit?, recency? }) -> same shape
+  Web search via Exa's neural/keyword index; a second, independent set of results.`,
+  "search.bluesky": `search.bluesky({ query, limit?, recency? }) -> same shape
+  Recent Bluesky posts, where hype, skepticism and disagreement show up.`,
   perplexity_search: `perplexity_search({ query, limit?, recency?, scope? }) -> { results: [{ title, url, snippet, publishedAt?, source }] }
   Web search via Perplexity. limit up to 20; recency is "hour" | "day" | "3days" | "week" | "month" | "year"; scope "open" drops the reputable-source allowlist (default: reputable).`,
   wikipedia_search: `wikipedia_search({ query, limit? }) -> same shape
@@ -84,7 +90,14 @@ const TOOL_DOCS: Record<string, string> = {
 
 function describeTools(tools: Tool[]): string {
   return tools
-    .map((tool) => TOOL_DOCS[tool.name] ?? `${tool.name}({ ... }) -> tool result`)
+    .map((tool) => {
+      const docs = TOOL_DOCS[tool.name];
+      if (docs) return docs;
+      const signature = tool.name.includes(".")
+        ? `${tool.name}({ query, limit?, recency? }) -> tool result`
+        : `${tool.name}({ ... }) -> tool result`;
+      return `${signature}\n  ${tool.description}`;
+    })
     .join("\n\n");
 }
 

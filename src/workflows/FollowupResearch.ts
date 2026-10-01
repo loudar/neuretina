@@ -22,6 +22,8 @@ export interface FollowupResearchDeps {
   /** Context the subagents search past briefs in. */
   contextId?: string;
   webSearch: SearchProvider;
+  /** All configured web providers; one search.<name> tool each. */
+  searchProviders?: SearchProvider[];
   socialSearch: SearchProvider;
   defaults: {
     recency: SearchRecency;
@@ -244,6 +246,10 @@ export class FollowupResearch {
 
   private createCodeModeTool(): CodeModeTool {
     const { defaults } = this.deps;
+    const providers =
+      this.deps.searchProviders && this.deps.searchProviders.length > 0
+        ? this.deps.searchProviders
+        : [this.deps.webSearch];
     const tools = [
       new SearchTool({
         provider: this.deps.webSearch,
@@ -254,16 +260,20 @@ export class FollowupResearch {
         allowScope: false,
         defaultLimit: 5,
       }),
-      new SearchTool({
-        provider: this.deps.webSearch,
-        defaultLimit: defaults.resultsPerProvider,
-        defaultRecency: defaults.recency,
-        defaultLanguage: defaults.language,
-        domains: defaults.searchDomains,
-      }),
+      ...providers.map(
+        (provider) =>
+          new SearchTool({
+            provider,
+            toolName: `search.${provider.name}`,
+            defaultLimit: defaults.resultsPerProvider,
+            defaultRecency: defaults.recency,
+            defaultLanguage: defaults.language,
+            domains: defaults.searchDomains,
+          }),
+      ),
       new SearchTool({
         provider: this.deps.socialSearch,
-        toolName: "bluesky_search",
+        toolName: "search.bluesky",
         defaultLimit: defaults.resultsPerProvider,
         defaultRecency: defaults.recency,
       }),

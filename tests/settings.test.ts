@@ -57,18 +57,37 @@ describe("SettingsService", () => {
 
   test("the environment always wins over the database", () => {
     const kv = new MapKv();
-    kv.set("setting:LLM_MODEL", "db-model");
-    const { config, service } = setup({ LLM_MODEL: "env-model" }, kv);
+    kv.set("setting:DEFAULT_BRIEF_LANGUAGE", "db-lang");
+    const { config, service } = setup({ DEFAULT_BRIEF_LANGUAGE: "env-lang" }, kv);
 
-    const info = service.list().find((setting) => setting.key === "LLM_MODEL");
+    const info = service.list().find((setting) => setting.key === "DEFAULT_BRIEF_LANGUAGE");
     expect(info?.source).toBe("env");
-    expect(info?.value).toBe("env-model");
+    expect(info?.value).toBe("env-lang");
     expect(info?.stored).toBe(true);
-    expect(config.llm.model).toBe("env-model");
+    expect(config.defaults.briefLanguage).toBe("env-lang");
 
     // Storing another override changes nothing while the env var is set.
-    expect(service.set("LLM_MODEL", "other-db").source).toBe("env");
-    expect(config.llm.model).toBe("env-model");
+    expect(service.set("DEFAULT_BRIEF_LANGUAGE", "other-db").source).toBe("env");
+    expect(config.defaults.briefLanguage).toBe("env-lang");
+  });
+
+  test("user-owned settings ignore the environment", () => {
+    const { config, service } = setup({
+      LLM_MODEL: "env-model",
+      KEY_PERPLEXITY: "env-key",
+      BLUESKY_IDENTIFIER: "env-handle",
+    });
+
+    expect(service.list().find((setting) => setting.key === "LLM_MODEL")?.source).toBe(
+      "default",
+    );
+    expect(config.llm.model).toBe("deepseek-v4.1-flash");
+    expect(config.perplexity.apiKey).toBeUndefined();
+    expect(config.bluesky.identifier).toBeUndefined();
+
+    // The user's own value still applies.
+    service.set("KEY_PERPLEXITY", "user-key");
+    expect(config.perplexity.apiKey).toBe("user-key");
   });
 
   test("clearing an override restores the base value", () => {
@@ -86,13 +105,13 @@ describe("SettingsService", () => {
   test("secrets are applied but never returned to the UI", () => {
     const { config, service } = setup();
 
-    const info = service.set("OPENCODE_API_KEY", "top-secret-key");
+    const info = service.set("LLM_API_KEY", "top-secret-key");
     expect(info.value).toBeNull();
     expect(info.configured).toBe(true);
     expect(info.stored).toBe(true);
     expect(config.llm.apiKey).toBe("top-secret-key");
 
-    const listed = service.list().find((setting) => setting.key === "OPENCODE_API_KEY");
+    const listed = service.list().find((setting) => setting.key === "LLM_API_KEY");
     expect(listed?.value).toBeNull();
     expect(listed?.configured).toBe(true);
   });
@@ -143,15 +162,15 @@ describe("SettingsService", () => {
     let reloads = 0;
     service.onReload = () => reloads++;
 
-    service.set("OPENCODE_API_KEY", "top-secret");
-    service.clear("OPENCODE_API_KEY");
+    service.set("LLM_API_KEY", "top-secret");
+    service.clear("LLM_API_KEY");
 
     expect(reloads).toBe(2);
 
     const events = bus.replayAfter(0).filter((event) => event.topic === "settings.updated");
     expect(events).toHaveLength(2);
-    expect(events[0]?.payload).toEqual({ key: "OPENCODE_API_KEY", action: "set" });
-    expect(events[1]?.payload).toEqual({ key: "OPENCODE_API_KEY", action: "cleared" });
+    expect(events[0]?.payload).toEqual({ key: "LLM_API_KEY", action: "set" });
+    expect(events[1]?.payload).toEqual({ key: "LLM_API_KEY", action: "cleared" });
     expect(JSON.stringify(events)).not.toContain("top-secret");
   });
 });

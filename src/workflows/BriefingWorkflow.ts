@@ -64,6 +64,8 @@ export interface BriefingWorkflowDeps {
   events: EventStore;
   llm: LlmProvider;
   webSearch: SearchProvider;
+  /** All configured web providers; the researcher gets one search.<name> tool each. */
+  searchProviders?: SearchProvider[];
   socialSearch: SearchProvider;
   finance: FinanceProvider;
   tts: TextToSpeechProvider;
@@ -999,17 +1001,25 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     // Code mode: the researcher writes one program that calls the real tools
     // inside a sandbox, so searches run in parallel and intermediate results
     // never round-trip through the model.
+    const providers =
+      this.deps.searchProviders && this.deps.searchProviders.length > 0
+        ? this.deps.searchProviders
+        : [this.deps.webSearch];
     const tools = [
-      new SearchTool({
-        provider: this.deps.webSearch,
-        defaultLimit: this.deps.defaults.resultsPerProvider,
-        defaultRecency: this.deps.defaults.recency,
-        defaultLanguage: this.deps.defaults.language,
-        domains: this.deps.defaults.searchDomains,
-      }),
+      ...providers.map(
+        (provider) =>
+          new SearchTool({
+            provider,
+            toolName: `search.${provider.name}`,
+            defaultLimit: this.deps.defaults.resultsPerProvider,
+            defaultRecency: this.deps.defaults.recency,
+            defaultLanguage: this.deps.defaults.language,
+            domains: this.deps.defaults.searchDomains,
+          }),
+      ),
       new SearchTool({
         provider: this.deps.socialSearch,
-        toolName: "bluesky_search",
+        toolName: "search.bluesky",
         defaultLimit: this.deps.defaults.resultsPerProvider,
         defaultRecency: this.deps.defaults.recency,
       }),
@@ -1054,6 +1064,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         briefs: this.deps.briefs,
         contextId,
         webSearch: this.deps.webSearch,
+        searchProviders: this.deps.searchProviders,
         socialSearch: this.deps.socialSearch,
         defaults: {
           recency: this.deps.defaults.recency,

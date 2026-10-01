@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
-import { ZERO_PRICING } from "../src/core/cost/CostTracker.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { WorkflowRegistry } from "../src/core/workflow/Workflow.ts";
@@ -35,7 +34,6 @@ function setup() {
     bus,
     logger: log,
     statuses,
-    pricing: ZERO_PRICING,
   });
   return { bus, workflows, runs, runner };
 }

@@ -17,9 +17,17 @@ describe("AuthService", () => {
     expect(result).not.toBeNull();
 
     const session = auth.verify(result!.token);
-    expect(session?.subject).toBe("global");
+    expect(session?.subject).toBe("admin");
     expect(session?.method).toBe("password");
     expect(auth.status(result!.token).authenticated).toBe(true);
+  });
+
+  test("logs the shared password in as ADMIN_USERNAME", () => {
+    const auth = new AuthService({
+      config: testConfig({ AUTH_GLOBAL_PASSWORD: "pw", ADMIN_USERNAME: "boss" }),
+    });
+    const result = auth.login(undefined, { password: "pw" });
+    expect(auth.verify(result!.token)?.subject).toBe("boss");
   });
 
   test("rejects tampered, malformed and expired tokens", () => {

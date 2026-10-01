@@ -11,10 +11,22 @@ import { eventWaitTimeoutMs } from "../commands/registerCommands.ts";
 
 export interface ApiDeps {
   config: AppConfig;
+  auth: AuthService;
+  logger: Logger;
+  /** Control-plane bus: authentication activity is audited there. */
+  bus: EventBus;
+  /** Account that owns the main database; unauthenticated sites act as it. */
+  adminUser: string;
+  /** The logged-in account's runtime: its stores, feeds and command router. */
+  runtimeFor(username: string): ApiRuntime;
+}
+
+/** The per-user slice the HTTP layer needs. */
+export interface ApiRuntime {
+  user: string;
   bus: EventBus;
   commands: CommandRouter;
   statuses: StatusHub;
-  auth: AuthService;
   logger: Logger;
 }
 
@@ -29,6 +41,11 @@ export interface InboundMessage {
   correlationId?: unknown;
 }
 
+/** WebSocket data: which account's status feed this socket follows. */
+interface WsData {
+  user: string;
+}
+
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const SESSION_COOKIE = "neuretina_session";
 /** Login requests allowed per client address and minute. */
@@ -37,21 +54,10 @@ const LOGIN_RATE_WINDOW_MS = 60_000;
 
 export function createApiServer(deps: ApiDeps): ApiServer {
   const log = deps.logger.child("api");
-  const statusClients = new Set<Bun.ServerWebSocket<undefined>>();
   const loginLimiter = new RateLimiter(LOGIN_RATE_LIMIT_PER_MINUTE, LOGIN_RATE_WINDOW_MS);
+  const statusSubscriptions = new Map<Bun.ServerWebSocket<WsData>, () => void>();
 
-  const unsubscribeStatuses = deps.statuses.subscribe((message) => {
-    const payload = JSON.stringify(message);
-    for (const client of statusClients) {
-      try {
-        client.send(payload);
-      } catch {
-        statusClients.delete(client);
-      }
-    }
-  });
-
-  const server = Bun.serve({
+  const server = Bun.serve<WsData>({
     port: deps.config.port,
     hostname: "0.0.0.0",
     maxRequestBodySize: 32 * 1024 * 1024,
@@ -78,19 +84,19 @@ export function createApiServer(deps: ApiDeps): ApiServer {
             service: "neuretina",
             auth: deps.auth.enabled ? "required" : "open",
             ingress: "POST a message { type, payload?, correlationId? } to this path",
-            commands: deps.commands.list(),
+            commands: deps.runtimeFor(deps.adminUser).commands.list(),
           }),
-        POST: guard((request: Bun.BunRequest<"/api/webhook">, server: Bun.Server<undefined>) => {
-          const denied = requireSession(request, deps);
-          if (denied) return denied;
-          return processMessage(request, deps, server);
+        POST: guard((request: Bun.BunRequest<"/api/webhook">, server: Bun.Server<WsData>) => {
+          const runtime = requestRuntime(request, deps);
+          if (!runtime) return unauthorized();
+          return processMessage(request, runtime, server);
         }),
       },
 
-      "/api/ws": (request: Bun.BunRequest<"/api/ws">, server: Bun.Server<undefined>) => {
-        const denied = requireSession(request, deps);
-        if (denied) return denied;
-        if (server.upgrade(request)) return undefined;
+      "/api/ws": (request: Bun.BunRequest<"/api/ws">, server: Bun.Server<WsData>) => {
+        const runtime = requestRuntime(request, deps);
+        if (!runtime) return unauthorized();
+        if (server.upgrade(request, { data: { user: runtime.user } })) return undefined;
         return jsonResponse({ error: "WebSocket upgrade required" }, 426);
       },
 
@@ -101,11 +107,21 @@ export function createApiServer(deps: ApiDeps): ApiServer {
 
     websocket: {
       open(ws) {
-        statusClients.add(ws);
-        ws.send(JSON.stringify(deps.statuses.snapshotMessage()));
+        const runtime = deps.runtimeFor(ws.data.user);
+        let unsubscribe: (() => void) | null = null;
+        unsubscribe = runtime.statuses.subscribe((message) => {
+          try {
+            ws.send(JSON.stringify(message));
+          } catch {
+            unsubscribe?.();
+          }
+        });
+        statusSubscriptions.set(ws, () => unsubscribe?.());
+        ws.send(JSON.stringify(runtime.statuses.snapshotMessage()));
       },
       close(ws) {
-        statusClients.delete(ws);
+        statusSubscriptions.get(ws)?.();
+        statusSubscriptions.delete(ws);
       },
       message() {
         // The status feed is server-push only.
@@ -124,7 +140,8 @@ export function createApiServer(deps: ApiDeps): ApiServer {
   return {
     port: server.port ?? deps.config.port,
     stop: () => {
-      unsubscribeStatuses();
+      for (const unsubscribe of statusSubscriptions.values()) unsubscribe();
+      statusSubscriptions.clear();
       server.stop(true);
     },
   };
@@ -175,16 +192,24 @@ function currentSession(request: Request, deps: ApiDeps): AuthSession | null {
   return deps.auth.verify(readCookie(request, SESSION_COOKIE));
 }
 
-/** Blocks the request with a 401 when the site is protected and unauthenticated. */
-function requireSession(request: Request, deps: ApiDeps): Response | null {
-  if (!deps.auth.enabled) return null;
-  if (currentSession(request, deps)) return null;
+function unauthorized(): Response {
   return jsonResponse({ ok: false, error: "Authentication required", code: "UNAUTHORIZED" }, 401);
+}
+
+/**
+ * Resolves the runtime of the logged-in account; null means the request must
+ * be rejected. With authentication disabled everything acts as the admin.
+ */
+function requestRuntime(request: Request, deps: ApiDeps): ApiRuntime | null {
+  if (!deps.auth.enabled) return deps.runtimeFor(deps.adminUser);
+  const session = currentSession(request, deps);
+  if (!session) return null;
+  return deps.runtimeFor(session.subject);
 }
 
 async function handleLogin(
   request: Request,
-  server: Bun.Server<undefined>,
+  server: Bun.Server<WsData>,
   deps: ApiDeps,
   loginLimiter: RateLimiter,
 ): Promise<Response> {
@@ -258,8 +283,8 @@ function handleLogout(request: Request, deps: ApiDeps): Response {
 
 async function processMessage(
   request: Request,
-  deps: ApiDeps,
-  server?: Bun.Server<undefined>,
+  runtime: ApiRuntime,
+  server?: Bun.Server<WsData>,
 ): Promise<Response> {
   const message = await readJson<InboundMessage>(request);
   if (typeof message.type !== "string" || !message.type.trim()) {
@@ -274,8 +299,8 @@ async function processMessage(
   const payload = message.payload ?? null;
 
   // Read-only commands are quiet: no audit events, so polling cannot feed itself.
-  if (type.startsWith("hook.") || !deps.commands.isQuiet(type)) {
-    deps.bus.publish(
+  if (type.startsWith("hook.") || !runtime.commands.isQuiet(type)) {
+    runtime.bus.publish(
       "message.received",
       { type, correlationId, payload },
       { source: "webhook", correlationId },
@@ -291,8 +316,12 @@ async function processMessage(
     const channel = type.slice("hook.".length);
     const event = typeof record.event === "string" ? record.event : "message";
 
-    deps.bus.publish("hook.received", { channel, event }, { source: `hook:${channel}`, correlationId });
-    deps.bus.publish(
+    runtime.bus.publish(
+      "hook.received",
+      { channel, event },
+      { source: `hook:${channel}`, correlationId },
+    );
+    runtime.bus.publish(
       `hook.${channel}`,
       { channel, event, payload },
       { source: `hook:${channel}`, correlationId },
@@ -307,19 +336,19 @@ async function processMessage(
     server.timeout(request, Math.ceil(eventWaitTimeoutMs(payload) / 1000) + 5);
   }
 
-  const result = await deps.commands.execute(type, payload, correlationId);
+  const result = await runtime.commands.execute(type, payload, correlationId);
   return jsonResponse({ ok: true, type, correlationId, result });
 }
 
 function guard<Path extends string>(
   handler: (
     request: Bun.BunRequest<Path>,
-    server: Bun.Server<undefined>,
+    server: Bun.Server<WsData>,
   ) => Promise<Response> | Response,
 ) {
   return async (
     request: Bun.BunRequest<Path>,
-    server: Bun.Server<undefined>,
+    server: Bun.Server<WsData>,
   ): Promise<Response> => {
     try {
       return await handler(request, server);

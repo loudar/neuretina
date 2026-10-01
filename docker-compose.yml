@@ -15,20 +15,12 @@ services:
       STARTUP_ANNOUNCE: "false"
 
       # --- Access (empty password runs the site without authentication) ---
+      # The global password logs in as the admin account.
       AUTH_GLOBAL_PASSWORD: ""
       # Optional: signs sessions; empty derives the key from the password.
       AUTH_SESSION_SECRET: ""
       AUTH_SESSION_TTL_HOURS: "720"
+      ADMIN_USERNAME: admin
 
-      # --- LLM (required for research and compiling) ---
-      OPENCODE_API_KEY: ""
-
-      # --- Web search + finance (required for research) ---
-      KEY_PERPLEXITY: ""
-
-      # --- Speech (optional; empty disables voice messages) ---
-      QWEN_TTS_BASE_URL: ""
-
-      # --- Bluesky (optional; anonymous public search without credentials) ---
-      BLUESKY_IDENTIFIER: ""
-      BLUESKY_APP_PASSWORD: ""
+      # --- LLM, web search, Bluesky and TTS credentials are per-user UI ---
+      # settings (Settings in the app); the environment cannot set them.

@@ -17,13 +17,9 @@ import { completion, stubLlm, stubWorkflow } from "./support.ts";
 const log = createLogger("test", { level: "error" });
 
 describe("CostTracker", () => {
-  test("prices LLM tokens with the configured rates", () => {
-    const tracker = new CostTracker({
-      llmInputPerMillion: 3,
-      llmOutputPerMillion: 15,
-      perplexitySearchPerRequest: 0.005,
-    });
-    tracker.addLlm("Research", { inputTokens: 1000, outputTokens: 2000 });
+  test("prices LLM tokens with the provider-reported cost", () => {
+    const tracker = new CostTracker();
+    tracker.addLlm("Research", { inputTokens: 1000, outputTokens: 2000, costUsd: 0.033 });
 
     const report = tracker.report();
     expect(report.complete).toBe(true);
@@ -38,19 +34,15 @@ describe("CostTracker", () => {
     ]);
   });
 
-  test("merges usage per step and provider, and marks unpriced usage", () => {
-    const tracker = new CostTracker({
-      llmInputPerMillion: 0,
-      llmOutputPerMillion: 0,
-      perplexitySearchPerRequest: 0.005,
-    });
+  test("merges usage per step and provider, and marks unreported costs", () => {
+    const tracker = new CostTracker();
     tracker.addLlm("Research", { inputTokens: 100, outputTokens: 50 });
     tracker.addLlm("Research", { inputTokens: 20 });
     tracker.addPerplexitySearch("Research", 3);
 
     const report = tracker.report();
     expect(report.complete).toBe(false);
-    expect(report.totalUsd).toBeCloseTo(0.015, 6);
+    expect(report.totalUsd).toBe(0);
 
     const llm = report.lines.find((line) => line.provider === "llm");
     expect(llm?.detail).toBe("2 calls · 120 in / 50 out tokens");
@@ -58,15 +50,11 @@ describe("CostTracker", () => {
 
     const perplexity = report.lines.find((line) => line.provider === "perplexity");
     expect(perplexity?.detail).toBe("3 searches");
-    expect(perplexity?.usd).toBe(0.015);
+    expect(perplexity?.usd).toBe(0);
   });
 
   test("uses exact reported cost when the provider gives one", () => {
-    const tracker = new CostTracker({
-      llmInputPerMillion: 3,
-      llmOutputPerMillion: 15,
-      perplexitySearchPerRequest: 0.005,
-    });
+    const tracker = new CostTracker();
     tracker.addLlm("Research", { inputTokens: 1000, outputTokens: 1000, costUsd: 0.01 });
     tracker.addFinance("Research", { inputTokens: 5000, outputTokens: 600, costUsd: 0.0042 });
 
@@ -113,19 +101,20 @@ describe("agent cost collection", () => {
           tool: "run_code",
           result: {
             toolCallsByTool: {
+              "search.perplexity": 2,
               perplexity_search: 2,
               web_search: 1,
               wikipedia_search: 1,
-              bluesky_search: 4,
+              "search.bluesky": 4,
             },
           },
         },
-        { tool: "perplexity_search" },
-        { tool: "bluesky_search" },
+        { tool: "search.perplexity" },
+        { tool: "search.bluesky" },
       ],
     });
 
-    expect(countWebSearches(result)).toBe(5);
+    expect(countWebSearches(result)).toBe(7);
   });
 
   test("collects finance usage from sandboxed and direct invocations", () => {
@@ -150,23 +139,21 @@ describe("agent cost collection", () => {
   });
 
   test("records an agent run into the tracker", () => {
-    const tracker = new CostTracker({
-      llmInputPerMillion: 1,
-      llmOutputPerMillion: 0,
-      perplexitySearchPerRequest: 0.005,
-    });
+    const tracker = new CostTracker();
     const result = agentResult({
       usage: { inputTokens: 2_000, outputTokens: 100 },
       invocations: [
-        { tool: "run_code", result: { toolCallsByTool: { perplexity_search: 2 } } },
+        { tool: "run_code", result: { toolCallsByTool: { "search.perplexity": 2 } } },
       ],
     });
 
     addAgentCost(tracker, "Research", result);
     const report = tracker.report();
     const llm = report.lines.find((line) => line.provider === "llm");
-    expect(llm?.usd).toBeCloseTo(0.002, 6);
-    expect(report.totalUsd).toBeCloseTo(0.012, 6);
+    expect(llm?.usd).toBe(0);
+    expect(report.totalUsd).toBe(0);
+    // The provider did not report a cost, so the report is incomplete.
+    expect(report.complete).toBe(false);
   });
 
   test("WorkflowRunner stores the cost report on the run", async () => {
@@ -192,19 +179,18 @@ describe("agent cost collection", () => {
       bus,
       logger: log,
       statuses,
-      pricing: { llmInputPerMillion: 10, llmOutputPerMillion: 0, perplexitySearchPerRequest: 0 },
     });
 
     const finished = await runner.start({ workflow: "metered", trigger: "manual" });
     expect(finished.cost).toEqual({
-      totalUsd: 0.001,
-      complete: true,
+      totalUsd: 0,
+      complete: false,
       lines: [
         {
           step: "Step one",
           provider: "llm",
           detail: "1 call · 100 in / 50 out tokens",
-          usd: 0.001,
+          usd: 0,
         },
       ],
     });

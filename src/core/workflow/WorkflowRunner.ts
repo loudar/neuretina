@@ -1,7 +1,6 @@
 import type { EventBus } from "../events/EventBus.ts";
 import type { Logger } from "../logger.ts";
 import type { StatusHub } from "../status/StatusHub.ts";
-import type { CostPricing } from "../cost/CostTracker.ts";
 import { CostTracker } from "../cost/CostTracker.ts";
 import { DEFAULT_CONTEXT_ID } from "../../domain/contexts/ContextRepository.ts";
 import type {
@@ -19,7 +18,6 @@ export interface WorkflowRunnerDeps {
   logger: Logger;
   statuses: StatusHub;
   /** Live price table for metered providers (settings can change at runtime). */
-  pricing: CostPricing;
 }
 
 export interface StartRunOptions {
@@ -28,7 +26,7 @@ export interface StartRunOptions {
   contextId?: string;
   trigger: TriggerKind;
   input?: Record<string, unknown>;
-  /** Trigger-specific origin, recorded on the run (job id, matrix event, …). */
+  /** Trigger-specific origin, recorded on the run (job id, matrix event, â€¦). */
   detail?: Record<string, unknown>;
   /** Reuse a known id (the scheduler passes its correlation id). */
   runId?: string;
@@ -125,7 +123,7 @@ export class WorkflowRunner {
     const workflowId = workflow.definition.id;
     const logger = this.deps.logger.child(`workflow:${workflowId}`);
     const started = Date.now();
-    const cost = new CostTracker(this.deps.pricing);
+    const cost = new CostTracker();
     const controller = new AbortController();
     let settled!: () => void;
     const done = new Promise<void>((resolve) => {

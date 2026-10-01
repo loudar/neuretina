@@ -83,11 +83,23 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       timezone: config.timezone,
       llm: { model: config.llm.model, baseUrl: config.llm.baseUrl },
       tts: {
-        provider: "qwen-tts",
-        baseUrl: config.qwenTts.baseUrl,
-        model: config.qwenTts.model,
-        voiceId: config.qwenTts.voiceId,
-        outputFormat: config.qwenTts.outputFormat,
+        provider: config.tts.provider,
+        baseUrl:
+          config.tts.provider === "elevenlabs"
+            ? config.elevenlabs.baseUrl
+            : config.qwenTts.baseUrl,
+        model:
+          config.tts.provider === "elevenlabs"
+            ? config.elevenlabs.modelId
+            : config.qwenTts.model,
+        voiceId:
+          config.tts.provider === "elevenlabs"
+            ? config.elevenlabs.voiceId
+            : config.qwenTts.voiceId,
+        outputFormat:
+          config.tts.provider === "elevenlabs"
+            ? config.elevenlabs.outputFormat
+            : config.qwenTts.outputFormat,
       },
       matrix: { roomId },
       bluesky: { pdsUrl: config.bluesky.pdsUrl },

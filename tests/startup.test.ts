@@ -100,14 +100,15 @@ describe("formatStartupReport", () => {
 
 /** All integrations configured (the Matrix delivery channel is passed as a dep). */
 function configuredConfig(overrides: Record<string, string | undefined> = {}) {
-  return testConfig({
-    OPENCODE_API_KEY: "key",
-    KEY_PERPLEXITY: "key",
-    QWEN_TTS_BASE_URL: "http://tts.test/v1",
-    BLUESKY_IDENTIFIER: "bot.test",
-    BLUESKY_APP_PASSWORD: "pw",
-    ...overrides,
-  });
+  const config = testConfig(overrides);
+  // Provider credentials are user-owned settings, so tests set them on the
+  // config directly (in production the settings service applies them).
+  config.llm.apiKey = "key";
+  config.perplexity.apiKey = "key";
+  config.bluesky.identifier = "bot.test";
+  config.bluesky.appPassword = "pw";
+  config.qwenTts.baseUrl = "http://tts.test/v1";
+  return config;
 }
 
 function okMockFetch(): void {
