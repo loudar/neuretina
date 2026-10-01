@@ -518,9 +518,9 @@ the Workflows tab.
   budget are capped, and a failed or fruitless pass always keeps the draft as it is.
 - **Cost tracking:** every workflow step reports what it spent. Costs are never configured: a line
   is priced only when the provider reports an exact cost with the response (Perplexity search and
-  finance do; Exa, Yahoo Finance and Bluesky do not), otherwise the usage is recorded as unpriced.
-  The per-step breakdown is stored on the run, and the run activity feed shows each task's cost sum
-  (unpriced usage counts as $0.00).
+  finance do; Exa and Yahoo Finance do not), otherwise the usage is recorded as unpriced. Free
+  social search is not tracked. The per-step breakdown is stored on the run, and the run activity
+  feed shows each task's cost sum (unpriced usage counts as $0.00).
 - Disable both post-draft passes with `DEFAULT_FOLLOWUP_RESEARCH=false`.
 - **Scheduled tasks** live in SQLite and use `Bun.cron` (standard 5-field expressions, in the
   server's `TZ`). Runs never overlap; every run's result is recorded and every step is emitted as

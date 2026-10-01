@@ -19,6 +19,28 @@ export interface CostReport {
   lines: CostLine[];
 }
 
+/** Search usage attributed to one provider on one step. */
+export interface SearchUsage {
+  /** Search requests that ran. */
+  requests: number;
+  /** Requests the provider left unpriced. */
+  unpriced: number;
+  /** Sum of the provider-reported costs. */
+  costUsd: number;
+}
+
+/** Finance usage attributed to one provider on one step. */
+export interface FinanceUsageSummary {
+  /** Lookups that ran. */
+  lookups: number;
+  /** Lookups the provider left unpriced. */
+  unpriced: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** Sum of the provider-reported costs. */
+  costUsd: number;
+}
+
 interface Accumulator {
   step: string;
   provider: string;
@@ -36,46 +58,52 @@ interface Accumulator {
  * Per-run cost accumulator. Every workflow step reports its LLM usage, paid
  * searches and finance lookups here; the runner stores the resulting report on
  * the run record. Prices are never configured: a line is priced only when the
- * provider reports the cost with the response (LLM/finance usage), otherwise
- * the usage is recorded as unpriced.
+ * provider reports the cost with the response (LLM/search/finance usage),
+ * otherwise the usage is recorded as unpriced.
  */
 export class CostTracker {
   private readonly accumulators = new Map<string, Accumulator>();
 
   addLlm(step: string, usage: LlmUsage, calls = 1): number {
-    const entry = this.entry(step, "llm");
-    entry.calls += calls;
+    return this.meter(step, "llm", { calls }, usage);
+  }
+
+  addSearch(step: string, provider: string, usage: SearchUsage): number {
+    return this.meter(
+      step,
+      provider,
+      { requests: usage.requests, unpriced: usage.unpriced },
+      usage,
+    );
+  }
+
+  addFinance(step: string, provider: string, usage: FinanceUsageSummary): number {
+    return this.meter(step, provider, { lookups: usage.lookups, unpriced: usage.unpriced }, usage);
+  }
+
+  /**
+   * Merges one usage batch into the step/provider line. `unpriced` defaults to
+   * every counted unit, so a missing price marks them all as unreported.
+   */
+  private meter(
+    step: string,
+    provider: string,
+    counts: { calls?: number; requests?: number; lookups?: number; unpriced?: number },
+    usage: { inputTokens?: number; outputTokens?: number; costUsd?: number },
+  ): number {
+    const entry = this.entry(step, provider);
+    entry.calls += counts.calls ?? 0;
+    entry.requests += counts.requests ?? 0;
+    entry.lookups += counts.lookups ?? 0;
     if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
     if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
 
     if (usage.costUsd === undefined) {
-      entry.unpriced += calls;
+      const units = (counts.calls ?? 0) + (counts.requests ?? 0) + (counts.lookups ?? 0);
+      entry.unpriced += counts.unpriced ?? (units || 1);
       return 0;
     }
-    entry.usd += usage.costUsd;
-    return usage.costUsd;
-  }
-
-  addPerplexitySearch(step: string, requests: number, costUsd?: number): number {
-    const entry = this.entry(step, "perplexity");
-    entry.requests += requests;
-    if (costUsd === undefined) {
-      entry.unpriced += requests;
-      return 0;
-    }
-    entry.usd += costUsd;
-    return costUsd;
-  }
-
-  addFinance(step: string, usage: FinanceUsage): number {
-    const entry = this.entry(step, "perplexity");
-    entry.lookups += 1;
-    if (usage.inputTokens !== undefined) entry.inputTokens += usage.inputTokens;
-    if (usage.outputTokens !== undefined) entry.outputTokens += usage.outputTokens;
-    if (usage.costUsd === undefined) {
-      entry.unpriced += 1;
-      return 0;
-    }
+    entry.unpriced += counts.unpriced ?? 0;
     entry.usd += usage.costUsd;
     return usage.costUsd;
   }

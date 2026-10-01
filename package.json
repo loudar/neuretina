@@ -12,7 +12,7 @@
     "check:llm": "bun scripts/check-llm.ts",
     "check:tts": "bun scripts/check-tts.ts",
     "laya:pull": "bun scripts/laya-pull.ts",
-    "test": "bun test"
+    "test": "bun test --isolate"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

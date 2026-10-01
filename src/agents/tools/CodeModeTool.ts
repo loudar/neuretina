@@ -11,6 +11,8 @@ export interface CodeModeToolOptions {
   timeoutMs?: number;
   /** Killed when the program produces no activity for this long (runaway loops). */
   idleTimeoutMs?: number;
+  /** Total sandbox stdout accepted before the program is killed. */
+  maxOutputChars?: number;
   /** Upper bound on tool invocations inside one program. */
   maxToolCalls?: number;
   /** The returned value is clipped to this many characters of JSON. */
@@ -135,6 +137,7 @@ export class CodeModeTool implements Tool<CodeModeResult> {
       createSubprocessExecutor({
         timeoutMs: options.timeoutMs,
         idleTimeoutMs: options.idleTimeoutMs,
+        maxOutputChars: options.maxOutputChars,
       });
   }
 

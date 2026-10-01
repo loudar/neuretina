@@ -733,6 +733,9 @@
   }
 
   .settings-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-large);
     flex: 1 1 auto;
     min-width: 0;
   }
@@ -760,15 +763,23 @@
     }
   }
 
+  /* Each section is its own card, so a section boundary is always visible. */
   .group {
+    box-sizing: border-box;
     max-width: 60rem;
-    margin-bottom: var(--space-large);
+    padding: var(--space-medium) var(--space-large);
+    border: 1px solid var(--m3c-outline-variant);
+    border-radius: var(--m3-shape-large);
+    background-color: var(--m3c-surface-container-low);
+    box-shadow: var(--m3-elevation-1);
   }
 
   .group h3 {
     @apply --m3-title-small;
     margin: 0 0 var(--space-small);
-    color: var(--m3c-on-surface-variant);
+    padding: 0 0 var(--space-small);
+    border-bottom: 1px solid var(--m3c-outline-variant);
+    color: var(--m3c-on-surface);
   }
 
   .setting {

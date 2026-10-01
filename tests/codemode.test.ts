@@ -224,6 +224,8 @@ describe("CodeModeTool", () => {
       tools: [stubTool()],
       timeoutMs: 800,
       idleTimeoutMs: 5000,
+      // Keep the output cap out of the way so the wall-clock timeout is exact.
+      maxOutputChars: 100_000_000,
     });
 
     await expect(

@@ -1,20 +1,23 @@
 import type { AgentRunResult } from "../../agents/Agent.ts";
-import type { FinanceUsage } from "../../capabilities/finance/FinanceProvider.ts";
 import { finiteNumber } from "../records.ts";
-import type { CostTracker } from "./CostTracker.ts";
+import type { CostTracker, FinanceUsageSummary, SearchUsage } from "./CostTracker.ts";
 
-/** Sandbox tools that run against the paid Perplexity web search. */
-const WEB_SEARCH_TOOLS = new Set([
-  "search.perplexity",
-  "perplexity_search",
-  "wikipedia_search",
-  "web_search",
-]);
-
-/** Finance tools are named `finance.<provider>`; priced usage comes from Perplexity's Agent API. */
+/** Every cost-relevant tool is named `<kind>.<provider>`. */
+const SEARCH_TOOL_PREFIX = "search.";
 const FINANCE_TOOL_PREFIX = "finance.";
 
-/** Records an agent run's LLM usage, paid searches and finance lookups. */
+/** Social search is free, so it never becomes a cost line. */
+const SOCIAL_SEARCH_PROVIDER = "bluesky";
+
+export interface ProviderSearchUsage extends SearchUsage {
+  provider: string;
+}
+
+export interface ProviderFinanceUsage extends FinanceUsageSummary {
+  provider: string;
+}
+
+/** Records an agent run's LLM usage, searches and finance lookups. */
 export function addAgentCost(
   tracker: CostTracker | undefined,
   step: string,
@@ -23,111 +26,147 @@ export function addAgentCost(
   if (!tracker) return 0;
   let usd = tracker.addLlm(step, result.usage, Math.max(1, result.steps.length));
 
-  const search = collectSearchUsage(result);
-  if (search.reported > 0) usd += tracker.addPerplexitySearch(step, search.reported, search.costUsd);
-  if (search.unpriced > 0) usd += tracker.addPerplexitySearch(step, search.unpriced);
-
-  for (const usage of collectFinanceUsage(result)) usd += tracker.addFinance(step, usage);
+  for (const { provider, ...usage } of collectSearchUsage(result)) {
+    usd += tracker.addSearch(step, provider, usage);
+  }
+  for (const { provider, ...usage } of collectFinanceUsage(result)) {
+    usd += tracker.addFinance(step, provider, usage);
+  }
   return usd;
 }
 
-export interface SearchUsageSummary {
-  /** Search calls that ran. */
-  requests: number;
-  /** Calls whose provider reported a cost. */
-  reported: number;
-  /** Calls the provider left unpriced. */
-  unpriced: number;
-  /** Sum of the reported costs. */
-  costUsd: number;
+/**
+ * Attributes search calls to the provider that served them: the tool name
+ * carries the provider (`search.<provider>`) and a direct response's
+ * `provider` wins when present. Perplexity reports `usage.costUsd`, so its
+ * calls are priced exactly while the rest (e.g. Exa, Wikipedia) are recorded
+ * as unpriced; social search is free and skipped.
+ */
+export function collectSearchUsage(result: AgentRunResult): ProviderSearchUsage[] {
+  return collectProviderUsage(result, SEARCH_TOOL_PREFIX, SOCIAL_SEARCH_PROVIDER).map(
+    ({ provider, calls, priced, costUsd }) => ({
+      provider,
+      requests: calls,
+      unpriced: Math.max(0, calls - priced),
+      costUsd,
+    }),
+  );
 }
 
-/**
- * Attributes web-search calls to their provider-reported costs: Perplexity
- * returns `usage.cost.total_cost`, so those calls are priced exactly while the
- * rest (e.g. Exa, Wikipedia, Bluesky) stay unpriced.
- */
-export function collectSearchUsage(result: AgentRunResult): SearchUsageSummary {
-  const summary: SearchUsageSummary = { requests: 0, reported: 0, unpriced: 0, costUsd: 0 };
-  for (const step of result.steps) {
-    for (const invocation of step.invocations) {
-      const response = invocation.result as
-        | { toolCallsByTool?: unknown; toolUsages?: unknown; usage?: unknown }
-        | undefined;
-      const byTool = response?.toolCallsByTool;
-      if (byTool && typeof byTool === "object") {
-        for (const [tool, calls] of Object.entries(byTool)) {
-          if (WEB_SEARCH_TOOLS.has(tool) && typeof calls === "number") summary.requests += calls;
-        }
-      } else if (WEB_SEARCH_TOOLS.has(invocation.tool)) {
-        summary.requests += 1;
-      }
-
-      if (Array.isArray(response?.toolUsages)) {
-        for (const entry of response.toolUsages) {
-          if (!entry || typeof entry !== "object") continue;
-          const record = entry as { tool?: unknown; usage?: unknown };
-          if (typeof record.tool !== "string" || !WEB_SEARCH_TOOLS.has(record.tool)) continue;
-          const costUsd = costOf(record.usage);
-          if (costUsd === undefined) continue;
-          summary.reported += 1;
-          summary.costUsd += costUsd;
-        }
-      }
-
-      if (WEB_SEARCH_TOOLS.has(invocation.tool)) {
-        const costUsd = costOf(response?.usage);
-        if (costUsd !== undefined) {
-          summary.reported += 1;
-          summary.costUsd += costUsd;
-        }
-      }
-    }
-  }
-  summary.unpriced = Math.max(0, summary.requests - summary.reported);
-  return summary;
+/** Same attribution for finance lookups; Yahoo is unpriced, Perplexity carries usage. */
+export function collectFinanceUsage(result: AgentRunResult): ProviderFinanceUsage[] {
+  return collectProviderUsage(result, FINANCE_TOOL_PREFIX).map(
+    ({ provider, calls, priced, costUsd, inputTokens, outputTokens }) => ({
+      provider,
+      lookups: calls,
+      unpriced: Math.max(0, calls - priced),
+      inputTokens,
+      outputTokens,
+      costUsd,
+    }),
+  );
 }
 
 export function countWebSearches(result: AgentRunResult): number {
-  return collectSearchUsage(result).requests;
+  return collectSearchUsage(result).reduce((sum, usage) => sum + usage.requests, 0);
 }
 
-export function collectFinanceUsage(result: AgentRunResult): FinanceUsage[] {
-  const usages: FinanceUsage[] = [];
+interface ProviderUsage {
+  provider: string;
+  /** Tool calls that ran. */
+  calls: number;
+  /** Calls whose provider reported a cost. */
+  priced: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+interface ToolInvocationResponse {
+  provider?: unknown;
+  usage?: unknown;
+  toolCallsByTool?: unknown;
+  toolUsages?: unknown;
+}
+
+/**
+ * One pass over an agent run: sandboxed calls are counted per tool name,
+ * direct calls per invocation, and every provider-reported usage is merged
+ * into the same per-provider bucket.
+ */
+function collectProviderUsage(
+  result: AgentRunResult,
+  prefix: string,
+  skipProvider?: string,
+): ProviderUsage[] {
+  const byProvider = new Map<string, ProviderUsage>();
+  const entry = (provider: string): ProviderUsage => {
+    let usage = byProvider.get(provider);
+    if (!usage) {
+      usage = { provider, calls: 0, priced: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+      byProvider.set(provider, usage);
+    }
+    return usage;
+  };
+  const resolve = (tool: unknown): string | undefined => {
+    if (typeof tool !== "string" || !tool.startsWith(prefix)) return undefined;
+    const provider = tool.slice(prefix.length);
+    return provider && provider !== skipProvider ? provider : undefined;
+  };
+
   for (const step of result.steps) {
     for (const invocation of step.invocations) {
-      const response = invocation.result as
-        | { usage?: unknown; toolUsages?: unknown }
-        | undefined;
-      if (invocation.tool.startsWith(FINANCE_TOOL_PREFIX)) collectUsage(response?.usage, usages);
+      const response = invocation.result as ToolInvocationResponse | undefined;
+      const toolProvider = resolve(invocation.tool);
+      const provider = providerOf(response) ?? toolProvider;
+
+      const byTool = response?.toolCallsByTool;
+      if (byTool && typeof byTool === "object") {
+        for (const [tool, calls] of Object.entries(byTool)) {
+          const callProvider = resolve(tool);
+          if (callProvider && typeof calls === "number") entry(callProvider).calls += calls;
+        }
+      } else if (toolProvider) {
+        entry(provider ?? toolProvider).calls += 1;
+      }
+
       if (Array.isArray(response?.toolUsages)) {
-        for (const entry of response.toolUsages) {
-          if (!entry || typeof entry !== "object") continue;
-          const record = entry as { tool?: unknown; usage?: unknown };
-          if (typeof record.tool !== "string" || !record.tool.startsWith(FINANCE_TOOL_PREFIX)) continue;
-          collectUsage(record.usage, usages);
+        for (const record of toolUsages(response.toolUsages)) {
+          const usageProvider = resolve(record.tool);
+          if (usageProvider) collectUsage(record.usage, entry(usageProvider));
         }
       }
+
+      if (toolProvider) collectUsage(response?.usage, entry(provider ?? toolProvider));
     }
   }
-  return usages;
+
+  return [...byProvider.values()];
 }
 
-function costOf(usage: unknown): number | undefined {
-  if (!usage || typeof usage !== "object") return undefined;
-  return finiteNumber((usage as Record<string, unknown>).costUsd);
+function toolUsages(value: unknown): Array<{ tool?: unknown; usage?: unknown }> {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is { tool?: unknown; usage?: unknown } => !!entry && typeof entry === "object",
+  );
 }
 
-function collectUsage(usage: unknown, out: FinanceUsage[]): void {
+function providerOf(response: ToolInvocationResponse | undefined): string | undefined {
+  const provider = response?.provider;
+  return typeof provider === "string" && provider.trim() ? provider.trim() : undefined;
+}
+
+function collectUsage(usage: unknown, out: ProviderUsage): void {
   if (!usage || typeof usage !== "object") return;
   const record = usage as Record<string, unknown>;
   const inputTokens = finiteNumber(record.inputTokens);
   const outputTokens = finiteNumber(record.outputTokens);
   const costUsd = finiteNumber(record.costUsd);
   if (inputTokens === undefined && outputTokens === undefined && costUsd === undefined) return;
-  out.push({
-    ...(inputTokens !== undefined ? { inputTokens } : {}),
-    ...(outputTokens !== undefined ? { outputTokens } : {}),
-    ...(costUsd !== undefined ? { costUsd } : {}),
-  });
+  if (costUsd !== undefined) {
+    out.priced += 1;
+    out.costUsd += costUsd;
+  }
+  out.inputTokens += inputTokens ?? 0;
+  out.outputTokens += outputTokens ?? 0;
 }

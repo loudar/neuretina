@@ -38,7 +38,7 @@ describe("CostTracker", () => {
     const tracker = new CostTracker();
     tracker.addLlm("Research", { inputTokens: 100, outputTokens: 50 });
     tracker.addLlm("Research", { inputTokens: 20 });
-    tracker.addPerplexitySearch("Research", 3);
+    tracker.addSearch("Research", "perplexity", { requests: 3, unpriced: 3, costUsd: 0 });
 
     const report = tracker.report();
     expect(report.complete).toBe(false);
@@ -56,7 +56,13 @@ describe("CostTracker", () => {
   test("uses exact reported cost when the provider gives one", () => {
     const tracker = new CostTracker();
     tracker.addLlm("Research", { inputTokens: 1000, outputTokens: 1000, costUsd: 0.01 });
-    tracker.addFinance("Research", { inputTokens: 5000, outputTokens: 600, costUsd: 0.0042 });
+    tracker.addFinance("Research", "perplexity", {
+      lookups: 1,
+      unpriced: 0,
+      inputTokens: 5000,
+      outputTokens: 600,
+      costUsd: 0.0042,
+    });
 
     const report = tracker.report();
     expect(report.complete).toBe(true);
@@ -94,7 +100,7 @@ describe("agent cost collection", () => {
     };
   }
 
-  test("counts paid web searches only", () => {
+  test("counts every paid web search and skips social", () => {
     const result = agentResult({
       invocations: [
         {
@@ -102,9 +108,8 @@ describe("agent cost collection", () => {
           result: {
             toolCallsByTool: {
               "search.perplexity": 2,
-              perplexity_search: 2,
-              web_search: 1,
-              wikipedia_search: 1,
+              "search.exa": 2,
+              "search.wikipedia": 1,
               "search.bluesky": 4,
             },
           },
@@ -114,15 +119,20 @@ describe("agent cost collection", () => {
       ],
     });
 
-    expect(countWebSearches(result)).toBe(7);
+    expect(countWebSearches(result)).toBe(6);
   });
 
-  test("collects finance usage from sandboxed and direct invocations", () => {
+  test("collects finance usage per provider, including unpriced lookups", () => {
     const result = agentResult({
       invocations: [
         {
           tool: "run_code",
           result: {
+            toolCallsByTool: {
+              "finance.perplexity": 1,
+              "finance.yahoo": 2,
+              "search.perplexity": 1,
+            },
             toolUsages: [
               { tool: "finance.perplexity", usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.001 } },
               { tool: "search.perplexity", usage: { costUsd: 0.005 } },
@@ -135,9 +145,64 @@ describe("agent cost collection", () => {
     });
 
     expect(collectFinanceUsage(result)).toEqual([
-      { inputTokens: 10, outputTokens: 5, costUsd: 0.001 },
-      { costUsd: 0.002 },
+      {
+        provider: "perplexity",
+        lookups: 2,
+        unpriced: 0,
+        inputTokens: 10,
+        outputTokens: 5,
+        costUsd: 0.003,
+      },
+      { provider: "yahoo", lookups: 2, unpriced: 2, inputTokens: 0, outputTokens: 0, costUsd: 0 },
     ]);
+  });
+
+  test("tracks each web provider on its own line and skips social", () => {
+    const tracker = new CostTracker();
+    const result = agentResult({
+      usage: { costUsd: 0.01 },
+      invocations: [
+        {
+          tool: "run_code",
+          result: {
+            toolCallsByTool: { "search.perplexity": 1, "search.exa": 2, "search.bluesky": 3 },
+            toolUsages: [{ tool: "search.perplexity", usage: { costUsd: 0.005 } }],
+          },
+        },
+      ],
+    });
+
+    addAgentCost(tracker, "Research", result);
+    const report = tracker.report();
+    const perplexity = report.lines.find((line) => line.provider === "perplexity");
+    expect(perplexity?.detail).toBe("1 search");
+    expect(perplexity?.usd).toBeCloseTo(0.005, 6);
+
+    const exa = report.lines.find((line) => line.provider === "exa");
+    expect(exa?.detail).toBe("2 searches");
+    expect(exa?.usd).toBe(0);
+
+    expect(report.lines.some((line) => line.provider === "bluesky")).toBe(false);
+    // Exa reports no cost, so the report cannot be complete.
+    expect(report.complete).toBe(false);
+  });
+
+  test("prefers the response provider when a direct call reports one", () => {
+    const tracker = new CostTracker();
+    const result = agentResult({
+      usage: { costUsd: 0.01 },
+      invocations: [
+        {
+          tool: "search.wikipedia",
+          result: { provider: "perplexity", usage: { costUsd: 0.004 } },
+        },
+      ],
+    });
+
+    addAgentCost(tracker, "Research", result);
+    const line = tracker.report().lines.find((entry) => entry.provider === "perplexity");
+    expect(line?.detail).toBe("1 search");
+    expect(line?.usd).toBeCloseTo(0.004, 6);
   });
 
   test("prices searches when the provider reports a cost", () => {
