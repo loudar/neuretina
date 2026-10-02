@@ -15,18 +15,18 @@ function orderedDepths(entries: StatusEntry[]): string[] {
 }
 
 describe("orderStatusEntries", () => {
-  test("groups all running entries at the bottom", () => {
+  test("orders running and settled entries chronologically", () => {
     const ordered = orderedIds([
-      entry({ id: "run-early", state: "running", startedAt: 10 }),
-      entry({ id: "done-1", state: "done", startedAt: 5, updatedAt: 20 }),
       entry({ id: "run-late", state: "running", startedAt: 30 }),
+      entry({ id: "done-1", state: "done", startedAt: 5, updatedAt: 20 }),
+      entry({ id: "run-early", state: "running", startedAt: 10 }),
       entry({ id: "failed-1", state: "failed", startedAt: 6, updatedAt: 22 }),
     ]);
 
     expect(ordered).toEqual(["done-1", "failed-1", "run-early", "run-late"]);
   });
 
-  test("keeps parallel running entries stable when their text updates", () => {
+  test("keeps entries stable when their text updates", () => {
     const before = orderedIds([
       entry({ id: "r1", state: "running", startedAt: 10, updatedAt: 10 }),
       entry({ id: "r2", state: "running", startedAt: 20, updatedAt: 20 }),
@@ -43,13 +43,13 @@ describe("orderStatusEntries", () => {
     expect(after).toEqual(["d1", "r1", "r2"]);
   });
 
-  test("orders settled history by settle time", () => {
+  test("breaks start-time ties by id", () => {
     const ordered = orderedIds([
-      entry({ id: "late-settle", state: "done", startedAt: 1, updatedAt: 30 }),
-      entry({ id: "early-settle", state: "done", startedAt: 2, updatedAt: 10 }),
+      entry({ id: "b", state: "done", startedAt: 1, updatedAt: 30 }),
+      entry({ id: "a", state: "done", startedAt: 1, updatedAt: 10 }),
     ]);
 
-    expect(ordered).toEqual(["early-settle", "late-settle"]);
+    expect(ordered).toEqual(["a", "b"]);
   });
 
   test("does not mutate the input", () => {

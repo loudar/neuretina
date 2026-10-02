@@ -2,6 +2,8 @@ import type { Logger } from "../core/logger.ts";
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { LlmMessage, LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
 import { errorMessage } from "../core/errors.ts";
+import type { StatusHub } from "../core/status/StatusHub.ts";
+import { toolInputDetail, toolResultDetail } from "../core/status/detail.ts";
 import type { Tool } from "./Tool.ts";
 
 export interface AgentOptions {
@@ -23,6 +25,10 @@ export interface AgentContext {
   logger: Logger;
   /** Aborted when the owning run is cancelled; checked between LLM steps. */
   signal?: AbortSignal;
+  /** Activity hub: every tool call becomes a child span under `statusId`. */
+  statuses?: StatusHub;
+  /** Step span the agent's tool calls belong to. */
+  statusId?: string;
 }
 
 export interface AgentToolInvocation {
@@ -240,9 +246,19 @@ export class Agent {
       { source, correlationId },
     );
 
+    // The activity feed keeps every tool call (inputs, code, outputs) as a
+    // child span of the step, so it stays readable after the run finished.
+    const span = context.statuses?.begin(`tool:${crypto.randomUUID()}`, name, {
+      correlationId,
+      ...(context.statusId ? { parentId: context.statusId } : {}),
+      kind: "tool",
+      detail: toolInputDetail(args),
+    });
+
     const tool = this.tools.get(name);
     if (!tool) {
       const error = `Unknown tool "${name}"`;
+      span?.failed(`${name} failed`, toolResultDetail(args, undefined, error));
       bus.publish(
         "agent.tool.failed",
         { agent: this.name, correlationId, tool: name, error },
@@ -252,9 +268,17 @@ export class Agent {
     }
 
     try {
-      const result = await tool.execute(args, { correlationId, bus, logger, agent: this.name });
+      const result = await tool.execute(args, {
+        correlationId,
+        bus,
+        logger,
+        agent: this.name,
+        ...(context.statuses ? { statuses: context.statuses } : {}),
+        ...(span ? { statusId: span.id } : {}),
+      });
       const durationMs = Date.now() - started;
       const summary = summarizeResult(result);
+      span?.done(name, toolResultDetail(args, result));
       bus.publish(
         "agent.tool.succeeded",
         {
@@ -270,6 +294,7 @@ export class Agent {
     } catch (error) {
       const durationMs = Date.now() - started;
       const message = errorMessage(error);
+      span?.failed(`${name} failed`, toolResultDetail(args, undefined, message));
       bus.publish(
         "agent.tool.failed",
         { agent: this.name, correlationId, tool: name, error: message },

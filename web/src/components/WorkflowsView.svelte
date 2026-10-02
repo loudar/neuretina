@@ -645,9 +645,6 @@
             headline={workflowHeadline(workflow)}
             supporting={workflowSupporting()}
           >
-            {#snippet leading()}
-              <Icon icon={iconSchedule} />
-            {/snippet}
             {#snippet trailing()}
               {#if workflow.triggers.includes("manual")}
                 <span class="run-button">

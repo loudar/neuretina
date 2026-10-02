@@ -335,7 +335,8 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
   // Bring back the persisted activity feed (its running entries become
   // interrupted); still-running runs are resumed from their checkpoints once
   // the runner exists.
-  if (statusRepository) statuses.restore(statusRepository.load());
+  // Tool calls are entries too; restore enough history for whole runs.
+  if (statusRepository) statuses.restore(statusRepository.load(500));
 
   const workflows = new WorkflowRegistry({ bus, logger: logger.child("workflows"), statuses });
 

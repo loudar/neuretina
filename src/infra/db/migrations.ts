@@ -458,6 +458,15 @@ export const migrations: Migration[] = [
         AND json_array_length(metadata, '$.artifactIds') = 0;
     `,
   },
+  {
+    // Activity-feed entries distinguish coarse tasks from tool calls, so the
+    // UI can render tool inputs/outputs (and code) as collapsible details.
+    id: 23,
+    name: "status_entry_kind",
+    sql: `
+      ALTER TABLE status_entries ADD COLUMN kind TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

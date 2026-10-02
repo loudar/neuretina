@@ -198,25 +198,52 @@ export class ReportRepository implements ReportStore {
       .map((artifact) => toReport(artifact, this.artifacts));
   }
 
-  /** Searches earlier reports (text + topics); without a query returns the latest. */
+  /**
+   * Searches earlier reports by keyword. The query is split into terms and
+   * every term is matched against the report's topics (container metadata) and
+   * its text; reports matching more terms rank first. Without a query the
+   * latest reports are returned.
+   */
   search(query: string | undefined, limit = 3, contextId?: string): Report[] {
-    const found = new Map<string, Report>();
-    for (const artifact of this.artifacts.search(query, { kind: REPORT_KIND, contextId, limit })) {
-      found.set(artifact.id, toReport(artifact, this.artifacts));
-    }
-    // The markdown lives on the child text artifact, so match there too.
-    for (const text of this.artifacts.search(query, { kind: REPORT_TEXT_KIND, contextId, limit })) {
-      const reportId = text.parentId;
-      if (!reportId || found.has(reportId)) continue;
-      try {
-        found.set(reportId, this.get(reportId));
-      } catch {
-        // The parent report was removed; ignore the orphaned text.
+    const terms = searchTerms(query);
+    if (terms.length === 0) return this.list(limit, contextId);
+
+    const matches = new Map<string, { report: Report; terms: Set<string> }>();
+    const record = (report: Report, term: string): void => {
+      const entry = matches.get(report.id) ?? { report, terms: new Set<string>() };
+      entry.terms.add(term);
+      matches.set(report.id, entry);
+    };
+
+    for (const term of terms) {
+      for (const artifact of this.artifacts.search(term, {
+        kind: REPORT_KIND,
+        contextId,
+        limit: limit * 4,
+      })) {
+        record(toReport(artifact, this.artifacts), term);
+      }
+      // The markdown lives on the child text artifact, so match there too.
+      for (const text of this.artifacts.search(term, {
+        kind: REPORT_TEXT_KIND,
+        contextId,
+        limit: limit * 4,
+      })) {
+        if (!text.parentId) continue;
+        try {
+          record(this.get(text.parentId), term);
+        } catch {
+          // The parent report was removed; ignore the orphaned text.
+        }
       }
     }
-    return [...found.values()]
-      .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, limit);
+
+    return [...matches.values()]
+      .sort(
+        (a, b) => b.terms.size - a.terms.size || b.report.createdAt - a.report.createdAt,
+      )
+      .slice(0, limit)
+      .map((entry) => entry.report);
   }
 
   latest(contextId?: string): Report | null {
@@ -321,4 +348,19 @@ function kindRank(kind: string): number {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string");
+}
+
+/** Query words used for keyword matching; stopwords and one-letter terms drop. */
+const SEARCH_STOPWORDS = new Set([
+  "and", "are", "for", "from", "into", "not", "the", "that", "this", "was",
+  "were", "with", "what", "when", "where", "which", "who", "why", "about",
+]);
+
+function searchTerms(query: string | undefined): string[] {
+  if (!query) return [];
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((term) => term.length >= 2 && !SEARCH_STOPWORDS.has(term));
+  return [...new Set(terms)];
 }

@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { Agent } from "../src/agents/Agent.ts";
 import { CodeModeTool } from "../src/agents/tools/CodeModeTool.ts";
 import type { Tool, ToolContext } from "../src/agents/Tool.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
+import { StatusHub } from "../src/core/status/StatusHub.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { createLogger } from "../src/core/logger.ts";
+import { completion, stubLlm } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
 
@@ -262,6 +265,44 @@ describe("CodeModeTool", () => {
         toolContext(),
       ),
     ).rejects.toThrow(/timed out after 800ms/);
+  });
+
+  test("the activity feed shows the attempted code and nested tool calls", async () => {
+    const hub = new StatusHub();
+    const step = hub.begin("step", "Research", { correlationId: "c-code" });
+    const tool = new CodeModeTool({ tools: [stubTool()] });
+    const code = `async () => { const r = await lookup({ query: "nested" }); return r.results.length; }`;
+    const llm = stubLlm((request) =>
+      request.messages.some((message) => message.role === "tool")
+        ? completion("done")
+        : completion("", [
+            { id: "call-1", name: "run_code", arguments: { code } },
+          ]),
+    );
+    const agent = new Agent({
+      name: "researcher",
+      systemPrompt: "s",
+      llm,
+      tools: [tool],
+    });
+
+    await agent.run("input", {
+      correlationId: "c-code",
+      bus: toolContext().bus,
+      logger: log,
+      statuses: hub,
+      statusId: step.id,
+    });
+    step.done();
+
+    const entries = hub.snapshot();
+    const runCode = entries.find((entry) => entry.text === "run_code");
+    const nested = entries.find((entry) => entry.text === "lookup");
+    expect(runCode).toMatchObject({ kind: "tool", parentId: step.id, state: "done" });
+    // Sandbox calls nest under the run_code span they came from.
+    expect(nested).toMatchObject({ kind: "tool", parentId: runCode?.id, state: "done" });
+    const detail = JSON.parse(runCode!.detail!) as { input: { code: string } };
+    expect(detail.input.code).toBe(code);
   });
 
   test("requires code", async () => {

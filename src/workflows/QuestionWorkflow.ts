@@ -145,6 +145,8 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
           bus: ctx.run.bus,
           logger: ctx.run.logger,
           signal: ctx.run.signal,
+          ...(ctx.run.statuses ? { statuses: ctx.run.statuses } : {}),
+          ...(status ? { statusId: status.id } : {}),
         },
       );
       status?.addCost(addAgentCost(ctx.run.cost, "Answering", result));

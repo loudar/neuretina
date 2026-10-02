@@ -3,7 +3,7 @@ import type { StatusEntry, StatusState } from "./statusTypes";
 
 export type { StatusEntry, StatusState };
 
-const MAX_ENTRIES = 100;
+const MAX_ENTRIES = 500;
 
 /**
  * Live status feed over the shared WebSocket: server-push, ephemeral,

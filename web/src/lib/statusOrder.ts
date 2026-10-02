@@ -7,10 +7,9 @@ export interface OrderedStatusEntry extends StatusEntry {
 }
 
 /**
- * Feed order with nesting: settled (dimmed) history on top, all currently
- * running entries grouped at the bottom, and any entry with a `parentId`
- * nested under its parent. Children keep execution order (start time), not
- * the running/settled split.
+ * Feed order with nesting: strictly chronological (top to bottom by start
+ * time, ties by id), with any entry carrying a `parentId` nested under its
+ * parent. Running and settled entries stay in execution order.
  */
 export function orderStatusEntries(entries: StatusEntry[]): OrderedStatusEntry[] {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
@@ -42,17 +41,9 @@ export function flattenStatusEntries(entries: OrderedStatusEntry[]): OrderedStat
   return entries.flatMap((entry) => [entry, ...flattenStatusEntries(entry.children)]);
 }
 
-/** Settled history first (by settle time), running entries last (by start). */
+/** Strictly chronological: earliest start first, ties by id. */
 function sortRoots(entries: StatusEntry[]): StatusEntry[] {
-  return [...entries].sort((a, b) => {
-    const aRunning = a.state === "running" ? 1 : 0;
-    const bRunning = b.state === "running" ? 1 : 0;
-    if (aRunning !== bRunning) return aRunning - bRunning;
-
-    const aKey = aRunning === 1 ? a.startedAt : a.updatedAt;
-    const bKey = bRunning === 1 ? b.startedAt : b.updatedAt;
-    return aKey - bKey || a.startedAt - b.startedAt;
-  });
+  return [...entries].sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
 }
 
 function sortChildren(entries: StatusEntry[]): StatusEntry[] {

@@ -1,4 +1,5 @@
 import { mount } from "svelte";
+import "highlight.js/styles/atom-one-dark.css";
 import "./app.css";
 import App from "./App.svelte";
 

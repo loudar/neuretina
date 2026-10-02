@@ -49,7 +49,12 @@ export class ReportSearchTool implements Tool<PastReportsResult> {
 
     const found = this.reports.search(query || undefined, limit, this.contextId);
     if (found.length === 0) {
-      return { reports: [], note: "No earlier reports are stored yet." };
+      return {
+        reports: [],
+        note: query
+          ? `No earlier reports match "${query}".`
+          : "No earlier reports are stored yet.",
+      };
     }
 
     return {

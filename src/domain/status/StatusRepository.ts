@@ -1,4 +1,9 @@
-import type { StatusEntry, StatusState, StatusStore } from "../../core/status/StatusHub.ts";
+import type {
+  StatusEntry,
+  StatusKind,
+  StatusState,
+  StatusStore,
+} from "../../core/status/StatusHub.ts";
 import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 
 interface StatusRow {
@@ -8,6 +13,7 @@ interface StatusRow {
   parent_id: string | null;
   text: string;
   detail: string | null;
+  kind: string | null;
   state: string;
   cost_usd: number | null;
   started_at: number;
@@ -29,11 +35,12 @@ export class StatusRepository implements StatusStore {
     this.db.raw
       .query(
         `INSERT INTO status_entries
-           (id, activity_id, correlation_id, parent_id, text, detail, state, cost_usd, started_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (id, activity_id, correlation_id, parent_id, text, detail, kind, state, cost_usd, started_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            text = excluded.text,
            detail = excluded.detail,
+           kind = excluded.kind,
            state = excluded.state,
            cost_usd = excluded.cost_usd,
            updated_at = excluded.updated_at`,
@@ -45,6 +52,7 @@ export class StatusRepository implements StatusStore {
         entry.parentId ?? null,
         entry.text,
         entry.detail ?? null,
+        entry.kind ?? null,
         entry.state,
         entry.costUsd ?? null,
         entry.startedAt,
@@ -55,11 +63,11 @@ export class StatusRepository implements StatusStore {
     if (this.writes % PRUNE_EVERY === 0) this.prune();
   }
 
-  /** Most recent entries in chronological order. */
+  /** Most recent entries in chronological order of creation. */
   load(limit = 200): StatusEntry[] {
     const rows = this.db.raw
       .query<StatusRow, [number]>(
-        "SELECT * FROM status_entries ORDER BY updated_at DESC, rowid DESC LIMIT ?",
+        "SELECT * FROM status_entries ORDER BY started_at DESC, rowid DESC LIMIT ?",
       )
       .all(limit);
     return rows.reverse().map(toEntry);
@@ -88,6 +96,7 @@ function toEntry(row: StatusRow): StatusEntry {
     ...(row.parent_id ? { parentId: row.parent_id } : {}),
     text: row.text,
     ...(row.detail !== null ? { detail: row.detail } : {}),
+    ...(row.kind !== null ? { kind: row.kind as StatusKind } : {}),
     state: row.state as StatusState,
     ...(row.cost_usd !== null ? { costUsd: row.cost_usd } : {}),
     startedAt: row.started_at,

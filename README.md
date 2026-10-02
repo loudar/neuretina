@@ -600,26 +600,25 @@ Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
 
 ## Live activity feed
 
-The `/api/ws` WebSocket pushes an ephemeral, in-memory status feed to the UI (broadcast by
-`src/core/status/StatusHub.ts`, not persisted) alongside the commands and domain events it
-already carries:
+The `/api/ws` WebSocket pushes a status feed to the UI (broadcast by
+`src/core/status/StatusHub.ts`, persisted through `status_entries` so it survives restarts)
+alongside the commands and domain events it already carries:
 
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
-- Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling report` /
-  `Waiting for the compiler model`, `Generating speech` / `Waiting for the local TTS server`,
-  `Delivering report`, follow-up spans, plus job lifecycle entries
-  (`Running job "…"`, finished/failed) and skipped/failed notices. Tool- and model-level activity
-  (`Calling tool <tool>`, `Model requested N tool call(s)`, …) is **not** surfaced to the UI — it
-  stays in the persisted event log as `agent.tool.*` / `agent.*` events for debugging.
-- Running entries show an animated M3 spinner and are **grouped at the bottom of the list**, so
-  parallel tasks always stay together; settled history (dimmed) sits above them in settle order.
-  Running entries keep a stable order even while their status text updates repeatedly.
-- Sub-activities are nested: a workflow's spans are indented under the span that owns them (e.g.
-  follow-up questions under the research span). Each nested section is capped at 200px, sticks to
-  its newest entries (just the last few actions stay visible), and fades out its top while there is
-  older history above.
+- Entries cover coarse workflow spans (`Researching "<topic>"`, `Compiling report`,
+  `Generating speech`, follow-up spans, job lifecycle, skipped/failed notices) **and every tool
+  call made inside a step**: each `agent.tool.*` invocation becomes a `tool` child entry with its
+  full input and output. Code-mode programs keep the attempted code in the entry's input, and the
+  sandbox's own tool calls are nested under the `run_code` entry.
+- Follow-up questions stay visible after completion: the question is kept as the span's detail
+  (and in the finished text), with the research agent's tool calls nested underneath.
+- Running entries show an animated M3 spinner; the list is **strictly chronological top to
+  bottom** (running and settled interleaved by start time), with sub-activities indented under
+  the span that owns them.
+- Tool entries render collapsible **Input & output** sections (code shown as a code block,
+  failures expanded by default); task details (e.g. the follow-up question) render inline.
 - When nothing is running the header chip shows `idle`, otherwise the running count.
-- The feed keeps the last ~120 entries, auto-reconnects, and re-syncs via snapshot. If the
+- The feed keeps the last ~500 entries, auto-reconnects, and re-syncs via snapshot. If the
   WebSocket is unavailable (stopped backend, strict proxy), the UI simply shows no live status;
   everything else keeps working.
 

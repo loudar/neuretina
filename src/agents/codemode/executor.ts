@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { errorMessage } from "../../core/errors.ts";
+import { toolInputDetail, toolResultDetail } from "../../core/status/detail.ts";
 import type {
   CodeModeExecutor,
   CodeModeJob,
@@ -115,6 +116,14 @@ async function runInSubprocess(
       const agent = job.context.agent ?? "codemode";
       const source = job.context.agent ? `agent:${job.context.agent}` : "codemode";
       const started = Date.now();
+      // Nested under the run_code span, so the feed shows the program's calls
+      // with their inputs and outputs as part of the step.
+      const span = job.context.statuses?.begin(`tool:${crypto.randomUUID()}`, message.name, {
+        correlationId: job.context.correlationId,
+        ...(job.context.statusId ? { parentId: job.context.statusId } : {}),
+        kind: "tool",
+        detail: toolInputDetail(message.args),
+      });
       job.context.bus.publish(
         "agent.tool.invoked",
         {
@@ -131,6 +140,7 @@ async function runInSubprocess(
         if (settled) return;
         const durationMs = Date.now() - started;
         calls.push({ tool: message.name, args: message.args, result, durationMs });
+        span?.done(message.name, toolResultDetail(message.args, result));
         job.context.bus.publish(
           "agent.tool.succeeded",
           {
@@ -148,6 +158,7 @@ async function runInSubprocess(
         const durationMs = Date.now() - started;
         const message2 = errorMessage(error);
         calls.push({ tool: message.name, args: message.args, error: message2, durationMs });
+        span?.failed(`${message.name} failed`, toolResultDetail(message.args, undefined, message2));
         job.context.bus.publish(
           "agent.tool.failed",
           {

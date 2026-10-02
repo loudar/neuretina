@@ -178,13 +178,8 @@ describe("StatusService", () => {
 });
 
 describe("Agent status instrumentation", () => {
-  test("keeps tool activity out of the status feed", async () => {
+  test("records each tool call as a child span with input and output", async () => {
     const hub = new StatusHub();
-    const seen: string[] = [];
-    hub.subscribe((message) => {
-      if (message.type === "entry") seen.push(message.entry.text);
-    });
-
     const tool: Tool = {
       name: "web_search",
       description: "search",
@@ -205,11 +200,51 @@ describe("Agent status instrumentation", () => {
       tools: [tool],
     });
 
-    const result = await agent.run("input", { correlationId: "corr", bus, logger: log });
+    const step = hub.begin("step", "Research", { correlationId: "corr" });
+    const result = await agent.run("input", {
+      correlationId: "corr",
+      bus,
+      logger: log,
+      statuses: hub,
+      statusId: step.id,
+    });
+    step.done("Research complete");
 
     expect(result.text).toBe("Final notes");
-    expect(seen).toEqual([]);
-    expect(hub.snapshot()).toEqual([]);
+    const toolEntry = hub.snapshot().find((entry) => entry.kind === "tool");
+    expect(toolEntry).toMatchObject({
+      parentId: step.id,
+      text: "web_search",
+      state: "done",
+    });
+    const detail = JSON.parse(toolEntry!.detail!) as {
+      input: { query: string };
+      output: { results: string[] };
+    };
+    expect(detail.input).toEqual({ query: "x" });
+    expect(detail.output).toEqual({ results: ["r1"] });
+  });
+
+  test("records a failed tool call with its error detail", async () => {
+    const hub = new StatusHub();
+    const tool: Tool = {
+      name: "web_search",
+      description: "search",
+      parameters: {},
+      execute: async () => {
+        throw new Error("provider down");
+      },
+    };
+    const llm = stubLlm(() => completion("", [{ id: "call-1", name: "web_search", arguments: {} }]));
+    const bus = new EventBus(new EventStore(new SqliteDatabase(":memory:")), log);
+    const agent = new Agent({ name: "researcher", systemPrompt: "s", llm, tools: [tool] });
+
+    await agent.run("input", { correlationId: "corr", bus, logger: log, statuses: hub });
+
+    const toolEntry = hub.snapshot().find((entry) => entry.kind === "tool");
+    expect(toolEntry?.state).toBe("failed");
+    const detail = JSON.parse(toolEntry!.detail!) as { error: string };
+    expect(detail.error).toBe("provider down");
   });
 
   test("enforces the tool call budget", async () => {

@@ -19,6 +19,21 @@ export function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString();
 }
 
+/** Compact elapsed time for activity rows: "820ms", "3.4s", "2m 05s", "1h 12m". */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, ms);
+  if (total < 1000) return `${Math.round(total)}ms`;
+
+  const seconds = total / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)}s`;
+
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.floor(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
 /** Relative time like "5 minutes ago" or "yesterday". */
 export function formatRelativeTime(
   ts: number | undefined,

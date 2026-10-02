@@ -593,6 +593,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           bus,
           logger: logger.child("research"),
           signal: ctx.run.signal,
+          ...(this.deps.statuses ? { statuses: this.deps.statuses } : {}),
+          ...(researchSpan ? { statusId: researchSpan.id } : {}),
         },
       );
     } catch (error) {

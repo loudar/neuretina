@@ -124,6 +124,8 @@ export class SourceUpgrades {
         bus: context.bus,
         logger: context.logger,
         signal: context.signal,
+        ...(context.statuses ? { statuses: context.statuses } : {}),
+        ...(status ? { statusId: status.id } : {}),
       });
       status?.addCost(addAgentCost(context.cost, "Primary sources", result));
 

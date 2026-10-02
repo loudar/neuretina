@@ -193,6 +193,12 @@ describe("ReportRepository", () => {
 
     expect(repo.search("Ownership").map((report) => report.id)).toEqual([rust.id]);
     expect(repo.search("regulation").map((report) => report.id)).toEqual([ai.id]);
+    // Multi-term queries match across topics and text, ranked by term hits.
+    expect(repo.search("Rust ownership regulation").map((report) => report.id)).toEqual([
+      rust.id,
+      ai.id,
+    ]);
+    expect(repo.search("nothing matches here")).toHaveLength(0);
     expect(repo.search(undefined, 1)[0]?.id).toBe(ai.id);
     expect(repo.search(undefined, 10)).toHaveLength(2);
   });

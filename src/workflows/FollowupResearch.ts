@@ -169,16 +169,20 @@ export class FollowupResearch {
           bus: context.bus,
           logger: context.logger,
           signal: context.signal,
+          ...(context.statuses ? { statuses: context.statuses } : {}),
+          ...(status ? { statusId: status.id } : {}),
         });
         status?.addCost(addAgentCost(context.cost, "Follow-up research", result));
         const outcome = parseFollowupOutcome(result.text);
 
+        // The question stays in the text so the finished feed still shows what
+        // was investigated, not just "Follow-up complete".
         if (outcome.found && outcome.notes) {
           notes.push(`Follow-up — ${task.question}\n${outcome.notes}`);
           sources.push(...collectSources(result));
-          status?.done("Follow-up complete");
+          status?.done(`Follow-up complete — ${task.question}`);
         } else {
-          status?.done("Nothing relevant found");
+          status?.done(`Nothing relevant found for: ${task.question}`);
         }
       } catch (error) {
         status?.failed(`Follow-up failed (${errorMessage(error)})`);

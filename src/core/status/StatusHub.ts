@@ -1,4 +1,6 @@
 export type StatusState = "running" | "done" | "failed";
+/** Rendering hint: a coarse task/step, or one tool call with its I/O. */
+export type StatusKind = "task" | "tool";
 
 export interface StatusEntry {
   id: string;
@@ -8,7 +10,9 @@ export interface StatusEntry {
   /** Entry this one runs under (e.g. an agent step under its research span). */
   parentId?: string;
   text: string;
+  /** Free text for tasks; JSON `{ input, output | error }` for tool calls. */
   detail?: string;
+  kind?: StatusKind;
   state: StatusState;
   /** USD spent by this task, including its subtasks. */
   costUsd?: number;
@@ -40,6 +44,7 @@ export interface BeginStatusOptions {
   correlationId?: string;
   parentId?: string;
   detail?: string;
+  kind?: StatusKind;
 }
 
 export interface PushStatusOptions extends BeginStatusOptions {
@@ -60,7 +65,8 @@ export class StatusHub {
   private readonly store?: StatusStore;
 
   constructor(options: { maxEntries?: number; store?: StatusStore } = {}) {
-    this.maxEntries = Math.max(10, options.maxEntries ?? 120);
+    // Every tool call is an entry now, so keep enough history for full runs.
+    this.maxEntries = Math.max(10, options.maxEntries ?? 500);
     this.store = options.store;
   }
 
@@ -154,6 +160,7 @@ export class StatusHub {
       parentId: options.parentId,
       text,
       detail: options.detail,
+      kind: options.kind,
       state,
       startedAt: now,
       updatedAt: now,

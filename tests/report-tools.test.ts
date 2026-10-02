@@ -37,6 +37,25 @@ describe("past report tools", () => {
     expect(result.reports[0]?.id).toBeTruthy();
   });
 
+  test("past_reports matches multi-word queries across topics and text", async () => {
+    const tool = new ReportSearchTool(setup());
+
+    const result = await tool.execute({
+      query: "geopolitics Rust supply chain AI regulation",
+      limit: 8,
+    });
+
+    // Both reports match at least one term; the AI report matches more.
+    expect(result.reports.map((report) => report.topics[0])).toEqual([
+      "AI regulation",
+      "Rust",
+    ]);
+
+    const none = await tool.execute({ query: "sports scores" });
+    expect(none.reports).toEqual([]);
+    expect(none.note).toContain("No earlier reports match");
+  });
+
   test("past_report opens one report in full with its sources", async () => {
     const reports = setup();
     const found = await new ReportSearchTool(reports).execute({ query: "Rust" });
