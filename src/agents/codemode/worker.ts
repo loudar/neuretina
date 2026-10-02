@@ -127,6 +127,27 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
   ...args: string[]
 ) => (...values: unknown[]) => Promise<unknown>;
 
+/** Models often wrap the program in a markdown fence; unwrap it before parsing. */
+function unwrapFence(code: string): string {
+  const match = code.match(/^\s*```[^\n]*\n([\s\S]*?)\n?\s*```\s*$/);
+  return (match?.[1] ?? code).trim();
+}
+
+/**
+ * `new AsyncFunction` reports bare messages ("Parser error") that say nothing
+ * about what was wrong. Add the error name, the offending program and how it
+ * must be shaped, so the model can fix its code on the next attempt.
+ */
+function describeParseFailure(error: unknown, code: string): Error {
+  const name = error instanceof Error ? error.name : "Error";
+  const message = error instanceof Error ? error.message : String(error);
+  const excerpt = code.length > 400 ? `${code.slice(0, 400)}…` : code;
+  return new Error(
+    `Could not parse the program (${name}: ${message}). ` +
+      `The code must be an async arrow function or a function body.\nProgram:\n${excerpt}`,
+  );
+}
+
 // Cut the program off from everything except the tool functions before it runs.
 for (const key of [
   "fetch",
@@ -167,18 +188,23 @@ async function runProgram(job: Job): Promise<void> {
   }
   const params = [...plain.map(([name]) => name), ...namespaces.keys()];
   const values = [...plain.map(([, call]) => call), ...namespaces.values()];
+  const code = unwrapFence(job.code);
 
   let program: (...values: unknown[]) => Promise<unknown>;
   try {
-    const factory = new AsyncFunction(...params, `"use strict"; return (${job.code}\n);`);
+    const factory = new AsyncFunction(...params, `"use strict"; return (${code}\n);`);
     const candidate = await factory(...values);
     if (typeof candidate !== "function") throw new Error("not a function");
     program = candidate as (...values: unknown[]) => Promise<unknown>;
   } catch {
     // Not an expression yielding a function: treat the code as the function body.
-    program = new AsyncFunction(...params, `"use strict";\n${job.code}`) as unknown as (
-      ...values: unknown[]
-    ) => Promise<unknown>;
+    try {
+      program = new AsyncFunction(...params, `"use strict";\n${code}`) as unknown as (
+        ...values: unknown[]
+      ) => Promise<unknown>;
+    } catch (error) {
+      throw describeParseFailure(error, code);
+    }
   }
 
   const result = await program(...values);

@@ -28,6 +28,12 @@ export interface PipelineOptions {
   deliver?: boolean;
   /** Routes deliverable outputs to the channels assigned to their step output. */
   delivery?: { workflow: string; router: DeliveryRouter };
+  /**
+   * Step id the pipeline stops after: everything up to and including it runs
+   * (and its outputs are delivered), later steps never start. Unknown ids are
+   * ignored, so a stale setting never blocks a run.
+   */
+  stopAfter?: string;
 }
 
 export interface PipelineOutcome {
@@ -57,6 +63,11 @@ export class StepPipeline {
     state.delivered ??= {};
 
     const steps = this.definition.steps;
+    // Only the prefix up to and including the stop step is eligible to run.
+    const stopIndex = options.stopAfter
+      ? steps.findIndex((step) => step.id === options.stopAfter)
+      : -1;
+    const lastIndex = stopIndex >= 0 ? stopIndex : steps.length - 1;
     const dependencies = this.dependencies();
     const closures = this.closures(dependencies);
     const outputs = new Map<string, Record<string, unknown>>();
@@ -67,7 +78,8 @@ export class StepPipeline {
 
     // Resume: completed steps are restored (replaying any missing delivery)
     // before anything new starts.
-    for (const step of steps) {
+    for (const [index, step] of steps.entries()) {
+      if (index > lastIndex) continue;
       const saved = state.steps[step.id];
       if (saved === undefined) continue;
       outputs.set(step.id, saved);
@@ -144,7 +156,8 @@ export class StepPipeline {
       // Starting stops on the first failure, halt or cancellation; in-flight
       // steps still settle so their work is recorded.
       if (!failed && halted === undefined && !options.context.signal?.aborted) {
-        for (const step of steps) {
+        for (const [index, step] of steps.entries()) {
+          if (index > lastIndex) continue;
           if (completed.has(step.id) || inFlight.has(step.id)) continue;
           if (!ready(step)) continue;
           start(step);

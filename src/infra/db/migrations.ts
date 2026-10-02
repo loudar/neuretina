@@ -334,6 +334,15 @@ export const migrations: Migration[] = [
       );
     `,
   },
+  {
+    // A user workflow can stop after a step: everything up to and including
+    // it runs (and its outputs are delivered), later steps never start.
+    id: 20,
+    name: "user_workflow_stop_after",
+    sql: `
+      ALTER TABLE user_workflows ADD COLUMN stop_after TEXT;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

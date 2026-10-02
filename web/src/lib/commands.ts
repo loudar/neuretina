@@ -146,10 +146,12 @@ export const commands = {
 
   userWorkflows: {
     list: () => send<UserWorkflowInfo[]>("workflow.user.list"),
-    create: (input: { name: string; inputs: Record<string, unknown> }) =>
+    create: (input: { name: string; inputs: Record<string, unknown>; stopAfter?: string }) =>
       send<UserWorkflowInfo>("workflow.user.create", input),
-    update: (id: string, patch: { name?: string; inputs?: Record<string, unknown> }) =>
-      send<UserWorkflowInfo>("workflow.user.update", { id, ...patch }),
+    update: (
+      id: string,
+      patch: { name?: string; inputs?: Record<string, unknown>; stopAfter?: string | null },
+    ) => send<UserWorkflowInfo>("workflow.user.update", { id, ...patch }),
     remove: (id: string) => send<{ ok: boolean }>("workflow.user.remove", { id }),
   },
 

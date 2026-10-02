@@ -60,6 +60,8 @@ export interface BriefingWorkflowInput {
   topicIds?: string[];
   /** Generic input values keyed by input id (user workflows store their own). */
   inputs?: Record<string, unknown>;
+  /** Step id the run stops after; later steps never start. */
+  stopAfter?: string;
   deliver?: boolean;
   generateAudio?: boolean;
 }
@@ -109,6 +111,8 @@ export interface BriefingWorkflowOutput {
   sources: number;
   audioBytes?: number;
   deliveredChannels?: number;
+  /** Step the run stopped after, when one was configured. */
+  stoppedAfter?: string;
   reason?: string;
 }
 
@@ -438,6 +442,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       resume: migrateResume(context.resume),
       deliver: input.deliver !== false,
       delivery: { workflow: workflowId, router: this.deps.delivery },
+      ...(input.stopAfter ? { stopAfter: input.stopAfter } : {}),
     });
 
     if (outcome.halted !== undefined) {
@@ -454,6 +459,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       sources: brief?.sources.length ?? 0,
       ...(voice?.bytes !== undefined ? { audioBytes: voice.bytes } : {}),
       ...(outcome.delivered > 0 ? { deliveredChannels: outcome.delivered } : {}),
+      ...(input.stopAfter ? { stoppedAfter: input.stopAfter } : {}),
     };
   }
 

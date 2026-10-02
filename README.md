@@ -400,6 +400,11 @@ the timeline as a monospace code block: aligned dates and times in plain text, w
 (`delivery.list`). `delivery.channel.verify` runs a live pre-flight (Matrix identity + room
 membership, webhook reachability, SMTP handshake).
 
+Every step of a customizable workflow also carries a **Stop after here** switch: the run executes
+everything up to and including that step, delivers its outputs, and starts no later step. The
+editor collapses the remaining steps into a "N steps not enabled due to stopping step" summary.
+The stop step is stored on the user workflow row (`stop_after`) and can be cleared at any time.
+
 ### Matrix chat commands
 
 When a matrix delivery channel exists, the bot listens in its room via `/sync` long-polling and

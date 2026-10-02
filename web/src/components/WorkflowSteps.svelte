@@ -9,10 +9,17 @@
     assignments: Record<string, string[]>;
     /** Channel switches are interactive only for customizable workflows. */
     editable: boolean;
+    /** Step the run stops after; null = run the whole pipeline. */
+    stopAfter: string | null;
     ontoggle: (step: string, output: string, channelId: string) => void;
+    onstop: (stepId: string | null) => void;
   }
 
-  let { steps, channels, assignments, editable, ontoggle }: Props = $props();
+  let { steps, channels, assignments, editable, stopAfter, ontoggle, onstop }: Props = $props();
+
+  const stopIndex = $derived(stopAfter ? steps.findIndex((step) => step.id === stopAfter) : -1);
+  const visibleSteps = $derived(stopIndex >= 0 ? steps.slice(0, stopIndex + 1) : steps);
+  const stoppedSteps = $derived(stopIndex >= 0 ? steps.slice(stopIndex + 1) : []);
 
   function assigned(step: string, output: string): string[] {
     return assignments[`${step}/${output}`] ?? [];
@@ -20,7 +27,7 @@
 </script>
 
 <div class="steps">
-  {#each steps as step, index (step.id)}
+  {#each visibleSteps as step, index (step.id)}
     <div class="step">
       <div class="cards">
         <article class="card">
@@ -65,6 +72,19 @@
           {#if step.description}
             <p class="muted description">{step.description}</p>
           {/if}
+          <label
+            class="flag stop"
+            title={editable
+              ? "Run everything up to and including this action, then stop"
+              : "Only customizable workflows can stop early"}
+          >
+            <Switch
+              checked={stopIndex === index}
+              disabled={!editable}
+              onchange={() => onstop(stopIndex === index ? null : step.id)}
+            />
+            <span>Stop after here</span>
+          </label>
         </article>
 
         <span class="link" aria-hidden="true"></span>
@@ -124,7 +144,7 @@
         </article>
       </div>
 
-      {#if index < steps.length - 1}
+      {#if index < visibleSteps.length - 1}
         <div class="flow" aria-hidden="true">
           <span class="flow-turn"></span>
           <span class="flow-drop"></span>
@@ -133,6 +153,29 @@
       {/if}
     </div>
   {/each}
+
+  {#if stoppedSteps.length > 0}
+    <div class="step">
+      <div class="flow" aria-hidden="true">
+        <span class="flow-turn"></span>
+        <span class="flow-drop"></span>
+        <span class="flow-arrow"></span>
+      </div>
+
+      <div class="stopped">
+        <span class="stopped-count">{stoppedSteps.length}</span>
+        <div class="stopped-info">
+          <span class="stopped-title">
+            {stoppedSteps.length} step{stoppedSteps.length === 1 ? "" : "s"} not enabled due to
+            stopping step
+          </span>
+          <span class="muted stopped-names">
+            {stoppedSteps.map((entry) => entry.title).join(" · ")}
+          </span>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -282,7 +325,7 @@
   .flag {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-large);
+    gap: var(--space-small);
     flex: none;
     color: var(--m3c-on-surface-variant);
     font-size: var(--font-small);
@@ -315,16 +358,62 @@
   .channel-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 0 var(--space-large);
+    gap: var(--space-small) var(--space-large);
   }
 
   .channel {
     display: inline-flex;
     align-items: center;
-    gap: var(--space-large);
+    gap: var(--space-small);
     color: var(--m3c-on-surface-variant);
     font-size: var(--font-medium);
     cursor: pointer;
     user-select: none;
+  }
+
+  .flag.stop {
+    margin-top: auto;
+    padding-top: var(--space-small);
+    cursor: pointer;
+  }
+
+  /* The collapsed tail after a stop step. */
+  .stopped {
+    display: flex;
+    align-items: center;
+    gap: var(--space-medium);
+    padding: var(--space-medium) var(--space-large);
+    border: 1px dashed var(--m3c-outline-variant);
+    border-radius: var(--m3-shape-medium);
+    background-color: var(--m3c-surface-container-low);
+  }
+
+  .stopped-count {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 50%;
+    background-color: var(--m3c-surface-container-highest);
+    color: var(--m3c-on-surface-variant);
+    font-size: var(--font-medium);
+  }
+
+  .stopped-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-small);
+    min-width: 0;
+  }
+
+  .stopped-title {
+    color: var(--m3c-on-surface-variant);
+    font-size: var(--font-medium);
+  }
+
+  .stopped-names {
+    font-size: var(--font-small);
+    overflow-wrap: anywhere;
   }
 </style>

@@ -48,6 +48,33 @@ describe("UserWorkflowRepository", () => {
     expect(() => repo.remove("missing")).toThrow(/not found/);
   });
 
+  test("stores, keeps and clears the stop step", () => {
+    const repo = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
+
+    const created = repo.add({
+      name: "Stop early",
+      inputs: { topics: ["t1"] },
+      stopAfter: "brief",
+    });
+    expect(created.stopAfter).toBe("brief");
+    expect(repo.get(created.id)?.stopAfter).toBe("brief");
+
+    // A patch without stopAfter keeps the current value.
+    const renamed = repo.update(created.id, { name: "Stop early v2" });
+    expect(renamed.stopAfter).toBe("brief");
+
+    // An explicit null clears it.
+    const cleared = repo.update(created.id, { stopAfter: null });
+    expect(cleared.stopAfter).toBeUndefined();
+
+    const upserted = repo.upsert("briefing", {
+      name: "Custom",
+      inputs: {},
+      stopAfter: "compile",
+    });
+    expect(upserted.stopAfter).toBe("compile");
+  });
+
   test("upserts rows under an explicit id", () => {
     const repo = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
 
@@ -132,6 +159,7 @@ interface UserWorkflowInfo {
   id: string;
   name: string;
   inputs: Record<string, unknown>;
+  stopAfter?: string;
 }
 
 describe("user workflows through the gateway", () => {
@@ -328,6 +356,42 @@ describe("user workflows through the gateway", () => {
     }
   });
 
+  test("stops a user workflow after the configured step", async () => {
+    const topic = await call<{ id: string }>("topic.create", { name: "Stop topic" });
+    const created = await call<UserWorkflowInfo>("workflow.user.create", {
+      name: "Stopped brief",
+      inputs: { topics: [topic.id] },
+      stopAfter: "brief",
+    });
+    expect(created.stopAfter).toBe("brief");
+
+    try {
+      const listed = await call<Array<{ id: string; stopAfter?: string }>>("workflow.list");
+      expect(listed.find((workflow) => workflow.id === created.id)?.stopAfter).toBe("brief");
+
+      const finished = waitForEvent(
+        kernel.bus,
+        "workflow.finished",
+        (event) => (event.payload as { workflow: string }).workflow === created.id,
+      );
+      await call("workflow.run", { id: created.id, input: {} });
+      const output = (
+        await finished
+      ).payload as {
+        output: { skipped: boolean; briefId?: string; stoppedAfter?: string; audioBytes?: number };
+      };
+
+      expect(output.output.skipped).toBe(false);
+      expect(output.output.stoppedAfter).toBe("brief");
+      expect(output.output.briefId).toBeTruthy();
+      // The audio step comes after the stop step and never ran.
+      expect(output.output.audioBytes).toBeUndefined();
+    } finally {
+      await call("workflow.user.remove", { id: created.id });
+      await call("topic.delete", { id: topic.id });
+    }
+  });
+
   test("validates user workflow input", async () => {
     const topic = await call<{ id: string }>("topic.create", { name: "Validation topic" });
 
@@ -350,6 +414,17 @@ describe("user workflows through the gateway", () => {
     });
     expect(unknownTopic.status).toBe(400);
     expect(unknownTopic.body.error).toContain("not found");
+
+    const unknownStop = await post({
+      type: "workflow.user.create",
+      payload: {
+        name: "Bad stop",
+        inputs: { topics: [topic.id] },
+        stopAfter: "missing-step",
+      },
+    });
+    expect(unknownStop.status).toBe(400);
+    expect(unknownStop.body.error).toContain("no step");
 
     const missing = await post({
       type: "workflow.user.update",

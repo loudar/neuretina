@@ -78,6 +78,28 @@ describe("CodeModeTool", () => {
     expect(result.result).toBe(1);
   });
 
+  test("unwraps markdown fences around the program", async () => {
+    const tool = new CodeModeTool({ tools: [stubTool()] });
+
+    const result = await tool.execute(
+      {
+        code: '```javascript\nasync () => {\n  const r = await lookup({ query: "fenced" });\n  return r.results.length;\n}\n```',
+      },
+      toolContext(),
+    );
+
+    expect(result.result).toBe(1);
+    expect(result.toolCalls).toBe(1);
+  });
+
+  test("describes an unparseable program instead of a bare parser error", async () => {
+    const tool = new CodeModeTool({ tools: [stubTool()] });
+
+    await expect(tool.execute({ code: "}" }, toolContext())).rejects.toThrow(
+      /Could not parse the program[\s\S]*Parser error[\s\S]*async arrow function[\s\S]*Program:/,
+    );
+  });
+
   test("captures console output", async () => {
     const tool = new CodeModeTool({ tools: [stubTool()] });
 

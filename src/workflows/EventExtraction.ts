@@ -4,7 +4,7 @@ import { isoDate } from "../core/dates.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { Logger } from "../core/logger.ts";
-import { textSimilarity } from "../core/text.ts";
+import { textSimilarity, tokenSimilarity, wordCount } from "../core/text.ts";
 import type { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
 import type { BriefSource } from "../domain/briefs/BriefRepository.ts";
 import type { EventStore, TimelineEvent } from "../domain/events/EventRepository.ts";
@@ -17,6 +17,15 @@ const SAME_DAY_THRESHOLD = 0.45;
 const TAG_CONFIDENCE = 0.5;
 /** Most events one brief may contribute. */
 const MAX_EVENTS_PER_BRIEF = 8;
+/** Hard cap on title length; the prompts ask the model for 4-5 words. */
+const MAX_TITLE_WORDS = 7;
+/** A clause before a colon/dash is kept only when it is at least this long. */
+const MIN_TITLE_CLAUSE = 2;
+/** Function words that make a poor end to a shortened title. */
+const TRAILING_STOPWORDS = new Set([
+  "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "of", "on",
+  "or", "over", "the", "to", "with",
+]);
 
 export interface EventSuggestion {
   date: string;
@@ -66,8 +75,8 @@ interface ReviewedEvent {
 
 /**
  * Turns a finished brief into dated events:
- * suggestions → potential duplicates (Levenshtein + % match, thresholded) →
- * LLM review of the candidates → upsert.
+ * suggestions → potential duplicates (edit distance + shared key terms,
+ * thresholded) → LLM review of the candidates → upsert.
  *
  * Tags come from a decision step over the existing tag list plus "other".
  * "other" (or no confident match) asks the LLM for a new tag, which joins the
@@ -135,7 +144,7 @@ export class EventExtractor {
       if (!entry || typeof entry !== "object") continue;
       const record = entry as Record<string, unknown>;
       const date = typeof record.date === "string" ? record.date.trim() : "";
-      const title = typeof record.title === "string" ? record.title.trim() : "";
+      const title = shortenTitle(typeof record.title === "string" ? record.title : "");
       if (!isIsoDate(date) || !title) continue;
       suggestions.push({
         date,
@@ -183,7 +192,7 @@ export class EventExtractor {
         : suggestion.entities,
       title:
         typeof parsed.title === "string" && parsed.title.trim()
-          ? parsed.title.trim()
+          ? shortenTitle(parsed.title)
           : suggestion.title,
       description:
         typeof parsed.description === "string" && parsed.description.trim()
@@ -342,20 +351,57 @@ export class EventExtractor {
   }
 }
 
-/** Potential duplicates for a suggestion, best match first. */
+/**
+ * Potential duplicates for a suggestion, best match first. Headlines about the
+ * same happening get worded differently ("Google challenges EU DMA orders in
+ * court" / "Google asks EU court to suspend DMA search-data order"), so the
+ * score is the better of edit distance and shared content words.
+ */
 export function findCandidates(
   suggestion: EventSuggestion,
   known: TimelineEvent[],
 ): Candidate[] {
   const candidates: Candidate[] = [];
   for (const event of known) {
-    const score = textSimilarity(suggestion.title, event.title);
+    const score = Math.max(
+      textSimilarity(suggestion.title, event.title),
+      tokenSimilarity(suggestion.title, event.title),
+    );
     const sameDay = event.date === suggestion.date;
     if (score >= DUPLICATE_THRESHOLD || (sameDay && score >= SAME_DAY_THRESHOLD)) {
       candidates.push({ event, score });
     }
   }
   return candidates.sort((a, b) => b.score - a.score).slice(0, 3);
+}
+
+/**
+ * Deterministic guard for the "4-5 word headline" rule: strips dates,
+ * markdown, quotes and trailing parentheticals, prefers the clause before a
+ * colon/dash, drops trailing function words and caps the title length. The
+ * model is still prompted to compress; this only trims obvious excess.
+ */
+export function shortenTitle(title: string): string {
+  let text = title
+    .replace(/[`*_]+/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+    .trim();
+  text = text.replace(/^\(?\d{4}-\d{2}-\d{2}\)?[\s:–—-]+/, "");
+  text = text.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  const clause = text.split(/\s*[:;—–]\s*/)[0]?.trim() ?? "";
+  if (clause !== text && wordCount(clause) >= MIN_TITLE_CLAUSE) text = clause;
+  text = text.replace(/[.,;:!?]+$/, "").trim();
+
+  const words = text.split(/\s+/).filter(Boolean);
+  while (words.length > MAX_TITLE_WORDS && TRAILING_STOPWORDS.has(words.at(-1)!.toLowerCase())) {
+    words.pop();
+  }
+  if (words.length > MAX_TITLE_WORDS) {
+    words.length = MAX_TITLE_WORDS;
+    while (words.length > 0 && TRAILING_STOPWORDS.has(words.at(-1)!.toLowerCase())) words.pop();
+  }
+  return words.join(" ");
 }
 
 export function mergeTags(existing: string[] | undefined, fresh: string[]): string[] {
@@ -401,20 +447,24 @@ An event is anything learned from the material that is attributable to a specifi
 
 Rules:
 - Resolve relative dates ("today", "yesterday") against the provided date; use the sources to confirm dates.
-- One event per real-world happening, in one or two plain sentences with concrete facts (numbers, names, outcomes).
+- One event per real-world happening: when several sources describe the same happening in different words, merge them into a single event.
+- title: 4-5 words, headline style, the core action and its subject (e.g. "Gemini 4 Argon launches", "Google appeals DMA orders"). No dates, no filler, no full sentences, never more than 6 words; put the details in the description.
+- description: one or two plain sentences with concrete facts (numbers, names, outcomes).
 - entities are the people, companies, products, places or organizations the event is about, under their common names.
 - Never invent material: if the date is unclear, leave the event out.
 - At most 8 events; keep the most significant ones.
 
 Finish with a single JSON object and nothing else:
-{"events": [{"date": "YYYY-MM-DD", "time": "HH:MM", "title": "<short headline>", "description": "<1-2 sentences>", "entities": ["<entity>"]}]}
+{"events": [{"date": "YYYY-MM-DD", "time": "HH:MM", "title": "<4-5 word headline>", "description": "<1-2 sentences>", "entities": ["<entity>"]}]}
 Omit "time" when the material does not state one.`;
 
 const REVIEW_PROMPT = `You review a newly suggested event against existing stored events that may describe the same real-world happening.
 
 Decide:
-- "update": the suggestion is the same event as one of the candidates (it may add or correct detail). Return that candidate's id and the merged fields, preferring the most specific date/time and the most complete description.
-- "add": the suggestion is a different event, even if it is related or similar.
+- "update": the suggestion and a candidate describe the same real-world happening, even when worded differently or when only one of them carries a detail (e.g. same company, body, product or decision). Return that candidate's id and the merged fields, preferring the most specific date/time and the most complete description.
+- "add": a genuinely different happening, even if it is related, by the same company, or about the same product line. Sharing a company or a model family is not enough.
+
+Always merge the title down to 4-5 words (never more than 6), the sharpest shared phrasing, e.g. "Google appeals DMA orders", "Anthropic releases Sonnet 5.5".
 
 Finish with a single JSON object and nothing else:
 {"action": "update"|"add", "id": "<candidate id when updating>", "date": "YYYY-MM-DD", "time": "HH:MM", "title": "…", "description": "…", "entities": ["<entity>"]}`;

@@ -170,6 +170,60 @@ describe("StepPipeline", () => {
     expect(seen).toContainEqual(["c", []]);
   });
 
+  test("stopAfter runs the prefix and never starts later steps", async () => {
+    const ran: string[] = [];
+    const pipeline = new StepPipeline(
+      definition([
+        step("a", async () => {
+          ran.push("a");
+          return { outputs: { text: { text: "A" } } };
+        }),
+        step(
+          "b",
+          async () => {
+            ran.push("b");
+            return { outputs: { text: { text: "B" } } };
+          },
+          ["a"],
+        ),
+        step(
+          "c",
+          async () => {
+            ran.push("c");
+          },
+          ["b"],
+        ),
+      ]),
+    );
+
+    const outcome = await pipeline.run({
+      inputs: {},
+      options: {},
+      context: runContext(),
+      stopAfter: "b",
+    });
+
+    expect(ran).toEqual(["a", "b"]);
+    expect([...outcome.outputs.keys()]).toEqual(["a", "b"]);
+  });
+
+  test("an unknown stopAfter is ignored", async () => {
+    const ran: string[] = [];
+    const pipeline = new StepPipeline(
+      definition([
+        step("a", async () => {
+          ran.push("a");
+        }),
+        step("b", async () => {
+          ran.push("b");
+        }),
+      ]),
+    );
+
+    await pipeline.run({ inputs: {}, options: {}, context: runContext(), stopAfter: "nope" });
+    expect(ran).toEqual(["a", "b"]);
+  });
+
   test("a halt stops scheduling new steps", async () => {
     const ran: string[] = [];
     const pipeline = new StepPipeline(

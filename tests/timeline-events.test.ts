@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createLogger } from "../src/core/logger.ts";
-import { levenshteinDistance, textSimilarity } from "../src/core/text.ts";
+import { levenshteinDistance, textSimilarity, tokenSimilarity } from "../src/core/text.ts";
 import { EventRepository, type TimelineEvent } from "../src/domain/events/EventRepository.ts";
-import { EventExtractor } from "../src/workflows/EventExtraction.ts";
+import { EventExtractor, findCandidates, shortenTitle } from "../src/workflows/EventExtraction.ts";
 import {
   renderTimelineHtml,
   renderTimelineMarkdown,
@@ -81,6 +81,90 @@ describe("text similarity", () => {
     expect(textSimilarity("Nvidia earnings", "nvidia earnings")).toBe(1);
     expect(textSimilarity("Nvidia earnings", "Nvidia earnings beat")).toBeGreaterThan(0.7);
     expect(textSimilarity("Rust release", "EU AI Act ruling")).toBeLessThan(0.4);
+  });
+
+  test("matches on shared content words when the wording differs", () => {
+    expect(
+      tokenSimilarity(
+        "Google launches Gemini 4 Argon",
+        "Google launches Gemini 4 Argon frontier model",
+      ),
+    ).toBe(1);
+    expect(
+      tokenSimilarity(
+        "Google challenges EU DMA orders in court",
+        "Google appeals two EU Digital Markets Act orders",
+      ),
+    ).toBeGreaterThan(0.45);
+    // camelCase folds into its parts: DevDay matches "Dev Day".
+    expect(
+      tokenSimilarity(
+        "OpenAI unveils Decisions API at Dev Day",
+        "OpenAI DevDay: Dots agents, GPT-6.1 Sol and a Pro 500 tier",
+      ),
+    ).toBeGreaterThan(0.5);
+    // One shared generic word is not enough.
+    expect(
+      tokenSimilarity("OpenAI unveils Decisions API at Dev Day", "Nvidia ships containment software"),
+    ).toBe(0);
+    expect(tokenSimilarity("Rust release", "EU AI Act ruling")).toBe(0);
+  });
+});
+
+describe("duplicate matching", () => {
+  test("flags rewordings, merged details and cross-day repeats", () => {
+    const stored = [
+      event({ id: "argon", date: "2026-09-30", title: "Google launches Gemini 4 Argon" }),
+      event({ id: "dma", date: "2026-09-29", title: "Google challenges EU DMA orders in court" }),
+      event({
+        id: "devday",
+        date: "2026-09-29",
+        title: "OpenAI DevDay: Dots agents, GPT-6.1 Sol and a Pro 500 tier",
+      }),
+    ];
+
+    const candidates = (date: string, title: string) =>
+      findCandidates({ date, title, entities: [], description: "" }, stored).map(
+        (candidate) => candidate.event.id,
+      );
+
+    expect(
+      candidates(
+        "2026-09-30",
+        "Google launches Gemini 4 Argon frontier model to select cyber defenders",
+      ),
+    ).toEqual(["argon"]);
+    expect(candidates("2026-09-30", "Google asks EU court to suspend DMA search-data order")).toContain(
+      "dma",
+    );
+    expect(candidates("2026-09-29", "Google appeals two EU Digital Markets Act orders")).toContain(
+      "dma",
+    );
+    // The Dev Day roundup and a single launch from it are sent to review.
+    expect(candidates("2026-09-29", "OpenAI unveils Decisions API at Dev Day")).toContain("devday");
+    // A different company's news on the same day is not a candidate.
+    expect(candidates("2026-09-29", "Nvidia ships containment software")).not.toContain("devday");
+  });
+});
+
+describe("shortenTitle", () => {
+  test("strips dates, markdown and clauses, then caps the length", () => {
+    expect(shortenTitle("**2026-09-30: Gemini 4 Argon launches**")).toBe("Gemini 4 Argon launches");
+    expect(
+      shortenTitle("Google launches Gemini 4 Argon frontier model to select cyber defenders"),
+    ).toBe("Google launches Gemini 4 Argon frontier model");
+    expect(shortenTitle("Google asks EU court to suspend DMA search-data order")).toBe(
+      "Google asks EU court to suspend DMA",
+    );
+    expect(shortenTitle("Anthropic releases Claude Sonnet 5.5")).toBe(
+      "Anthropic releases Claude Sonnet 5.5",
+    );
+    expect(shortenTitle("OpenAI unveils Decisions API (Dev Day)")).toBe(
+      "OpenAI unveils Decisions API",
+    );
+    expect(shortenTitle("OpenAI DevDay: Dots agents, GPT-6.1 Sol and a Pro 500 tier")).toBe(
+      "OpenAI DevDay",
+    );
   });
 });
 
@@ -179,6 +263,35 @@ describe("EventExtractor", () => {
 
     // suggest + review + categorize ×2 + generate.
     expect(calls).toHaveLength(5);
+  });
+
+  test("shortens long suggested titles before storing them", async () => {
+    const events = new EventRepository(new SqliteDatabase(":memory:"));
+    const llm = stubLlm((request) => {
+      const system = request.messages[0]?.content ?? "";
+      if (system.includes("extract dated events")) {
+        return completion(
+          JSON.stringify({
+            events: [
+              {
+                date: "2026-09-30",
+                title: "Google launches Gemini 4 Argon frontier model to select cyber defenders",
+                description: "A new frontier model.",
+                entities: ["Google"],
+              },
+            ],
+          }),
+        );
+      }
+      return completion(JSON.stringify({ tags: [] }));
+    });
+
+    const extractor = new EventExtractor({ llm, events, logger: log });
+    await extractor.extract({ brief: "# Brief", sources: [] });
+
+    expect(events.list().map((stored) => stored.title)).toEqual([
+      "Google launches Gemini 4 Argon frontier model",
+    ]);
   });
 });
 

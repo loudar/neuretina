@@ -110,7 +110,12 @@ export interface DataBundle {
     muted: boolean;
     contextId?: string;
   }>;
-  userWorkflows: Array<{ id: string; name: string; inputs: Record<string, unknown> }>;
+  userWorkflows: Array<{
+    id: string;
+    name: string;
+    inputs: Record<string, unknown>;
+    stopAfter?: string;
+  }>;
   deliveryChannels: Array<{
     id: string;
     type: string;
@@ -215,12 +220,16 @@ export interface WorkflowInfo {
   user?: boolean;
   /** Configured input values (undefined = the workflow's defaults). */
   inputValues?: Record<string, unknown>;
+  /** Step id the run stops after; later steps never start. */
+  stopAfter?: string;
 }
 
 export interface UserWorkflowInfo {
   id: string;
   name: string;
   inputs: Record<string, unknown>;
+  /** Step id the run stops after; later steps never start. */
+  stopAfter?: string;
 }
 
 export interface AppContextInfo {

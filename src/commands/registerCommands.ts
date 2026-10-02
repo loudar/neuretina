@@ -379,7 +379,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const userById = new Map(userWorkflows.list().map((workflow) => [workflow.id, workflow]));
     return workflows.list().map((info) => {
       const user = userById.get(info.id);
-      return user ? { ...info, user: true, inputValues: user.inputs } : info;
+      return user
+        ? {
+            ...info,
+            user: true,
+            inputValues: user.inputs,
+            ...(user.stopAfter ? { stopAfter: user.stopAfter } : {}),
+          }
+        : info;
     });
   });
 
@@ -476,9 +483,12 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("workflow.user.create", (payload, context) => {
     const record = asRecord(payload);
+    const definition = userWorkflowTemplate(coreWorkflows);
+    const stopAfter = validateStopAfter(definition, record.stopAfter);
     const workflow = userWorkflows.add({
       name: requireString(record, "name"),
-      inputs: validateWorkflowInputs(userWorkflowTemplate(coreWorkflows), record.inputs, topics),
+      inputs: validateWorkflowInputs(definition, record.inputs, topics),
+      ...(stopAfter ? { stopAfter } : {}),
     });
     publishUserWorkflowChanged(bus, "create", workflow.id, context.correlationId);
     return toUserWorkflowInfo(workflow);
@@ -496,18 +506,27 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
       if (!workflows.list().some((workflow) => workflow.id === id)) {
         throw new NotFoundError(`User workflow ${id} not found`);
       }
+      const definition = workflows.get(id).definition;
+      const stopAfter = validateStopAfter(definition, record.stopAfter);
       const workflow = userWorkflows.upsert(id, {
         name: record.name !== undefined ? requireString(record, "name") : id,
-        inputs: validateWorkflowInputs(workflows.get(id).definition, record.inputs, topics),
+        inputs: validateWorkflowInputs(definition, record.inputs, topics),
+        ...(stopAfter ? { stopAfter } : {}),
       });
       publishUserWorkflowChanged(bus, "update", workflow.id, context.correlationId);
       return toUserWorkflowInfo(workflow);
     }
 
-    const patch: { name?: string; inputs?: Record<string, unknown> } = {};
+    const patch: { name?: string; inputs?: Record<string, unknown>; stopAfter?: string | null } = {};
     if (record.name !== undefined) patch.name = requireString(record, "name");
     if (record.inputs !== undefined) {
       patch.inputs = validateWorkflowInputs(workflows.get(id).definition, record.inputs, topics);
+    }
+    if (record.stopAfter !== undefined) {
+      patch.stopAfter =
+        record.stopAfter === null
+          ? null
+          : (validateStopAfter(workflows.get(id).definition, record.stopAfter) ?? null);
     }
 
     const workflow = userWorkflows.update(id, patch);
@@ -948,8 +967,29 @@ function toUserWorkflowInfo(workflow: UserWorkflow): {
   id: string;
   name: string;
   inputs: Record<string, unknown>;
+  stopAfter?: string;
 } {
-  return { id: workflow.id, name: workflow.name, inputs: workflow.inputs };
+  return {
+    id: workflow.id,
+    name: workflow.name,
+    inputs: workflow.inputs,
+    ...(workflow.stopAfter ? { stopAfter: workflow.stopAfter } : {}),
+  };
+}
+
+/** Validates a stop-step id against a workflow definition; empty clears it. */
+function validateStopAfter(
+  definition: WorkflowDefinition,
+  value: unknown,
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string") throw new ValidationError(`"stopAfter" must be a step id`);
+  const step = value.trim();
+  if (!step) return undefined;
+  if (!definition.steps.some((entry) => entry.id === step)) {
+    throw new ValidationError(`Workflow "${definition.id}" has no step "${step}"`);
+  }
+  return step;
 }
 
 /** Validates unsaved LLM form values from the settings dialog. */

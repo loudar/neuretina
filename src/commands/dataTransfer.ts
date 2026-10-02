@@ -24,7 +24,12 @@ export interface DataBundle {
     muted: boolean;
     contextId?: string;
   }>;
-  userWorkflows: Array<{ id: string; name: string; inputs: Record<string, unknown> }>;
+  userWorkflows: Array<{
+    id: string;
+    name: string;
+    inputs: Record<string, unknown>;
+    stopAfter?: string;
+  }>;
   deliveryChannels: Array<{
     id: string;
     type: string;
@@ -100,6 +105,7 @@ export class DataTransfer {
         id: workflow.id,
         name: workflow.name,
         inputs: workflow.inputs,
+        ...(workflow.stopAfter ? { stopAfter: workflow.stopAfter } : {}),
       })),
       deliveryChannels: this.deps.deliveries.channels().map((channel) => ({
         id: channel.id,
@@ -252,6 +258,7 @@ export class DataTransfer {
       this.deps.userWorkflows.upsert(workflow.id, {
         name: workflow.name,
         inputs: remapTopicIds(workflow.inputs, topicIds),
+        ...(workflow.stopAfter ? { stopAfter: workflow.stopAfter } : {}),
       });
       // Registers the workflow in the running registry (and refreshes the UI).
       this.deps.bus.publish(

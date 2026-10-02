@@ -36,7 +36,13 @@ export class UserBriefingWorkflow
   ): Promise<BriefingWorkflowOutput> {
     // The stored input values always win: callers cannot widen or change them.
     return this.briefing.run(
-      { ...input, topics: undefined, topicIds: undefined, inputs: this.userWorkflow.inputs },
+      {
+        ...input,
+        topics: undefined,
+        topicIds: undefined,
+        inputs: this.userWorkflow.inputs,
+        stopAfter: this.userWorkflow.stopAfter,
+      },
       context,
     );
   }

@@ -55,9 +55,12 @@
   let editorInputs = $state<Record<string, string[]>>({});
   /** Assigned channel ids keyed by "step/output". */
   let editorAssignments = $state<Record<string, string[]>>({});
+  /** Step the run stops after; null = run the whole pipeline. */
+  let editorStopAfter = $state<string | null>(null);
   let editorBaseName = $state("");
   let editorBaseInputs = $state("");
   let editorBaseAssignments = $state("");
+  let editorBaseStopAfter = $state<string | null>(null);
   let editorLoading = $state(false);
   let savingWorkflow = $state(false);
 
@@ -121,7 +124,8 @@
     editorReady &&
       (editorName.trim() !== editorBaseName ||
         serializeInputs(editorInputs) !== editorBaseInputs ||
-        serializeAssignments(editorAssignments) !== editorBaseAssignments),
+        serializeAssignments(editorAssignments) !== editorBaseAssignments ||
+        editorStopAfter !== editorBaseStopAfter),
   );
 
   /** Every required input holds a value (e.g. at least one topic). */
@@ -229,9 +233,11 @@
       editorName = workflow.user ? workflow.title : id;
       editorInputs = inputs;
       editorAssignments = assignments;
+      editorStopAfter = workflow.stopAfter ?? null;
       editorBaseName = editorName;
       editorBaseInputs = serializeInputs(inputs);
       editorBaseAssignments = serializeAssignments(assignments);
+      editorBaseStopAfter = editorStopAfter;
     } catch (error) {
       reportError(error);
     } finally {
@@ -373,6 +379,10 @@
     };
   }
 
+  function toggleStopAfter(stepId: string | null): void {
+    editorStopAfter = stepId;
+  }
+
   // Attaches/detaches channels so each step output matches `assignments`.
   async function reconcileAssignments(
     id: string,
@@ -426,13 +436,19 @@
       const inputs = { ...editorInputs };
       const nameChanged = name !== editorBaseName;
       const inputsChanged = serializeInputs(inputs) !== editorBaseInputs;
-      if (workflow.user || nameChanged || inputsChanged) {
-        await commands.userWorkflows.update(id, { name, inputs });
+      const stopChanged = editorStopAfter !== editorBaseStopAfter;
+      if (workflow.user || nameChanged || inputsChanged || stopChanged) {
+        await commands.userWorkflows.update(id, {
+          name,
+          inputs,
+          stopAfter: editorStopAfter,
+        });
       }
       await reconcileAssignments(id, editorAssignments);
       editorBaseName = name;
       editorBaseInputs = serializeInputs(inputs);
       editorBaseAssignments = serializeAssignments(editorAssignments);
+      editorBaseStopAfter = editorStopAfter;
       reportSuccess("Workflow saved");
       await refresh();
     } catch (error) {
@@ -844,7 +860,9 @@
             {channels}
             assignments={editorAssignments}
             editable={selectedEditable}
+            stopAfter={editorStopAfter}
             ontoggle={toggleAssignment}
+            onstop={toggleStopAfter}
           />
         {/if}
       </Pane>
