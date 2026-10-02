@@ -15,15 +15,15 @@
 
   interface Props {
     detail?: string;
-    state: StatusState;
+    status: StatusState;
   }
 
-  let { detail, state }: Props = $props();
+  let { detail, status }: Props = $props();
 
   // Running calls stay open so the code/IO can be watched live; finished ones
   // collapse by default, and an explicit toggle wins from then on.
   let userOpen = $state<boolean | null>(null);
-  const open = $derived(userOpen ?? state !== "done");
+  const open = $derived(userOpen ?? status !== "done");
 
   const parsed = $derived(parseToolDetail(detail));
 

@@ -92,7 +92,7 @@
       </span>
 
       {#if entry.kind === "tool" || parseToolDetail(entry.detail)}
-        <ToolCallDetail detail={entry.detail} state={entry.state} />
+        <ToolCallDetail detail={entry.detail} status={entry.state} />
       {/if}
     </span>
     {#if entry.costUsd && entry.costUsd > 0}
