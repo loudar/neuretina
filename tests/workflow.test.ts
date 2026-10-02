@@ -26,17 +26,10 @@ import {
   stubFinance,
   stubLlm,
   stubSearch,
+  waitUntil,
 } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
-}
 
 interface SetupOptions {
   webResults?: typeof sampleResults;

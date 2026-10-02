@@ -3,16 +3,15 @@ import { AuthService } from "../src/auth/AuthService.ts";
 import { RateLimiter } from "../src/auth/RateLimiter.ts";
 import { createLogger } from "../src/core/logger.ts";
 import { createKernel, type Kernel } from "../src/kernel/Kernel.ts";
-import { StubTts, completion, createTestKernel, stubLlm, stubSearch, testConfig } from "./support.ts";
-
-async function waitUntil(condition: () => boolean, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("waitUntil timed out");
-}
+import {
+  StubTts,
+  completion,
+  createTestKernel,
+  stubLlm,
+  stubSearch,
+  testConfig,
+  waitUntil,
+} from "./support.ts";
 
 describe("AuthService", () => {
   test("issues a session for the right password, not the wrong one", () => {

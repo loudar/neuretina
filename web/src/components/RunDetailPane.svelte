@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Button, Chip, Icon, ListItem } from "m3-svelte";
   import iconChevronRight from "@ktibow/iconset-material-symbols/chevron-right";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconPayments from "@ktibow/iconset-material-symbols/payments";
   import iconSchedule from "@ktibow/iconset-material-symbols/schedule";
   import type { ArtifactInfo, DeliveryRecord, WorkflowRunDetail } from "../lib/api";
   import { formatDateTime, formatRelativeTime } from "../lib/format";
   import { costLabel, outputPreview, triggerLabel } from "../lib/workflows";
   import DataList from "./DataList.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import Pane from "./Pane.svelte";
   import RunStatusIcon from "./RunStatusIcon.svelte";
   import StatusFeedPanel from "./StatusFeed.svelte";
@@ -46,17 +46,7 @@
           </Button>
         </span>
       {/if}
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          title="Delete run"
-          onclick={ondelete}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
+      <DeleteIconButton title="Delete run" onclick={ondelete} disabled={deleting} />
     {/if}
   {/snippet}
 

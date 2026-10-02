@@ -64,6 +64,18 @@ export async function requestRaw(
   throw lastError ?? new ProviderError(provider, `request failed: ${url}`);
 }
 
+/** JSON POST init with a bearer token; the common provider request shape. */
+export function bearerJsonInit(apiKey: string | undefined, body: unknown): RequestInit {
+  return {
+    method: "POST",
+    headers: {
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  };
+}
+
 export async function requestJson<T>(
   provider: string,
   url: string,

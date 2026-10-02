@@ -10,17 +10,9 @@ import type { DomainEvent } from "../src/core/events/types.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { createKernel } from "../src/kernel/Kernel.ts";
-import { stubWorkflow, testConfig } from "./support.ts";
+import { stubWorkflow, testConfig, waitUntil } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-}
 
 function setup() {
   const db = new SqliteDatabase(":memory:");

@@ -12,6 +12,7 @@ import {
   stubWorkflow,
   testConfig,
   waitForEvent,
+  waitUntil,
 } from "./support.ts";
 
 let kernel: Kernel;
@@ -56,15 +57,6 @@ async function call<T>(type: string, payload?: unknown): Promise<T> {
   const { status, body } = await post({ type, payload });
   expect(status).toBe(200);
   return body.result as T;
-}
-
-async function waitUntil(condition: () => boolean, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("waitUntil timed out");
 }
 
 describe("webhook gateway", () => {

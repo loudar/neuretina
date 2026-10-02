@@ -1,6 +1,7 @@
 import { hostnameOf } from "../search/searchSupport.ts";
+import { reportedCostUsd } from "../../core/cost/usage.ts";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
-import { requestJson } from "../../infra/http/request.ts";
+import { bearerJsonInit, requestJson } from "../../infra/http/request.ts";
 import type {
   FinanceDataItem,
   FinanceProvider,
@@ -117,14 +118,11 @@ export class PerplexityFinanceProvider implements FinanceProvider {
       reasoning: { effort: "low" },
     };
 
-    return requestJson<PerplexityAgentResponse>(this.name, `${this.options.baseUrl}/v1/agent`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.options.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    return requestJson<PerplexityAgentResponse>(
+      this.name,
+      `${this.options.baseUrl}/v1/agent`,
+      bearerJsonInit(this.options.apiKey, payload),
+    );
   }
 }
 
@@ -148,8 +146,7 @@ function incompleteDetail(response: PerplexityAgentResponse): string | undefined
 
 function parseUsage(usage: PerplexityAgentResponse["usage"]): FinanceUsage | undefined {
   if (!usage) return undefined;
-  const cost =
-    typeof usage.cost === "number" ? usage.cost : usage.cost?.total_cost;
+  const cost = reportedCostUsd(usage);
   const result: FinanceUsage = {
     ...(typeof usage.input_tokens === "number" ? { inputTokens: usage.input_tokens } : {}),
     ...(typeof usage.output_tokens === "number" ? { outputTokens: usage.output_tokens } : {}),

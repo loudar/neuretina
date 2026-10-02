@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { Button, Icon } from "m3-svelte";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
+  import { Button } from "m3-svelte";
   import type { DeliveryChannelInfo, Topic, WorkflowInfo } from "../lib/api";
   import { commands } from "../lib/commands";
   import { reportError, reportSuccess } from "../lib/feedback";
@@ -12,6 +11,7 @@
     workflowHeadline,
     workflowSummary,
   } from "../lib/workflows";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import Pane from "./Pane.svelte";
   import WorkflowForm from "./WorkflowForm.svelte";
   import WorkflowSteps from "./WorkflowSteps.svelte";
@@ -212,17 +212,11 @@
       <Button variant="filled" onclick={() => void save()} disabled={!canSave}>Save changes</Button>
     {/if}
     {#if user}
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          title={resettable ? "Reset workflow" : "Delete workflow"}
-          onclick={ondelete}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
+      <DeleteIconButton
+        title={resettable ? "Reset workflow" : "Delete workflow"}
+        onclick={ondelete}
+        disabled={deleting}
+      />
     {/if}
   {/snippet}
 

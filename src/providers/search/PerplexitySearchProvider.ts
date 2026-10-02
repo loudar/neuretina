@@ -1,5 +1,6 @@
+import { reportedCostUsd } from "../../core/cost/usage.ts";
 import { ConfigurationError } from "../../core/errors.ts";
-import { requestJson } from "../../infra/http/request.ts";
+import { bearerJsonInit, requestJson } from "../../infra/http/request.ts";
 import { hostnameOf } from "./searchSupport.ts";
 import type {
   SearchProvider,
@@ -45,18 +46,11 @@ export class PerplexitySearchProvider implements SearchProvider {
     const response = await requestJson<{ results?: unknown[] }>(
       this.name,
       `${this.options.baseUrl}/search`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.options.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: "neuretina startup check",
-          max_results: 1,
-          search_type: "fast",
-        }),
-      },
+      bearerJsonInit(this.options.apiKey, {
+        query: "neuretina startup check",
+        max_results: 1,
+        search_type: "fast",
+      }),
     );
 
     return `reachable, ${response.results?.length ?? 0} result(s)`;
@@ -88,14 +82,7 @@ export class PerplexitySearchProvider implements SearchProvider {
     const response = await requestJson<PerplexitySearchResponse>(
       this.name,
       `${this.options.baseUrl}/search`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.options.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      },
+      bearerJsonInit(this.options.apiKey, payload),
     );
 
     const results: SearchResult[] = (response.results ?? []).map((item) => ({
@@ -115,24 +102,6 @@ export class PerplexitySearchProvider implements SearchProvider {
       ...(costUsd !== undefined ? { usage: { costUsd } } : {}),
     };
   }
-}
-
-/**
- * Perplexity meters each response: current responses carry
- * `usage.cost.total_cost` (with `request_cost`); older ones a flat
- * `usage.cost` or `usage.total_cost`.
- */
-function reportedCostUsd(usage: unknown): number | undefined {
-  if (!usage || typeof usage !== "object") return undefined;
-  const record = usage as Record<string, unknown>;
-  const nested =
-    record.cost && typeof record.cost === "object"
-      ? (record.cost as Record<string, unknown>).total_cost
-      : undefined;
-  for (const value of [record.cost, record.total_cost, nested, record.request_cost]) {
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-  }
-  return undefined;
 }
 
 /** Perplexity expects MM/DD/YYYY for date filters. */

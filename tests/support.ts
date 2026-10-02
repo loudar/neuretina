@@ -252,6 +252,19 @@ export const sampleResults: SearchResult[] = [
   },
 ];
 
+/** Polls `condition` until it holds; throws once the deadline passes. */
+export async function waitUntil(
+  condition: () => boolean,
+  timeoutMs = 3000,
+  intervalMs = 5,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 export function waitForEvent(
   bus: EventBus,
   topic: string,

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { reportedCostUsd } from "../../core/cost/usage.ts";
 import { ConfigurationError, ProviderError } from "../../core/errors.ts";
 import { finiteNumber, numberField } from "../../core/records.ts";
 import { requestJson } from "../../infra/http/request.ts";
@@ -126,7 +127,7 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
       const choice = completion.choices[0];
       const message = choice?.message;
       const usageRecord = completion.usage as unknown;
-      const costUsd = costOf(usageRecord);
+      const costUsd = reportedCostUsd(usageRecord);
       const inputTokens =
         numericField(usageRecord, "prompt_tokens") ?? numericField(usageRecord, "input_tokens");
       const outputTokens =
@@ -173,20 +174,6 @@ function isOpenCodeEndpoint(baseUrl: string): boolean {
   } catch {
     return false;
   }
-}
-
-function costOf(usage: unknown): number | undefined {
-  if (!usage || typeof usage !== "object") return undefined;
-  const record = usage as Record<string, unknown>;
-  const nested =
-    record.cost && typeof record.cost === "object"
-      ? (record.cost as Record<string, unknown>).total_cost
-      : undefined;
-  for (const value of [record.cost, record.total_cost, nested]) {
-    const usd = finiteNumber(value);
-    if (usd !== undefined) return usd;
-  }
-  return undefined;
 }
 
 function parseToolCall(call: { id: string; function: { name: string; arguments: string } }): LlmToolCall {

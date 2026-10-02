@@ -1,7 +1,6 @@
 <script lang="ts">
   import { Button, Dialog, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
@@ -13,6 +12,7 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
 import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
 
@@ -237,16 +237,7 @@ import DataList from "./DataList.svelte";
       <Button variant="tonal" iconType="left" onclick={run} disabled={running}>
         <Icon icon={iconPlay} /> Run now
       </Button>
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          onclick={() => (confirmingDelete = true)}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
+      <DeleteIconButton onclick={() => (confirmingDelete = true)} disabled={deleting} />
     {/if}
   {/snippet}
 

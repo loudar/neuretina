@@ -2,13 +2,13 @@
   import { Button, Dialog, Icon, Select, TextFieldOutlined } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconCopy from "@ktibow/iconset-material-symbols/content-copy";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconEdit from "@ktibow/iconset-material-symbols/edit";
   import { commands } from "../lib/commands";
   import type { ConnectionPreset, SettingInfo } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
   import DataList from "./DataList.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import SecretField from "./SecretField.svelte";
 
   interface Props {
@@ -231,19 +231,13 @@
         >
           <Icon icon={iconEdit} />
         </Button>
-        <span class="danger">
-          <Button
-            variant="text"
-            iconType="full"
-            title={`Delete ${noun}`}
-            onclick={() => {
-              deleteTarget = connection;
-              confirmingDelete = true;
-            }}
-          >
-            <Icon icon={iconDelete} />
-          </Button>
-        </span>
+        <DeleteIconButton
+          title={`Delete ${noun}`}
+          onclick={() => {
+            deleteTarget = connection;
+            confirmingDelete = true;
+          }}
+        />
       </div>
     </article>
   {/snippet}

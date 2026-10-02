@@ -9,7 +9,6 @@
     TextFieldOutlinedMultiline,
   } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconVisibility from "@ktibow/iconset-material-symbols/visibility";
   import iconVisibilityOff from "@ktibow/iconset-material-symbols/visibility-off";
@@ -19,7 +18,8 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
-import DataList from "./DataList.svelte";
+  import DataList from "./DataList.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import Pane from "./Pane.svelte";
 
   let topics = $state<Topic[]>([]);
@@ -194,16 +194,10 @@ import DataList from "./DataList.svelte";
         />
         <span class="toggle-label">{selected.muted ? "Excluded" : "Included"}</span>
       </label>
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          onclick={() => (confirmingDelete = true)}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
+      <DeleteIconButton
+        onclick={() => (confirmingDelete = true)}
+        disabled={deleting}
+      />
     {/if}
   {/snippet}
 

@@ -11,7 +11,7 @@ import { StatusHub } from "../src/core/status/StatusHub.ts";
 import type { Workflow } from "../src/core/workflow/Workflow.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
-import { StubMessaging, stubWorkflow, testConfig } from "./support.ts";
+import { StubMessaging, stubWorkflow, testConfig, waitUntil } from "./support.ts";
 import type { ChatCommand } from "../src/capabilities/chat/ChatChannel.ts";
 
 const log = createLogger("test", { level: "error" });
@@ -64,15 +64,6 @@ function setup() {
   return { bus, jobs, workflows, messaging, scheduler, handler };
 }
 
-async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("condition not met in time");
-}
-
 describe("chat commands", () => {
   test("/help explains the commands", async () => {
     const { handler } = setup();
@@ -105,7 +96,7 @@ describe("chat commands", () => {
     const reply = await handler(command({ command: "start", args: "morning-report" }));
     expect(reply).toContain(`Started job "morning-report"`);
 
-    await waitFor(() => messaging.sent.length >= 1);
+    await waitUntil(() => messaging.sent.length >= 1);
     expect(messaging.sent[0]?.message.kind).toBe("text");
     if (messaging.sent[0]?.message.kind === "text") {
       expect(messaging.sent[0].message.text).toContain('Job "morning-report" finished successfully');
@@ -127,7 +118,7 @@ describe("chat commands", () => {
     const reply = await handler(command({ command: "start", args: "briefing" }));
     expect(reply).toContain('Started workflow "briefing"');
 
-    await waitFor(() => messaging.sent.length >= 1);
+    await waitUntil(() => messaging.sent.length >= 1);
     if (messaging.sent[0]?.message.kind === "text") {
       expect(messaging.sent[0].message.text).toContain('Workflow "briefing" finished successfully');
     }

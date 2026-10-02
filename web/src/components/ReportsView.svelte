@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Button, Icon } from "m3-svelte";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconLink from "@ktibow/iconset-material-symbols/link";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
@@ -14,6 +13,7 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import DataList from "./DataList.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
   import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
@@ -195,16 +195,7 @@
       <Button variant="tonal" iconType="left" onclick={() => (resendOpen = true)}>
         <Icon icon={iconSend} /> Re-send
       </Button>
-      <span class="danger">
-        <Button
-          variant="text"
-          iconType="full"
-          onclick={() => (confirmingDelete = true)}
-          disabled={deleting}
-        >
-          <Icon icon={iconDelete} />
-        </Button>
-      </span>
+      <DeleteIconButton onclick={() => (confirmingDelete = true)} disabled={deleting} />
     {/if}
   {/snippet}
 

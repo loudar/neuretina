@@ -11,6 +11,7 @@ import type {
 import { StepPipeline, type PipelineState } from "../src/core/workflow/StepPipeline.ts";
 import type { WorkflowRunContext } from "../src/core/workflow/Workflow.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
+import { waitUntil } from "./support.ts";
 
 const log = createLogger("test", { level: "error" });
 
@@ -51,14 +52,6 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
     resolve = settle;
   });
   return { promise, resolve };
-}
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for condition");
-    await new Promise((resolve) => setTimeout(resolve, 2));
-  }
 }
 
 describe("StepPipeline", () => {

@@ -2,7 +2,6 @@
   import { Button, Icon, Switch } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconCopy from "@ktibow/iconset-material-symbols/content-copy";
-  import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconEdit from "@ktibow/iconset-material-symbols/edit";
   import { commands } from "../lib/commands";
   import type { DeliveryChannelInfo } from "../lib/api";
@@ -15,6 +14,7 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
   import DataList from "./DataList.svelte";
+  import DeleteIconButton from "./DeleteIconButton.svelte";
   import DeliveryChannelDialog from "./DeliveryChannelDialog.svelte";
   import Pane from "./Pane.svelte";
 
@@ -162,19 +162,13 @@
             <Button variant="text" iconType="full" title="Edit channel" onclick={() => openEdit(channel)}>
               <Icon icon={iconEdit} />
             </Button>
-            <span class="danger">
-              <Button
-                variant="text"
-                iconType="full"
-                title="Delete channel"
-                onclick={() => {
-                  deleteTarget = channel;
-                  confirmingDelete = true;
-                }}
-              >
-                <Icon icon={iconDelete} />
-              </Button>
-            </span>
+            <DeleteIconButton
+              title="Delete channel"
+              onclick={() => {
+                deleteTarget = channel;
+                confirmingDelete = true;
+              }}
+            />
           </div>
         </article>
       {/snippet}
