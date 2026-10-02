@@ -248,6 +248,46 @@ describe("password-protected gateway", () => {
     expect((await fetch(`${base}/api/share/brief/unknown`)).status).toBe(404);
     expect((await fetch(`${base}/api/share/brief/unknown/audio`)).status).toBe(404);
   });
+
+  test("includes the timeline artifact and its events in a shared brief", async () => {
+    const event = kernel.events.upsert({
+      date: "2026-09-30",
+      title: "Rust 1.90 released",
+      description: "Faster builds.",
+      entities: ["Rust"],
+    });
+    const brief = kernel.briefs.create({
+      topics: ["Rust"],
+      markdown: "# Shared brief",
+      narration: "spoken",
+      sources: [],
+    });
+    const timeline = kernel.artifacts.create({
+      kind: "timeline",
+      contentType: "text/markdown",
+      content: "## Timeline",
+      metadata: { eventIds: [event.id] },
+      parentId: brief.artifactId,
+    });
+    kernel.artifacts.updateMetadata(brief.artifactId, { timelineArtifactId: timeline.id });
+    const token = kernel.briefs.shareToken(brief.id)!;
+
+    const response = await fetch(`${base}/api/share/brief/${token}`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      brief: {
+        timelineArtifactId?: string;
+        timeline?: {
+          artifact: { id: string; kind: string };
+          events: Array<{ id: string; title: string }>;
+        };
+      };
+    };
+    expect(body.brief.timelineArtifactId).toBe(timeline.id);
+    expect(body.brief.timeline?.artifact.id).toBe(timeline.id);
+    expect(body.brief.timeline?.artifact.kind).toBe("timeline");
+    expect(body.brief.timeline?.events.map((entry) => entry.id)).toEqual([event.id]);
+  });
 });
 
 describe("login rate limiting", () => {

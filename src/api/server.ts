@@ -8,6 +8,8 @@ import type { Logger } from "../core/logger.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { Brief } from "../domain/briefs/BriefRepository.ts";
+import type { Artifact } from "../domain/artifacts/ArtifactRepository.ts";
+import type { TimelineEvent } from "../domain/events/EventRepository.ts";
 
 export interface ApiDeps {
   config: AppConfig;
@@ -23,10 +25,17 @@ export interface ApiDeps {
   sharedBrief(token: string): SharedBriefResult | null;
 }
 
+/** The timeline artifact of a shared brief, with the events it renders. */
+export interface SharedTimeline {
+  artifact: Artifact;
+  events: TimelineEvent[];
+}
+
 /** A brief reachable through its anonymous share token. */
 export interface SharedBriefResult {
   brief: Brief;
   audio(): { audio: Uint8Array; mimeType: string } | null;
+  timeline(): SharedTimeline | null;
 }
 
 /** The per-user slice the HTTP layer needs. */
@@ -383,6 +392,7 @@ function handleSharedBrief(
   const found = deps.sharedBrief(request.params.token);
   if (!found) return jsonResponse({ ok: false, error: "Brief not found" }, 404);
   const { brief } = found;
+  const timeline = found.timeline();
   return jsonResponse({
     ok: true,
     brief: {
@@ -395,6 +405,8 @@ function handleSharedBrief(
       hasAudio: brief.hasAudio,
       audioMime: brief.audioMime,
       audioDurationMs: brief.audioDurationMs,
+      timelineArtifactId: brief.timelineArtifactId,
+      ...(timeline ? { timeline } : {}),
     },
   });
 }

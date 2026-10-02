@@ -124,7 +124,30 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     sharedBrief: (token) => {
       for (const runtime of runtimes.values()) {
         const brief = runtime.briefs.findByShareToken(token);
-        if (brief) return { brief, audio: () => runtime.briefs.getAudio(brief.id) };
+        if (!brief) continue;
+        return {
+          brief,
+          audio: () => runtime.briefs.getAudio(brief.id),
+          timeline: () => {
+            const artifactId = brief.timelineArtifactId;
+            if (!artifactId) return null;
+            try {
+              const artifact = runtime.artifacts.get(artifactId);
+              const ids = Array.isArray(artifact.metadata.eventIds)
+                ? artifact.metadata.eventIds.filter(
+                    (id): id is string => typeof id === "string" && id.length > 0,
+                  )
+                : [];
+              return {
+                artifact,
+                events: ids.length > 0 ? runtime.events.list({ ids }) : [],
+              };
+            } catch {
+              // The artifact was removed after the brief was linked.
+              return null;
+            }
+          },
+        };
       }
       return null;
     },

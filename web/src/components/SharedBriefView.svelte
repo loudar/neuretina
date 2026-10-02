@@ -2,6 +2,7 @@
   import { fetchSharedBrief, type SharedBrief } from "../lib/api";
   import { formatDateTime } from "../lib/format";
   import MarkdownView from "./MarkdownView.svelte";
+  import TimelineView from "./TimelineView.svelte";
 
   interface Props {
     /** Anonymous read-only token from the delivery link. */
@@ -53,6 +54,11 @@
   {:else if !brief}
     <p class="muted">Loading…</p>
   {:else}
+    {#if brief.timeline}
+      <div class="timeline">
+        <TimelineView artifact={brief.timeline.artifact} events={brief.timeline.events} />
+      </div>
+    {/if}
     {#if audioUrl}
       <audio controls src={audioUrl}></audio>
     {/if}
@@ -101,6 +107,12 @@
 
   audio {
     display: block;
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto var(--space-medium);
+  }
+
+  .timeline {
     width: 100%;
     max-width: 800px;
     margin: 0 auto var(--space-medium);

@@ -69,6 +69,12 @@ export interface BriefAudio {
   durationMs: number | null;
 }
 
+/** The timeline artifact of a shared brief, with the events it renders. */
+export interface SharedTimeline {
+  artifact: ArtifactInfo;
+  events: TimelineEvent[];
+}
+
 /** A brief fetched through its anonymous share token (no session needed). */
 export interface SharedBrief {
   id: string;
@@ -80,6 +86,9 @@ export interface SharedBrief {
   hasAudio: boolean;
   audioMime?: string;
   audioDurationMs?: number;
+  /** Timeline artifact composed of the brief's extracted events, when any. */
+  timelineArtifactId?: string;
+  timeline?: SharedTimeline;
 }
 
 /** A dated event extracted from a brief; the rows behind timeline artifacts. */

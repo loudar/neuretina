@@ -21,9 +21,11 @@
 
   interface Props {
     artifact: ArtifactInfo;
+    /** Preloaded events (anonymous share view); otherwise loaded over the session. */
+    events?: TimelineEvent[];
   }
 
-  let { artifact }: Props = $props();
+  let { artifact, events: preloadedEvents }: Props = $props();
 
   const tooltipPrefix = crypto.randomUUID();
 
@@ -31,9 +33,11 @@
   const MAX_STACKED = 2;
   const LABEL_LINE_REM = 1.35;
 
-  let events = $state<TimelineEvent[] | null>(null);
-  let loading = $state(true);
+  let fetchedEvents = $state<TimelineEvent[] | null>(null);
+  let loading = $state(preloadedEvents === undefined);
   let measuredWidth = $state(0);
+
+  const events = $derived(preloadedEvents ?? fetchedEvents);
 
   interface ActivePopover {
     key: string;
@@ -75,8 +79,12 @@
   );
 
   $effect(() => {
+    if (preloadedEvents !== undefined) {
+      loading = false;
+      return;
+    }
     const ids = eventIds;
-    events = null;
+    fetchedEvents = null;
     loading = true;
     if (ids.length === 0) {
       loading = false;
@@ -86,7 +94,7 @@
     void (async () => {
       try {
         const loaded = await commands.timeline.events(ids);
-        if (!cancelled) events = loaded;
+        if (!cancelled) fetchedEvents = loaded;
       } catch (error) {
         if (!cancelled) reportError(error);
       } finally {
