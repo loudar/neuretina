@@ -44,10 +44,14 @@ export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
 }
 
 /**
- * Places events on a 0..1 axis (earliest → latest) and merges ones that would
- * sit closer than `minGap` pixels into a single marker. A marker sits at the
- * average of its cluster, so two markers stay at least `minGap` apart along the
- * supplied axis length.
+ * Places events on a 0..1 axis and merges ones that would sit closer than
+ * `minGap` pixels into a single marker. A marker sits at the average of its
+ * cluster, so two markers stay at least `minGap` apart along the supplied axis
+ * length.
+ *
+ * Positions snap to the calendar day, on the same day-based domain the scale
+ * marks use, so every marker sits exactly under its date mark; the time only
+ * orders events within the day.
  */
 export function groupTimelineEvents(
   events: TimelineEvent[],
@@ -56,18 +60,14 @@ export function groupTimelineEvents(
   if (events.length === 0) return [];
 
   const sorted = sortTimelineEvents(events);
-  const times = sorted.map(eventTime);
-  const first = times[0] ?? 0;
-  const last = times[times.length - 1] ?? first;
-  const span = last - first;
+  const domain = timelineDomain(sorted);
 
   const length = options.length && options.length > 0 ? options.length : FALLBACK_LENGTH_PX;
   const gap = (options.minGap ?? MIN_MARKER_GAP_PX) / length;
 
   const clusters: Array<{ position: number; count: number; events: TimelineEvent[] }> = [];
-  for (let index = 0; index < sorted.length; index += 1) {
-    const event = sorted[index]!;
-    const position = span === 0 ? 0.5 : ((times[index] ?? first) - first) / span;
+  for (const event of sorted) {
+    const position = domainPosition(startOfDay(eventTime(event)), domain);
     const current = clusters[clusters.length - 1];
     if (current && position - current.position < gap) {
       current.count += 1;
@@ -83,6 +83,41 @@ export function groupTimelineEvents(
     position: cluster.position,
     events: cluster.events,
   }));
+}
+
+/** One marker slot on the horizontal axis; keeps its titles readable. */
+export const HORIZONTAL_SLOT_PX = 340;
+/** Title column inside a slot. */
+export const HORIZONTAL_LABEL_PX = 300;
+/** Room left of the first marker for its centered date label. */
+export const HORIZONTAL_EDGE_PX = 40;
+const HORIZONTAL_EDGE_END_PX = HORIZONTAL_LABEL_PX + 12;
+
+/** Usable axis length inside a horizontal content width, clear of the edges. */
+export function horizontalAxisLength(contentWidth: number): number {
+  return Math.max(0, contentWidth - HORIZONTAL_EDGE_PX - HORIZONTAL_EDGE_END_PX);
+}
+
+/**
+ * Content width for the horizontal axis: every scale mark gets a full slot, so
+ * markers stay readable; when there are few marks the box itself is the width.
+ * A content wider than the viewport is meant to be scrolled.
+ */
+export function horizontalTimelineWidth(markCount: number, viewportWidth: number): number {
+  const marks = Math.max(1, markCount);
+  return Math.max(
+    viewportWidth,
+    HORIZONTAL_EDGE_PX +
+      HORIZONTAL_EDGE_END_PX +
+      (marks - 1) * HORIZONTAL_SLOT_PX,
+  );
+}
+
+/** Maps a 0..1 time position onto a 0..1 horizontal content position. */
+export function horizontalPosition(position: number, contentWidth: number): number {
+  const axis = horizontalAxisLength(contentWidth);
+  if (contentWidth <= 0 || axis <= 0) return position;
+  return (HORIZONTAL_EDGE_PX + position * axis) / contentWidth;
 }
 
 /** One calendar day of the compact vertical layout, earliest event first. */

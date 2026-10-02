@@ -1,12 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { TimelineEvent } from "../web/src/lib/api.ts";
 import {
+  HORIZONTAL_SLOT_PX,
   MAX_SCALE_MARKS,
   MIN_MARKER_GAP_PX,
   formatEventDay,
   formatEventWhen,
   groupTimelineDays,
   groupTimelineEvents,
+  horizontalAxisLength,
+  horizontalPosition,
+  horizontalTimelineWidth,
   timelineScale,
 } from "../web/src/lib/timeline.ts";
 
@@ -69,6 +73,20 @@ describe("groupTimelineEvents", () => {
     expect(groups[1]?.events.map((entry) => entry.id)).toEqual(["d"]);
   });
 
+  test("keeps markers on the same day grid as the scale marks", () => {
+    const events = [
+      event({ id: "a", date: "2026-03-01", time: "09:00" }),
+      event({ id: "b", date: "2026-03-02", time: "12:00" }),
+      event({ id: "c", date: "2026-03-03", time: "18:00" }),
+    ];
+    const groups = groupTimelineEvents(events, { length: 3000, minGap: 1 });
+    const scale = timelineScale(events);
+
+    expect(groups.map((group) => group.position)).toEqual(
+      scale.marks.map((mark) => mark.position),
+    );
+  });
+
   test("keeps markers at least minGap pixels apart on dense timelines", () => {
     const length = 400;
     const events = Array.from({ length: 40 }, (_, index) =>
@@ -84,6 +102,26 @@ describe("groupTimelineEvents", () => {
     const ids = groups.flatMap((group) => group.events.map((entry) => entry.id));
     expect(ids).toHaveLength(events.length);
     expect(new Set(ids).size).toBe(events.length);
+  });
+});
+
+describe("horizontal layout", () => {
+  test("gives every scale mark a slot, falling back to the viewport width", () => {
+    expect(horizontalTimelineWidth(2, 900)).toBe(900);
+    const width = horizontalTimelineWidth(6, 900);
+    expect(width).toBeGreaterThan(900);
+    expect(width - horizontalTimelineWidth(5, 0)).toBe(HORIZONTAL_SLOT_PX);
+  });
+
+  test("keeps the first and last positions clear of the edges", () => {
+    const width = horizontalTimelineWidth(6, 900);
+    const first = horizontalPosition(0, width) * width;
+    const last = horizontalPosition(1, width) * width;
+    // Room for the centered date label on the left and the title column right.
+    expect(first).toBeGreaterThanOrEqual(30);
+    expect(width - last).toBeGreaterThanOrEqual(300);
+    expect(horizontalAxisLength(width)).toBeGreaterThan(0);
+    expect(horizontalPosition(0.5, 0)).toBe(0.5);
   });
 });
 
