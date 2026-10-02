@@ -6,10 +6,11 @@
   import type { ArtifactInfo, TimelineEvent } from "../lib/api";
   import { reportError } from "../lib/feedback";
   import {
+    formatEventDay,
     formatEventWhen,
+    groupTimelineDays,
     groupTimelineEvents,
     timelineScale,
-    type TimelineGroup,
   } from "../lib/timeline";
   import { timelinePrefs, type TimelineOrientation } from "../lib/timeline.svelte";
 
@@ -25,14 +26,12 @@
   const MAX_STACKED = 2;
   /** Keeps left-aligned titles of neighbouring markers from touching. */
   const HORIZONTAL_MARKER_GAP_PX = 168;
-  const VERTICAL_MARKER_GAP_PX = 88;
   const HORIZONTAL_LABEL_PX = 152;
   const LABEL_LINE_REM = 1.35;
 
   let events = $state<TimelineEvent[] | null>(null);
   let loading = $state(true);
   let measuredWidth = $state(0);
-  let measuredHeight = $state(0);
 
   const eventIds = $derived(
     Array.isArray(artifact.metadata.eventIds)
@@ -74,8 +73,13 @@
     more?: boolean;
   }
 
+  interface LabelGroup {
+    key: string;
+    events: TimelineEvent[];
+  }
+
   /** At most two titles per marker; anything beyond becomes one "+n more…" row. */
-  function labelEntries(group: TimelineGroup): LabelEntry[] {
+  function labelEntries(group: LabelGroup): LabelEntry[] {
     const entries: LabelEntry[] = group.events.slice(0, MAX_STACKED).map((event) => ({
       key: event.id,
       label: event.title,
@@ -93,41 +97,36 @@
     return entries;
   }
 
-  function labelLines(group: TimelineGroup): number {
+  function labelLines(group: LabelGroup): number {
     return Math.min(group.events.length, MAX_STACKED + 1);
   }
 
   const orientation = $derived(timelinePrefs.orientation);
-  const trackLength = $derived(orientation === "horizontal" ? measuredWidth : measuredHeight);
-  const markerGap = $derived(
-    orientation === "horizontal" ? HORIZONTAL_MARKER_GAP_PX : VERTICAL_MARKER_GAP_PX,
-  );
-  const groups = $derived(
-    groupTimelineEvents(events ?? [], { length: Math.max(0, trackLength), minGap: markerGap }),
+  const dayGroups = $derived(groupTimelineDays(events ?? []));
+  const horizontalGroups = $derived(
+    groupTimelineEvents(events ?? [], {
+      length: Math.max(0, measuredWidth),
+      minGap: HORIZONTAL_MARKER_GAP_PX,
+    }),
   );
   const scale = $derived(timelineScale(events ?? []));
   const maxLines = $derived(
-    groups.reduce((max, group) => Math.max(max, labelLines(group)), 1),
+    horizontalGroups.reduce((max, group) => Math.max(max, labelLines(group)), 1),
   );
 
-  /** Half of the tallest stacked block has to stay inside the track. */
-  const verticalEdge = $derived(4 + maxLines * 10);
-  const edgeStart = $derived(orientation === "horizontal" ? 6 : verticalEdge);
+  const edgeStart = 6;
   const edgeEnd = $derived(
     orientation === "horizontal"
-      ? Math.min(trackLength * 0.5, HORIZONTAL_LABEL_PX + 8)
-      : verticalEdge,
+      ? Math.min(measuredWidth * 0.5, HORIZONTAL_LABEL_PX + 8)
+      : 0,
   );
-  const axisLength = $derived(Math.max(0, trackLength - edgeStart - edgeEnd));
+  const axisLength = $derived(Math.max(0, measuredWidth - edgeStart - edgeEnd));
   const horizontalHeight = $derived(2.95 + maxLines * LABEL_LINE_REM);
-  const verticalHeight = $derived(
-    Math.min(900, Math.max(320, (events?.length ?? 0) * 44 + 96)),
-  );
 
-  /** Maps a 0..1 position onto the track, clear of the edges. */
+  /** Maps a 0..1 position onto the horizontal track, clear of the edges. */
   function offset(position: number): string {
-    if (trackLength <= 0 || axisLength <= 0) return `${(position * 100).toFixed(3)}%`;
-    return `${(((edgeStart + position * axisLength) / trackLength) * 100).toFixed(3)}%`;
+    if (measuredWidth <= 0 || axisLength <= 0) return `${(position * 100).toFixed(3)}%`;
+    return `${(((edgeStart + position * axisLength) / measuredWidth) * 100).toFixed(3)}%`;
   }
 
   function setOrientation(next: TimelineOrientation): void {
@@ -151,6 +150,26 @@
         {/each}
       </span>
     {/if}
+  </span>
+{/snippet}
+
+{#snippet labelList(entries: LabelEntry[])}
+  <span class="labels">
+    {#each entries as entry (entry.key)}
+      <button
+        type="button"
+        class="timeline-anchor"
+        class:more={entry.more}
+        aria-describedby={`${tooltipPrefix}-${entry.key}`}
+      >
+        {entry.label}
+      </button>
+      <span class="timeline-popover" role="tooltip" id={`${tooltipPrefix}-${entry.key}`}>
+        {#each entry.events as event (event.id)}
+          {@render eventDetails(event)}
+        {/each}
+      </span>
+    {/each}
   </span>
 {/snippet}
 
@@ -186,16 +205,13 @@
 
   {#if loading}
     <p class="muted">Loading timeline…</p>
-  {:else if groups.length === 0}
+  {:else if dayGroups.length === 0}
     <p class="muted">No events in this timeline.</p>
-  {:else}
+  {:else if orientation === "horizontal"}
     <div
-      class="track {orientation}"
-      style:height={orientation === "horizontal"
-        ? `${horizontalHeight.toFixed(2)}rem`
-        : `${verticalHeight}px`}
+      class="track horizontal"
+      style:height={`${horizontalHeight.toFixed(2)}rem`}
       bind:clientWidth={measuredWidth}
-      bind:clientHeight={measuredHeight}
     >
       <span class="axis" aria-hidden="true"></span>
 
@@ -206,34 +222,21 @@
         </span>
       {/each}
 
-      {#each groups as group, index (group.key)}
-        <div
-          class="marker"
-          style:--at={offset(group.position)}
-          style:--lines={labelLines(group)}
-        >
+      {#each horizontalGroups as group (group.key)}
+        <div class="marker" style:--at={offset(group.position)}>
           <span class="tick" class:multi={group.events.length > 1} aria-hidden="true"></span>
-          <span class="labels">
-            {#each labelEntries(group) as entry, entryIndex (entry.key)}
-              <button
-                type="button"
-                class="timeline-anchor"
-                class:more={entry.more}
-                aria-describedby={`${tooltipPrefix}-${index}-${entryIndex}`}
-              >
-                {entry.label}
-              </button>
-              <span
-                class="timeline-popover"
-                role="tooltip"
-                id={`${tooltipPrefix}-${index}-${entryIndex}`}
-              >
-                {#each entry.events as event (event.id)}
-                  {@render eventDetails(event)}
-                {/each}
-              </span>
-            {/each}
-          </span>
+          {@render labelList(labelEntries(group))}
+        </div>
+      {/each}
+    </div>
+  {:else}
+    <div class="track vertical">
+      <span class="axis" aria-hidden="true"></span>
+      {#each dayGroups as day (day.key)}
+        <div class="day">
+          <span class="day-when">{formatEventDay(day.events[0]!)}</span>
+          <span class="day-tick" class:multi={day.events.length > 1} aria-hidden="true"></span>
+          {@render labelList(labelEntries(day))}
         </div>
       {/each}
     </div>
@@ -322,6 +325,53 @@
     transform: translateX(-50%);
   }
 
+  /* Vertical layout: days stack in a stream, so the shortest distance between
+     two events is the flex gap below. */
+  .track.vertical {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-small);
+  }
+
+  .day {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .day-when {
+    flex: none;
+    box-sizing: border-box;
+    width: 4.5rem;
+    padding-right: 0.75rem;
+    color: var(--m3c-on-surface-variant);
+    font-size: var(--font-small);
+    line-height: calc(var(--font-medium) * 1.4);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .day-tick {
+    position: absolute;
+    left: 4.5rem;
+    top: calc(var(--font-medium) * 0.7);
+    width: 1.25rem;
+    height: 2px;
+    transform: translate(-0.35rem, -50%);
+    background-color: var(--m3c-outline);
+  }
+
+  .day-tick.multi {
+    background-color: var(--m3c-primary);
+  }
+
+  .day .labels {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-left: 1.15rem;
+  }
+
   /* Scale markings sit on the side opposite the event titles. */
   .scale {
     position: absolute;
@@ -351,30 +401,6 @@
     transform: translateX(-50%);
   }
 
-  .track.vertical .scale {
-    top: var(--at);
-    left: 0;
-    width: 4.5rem;
-    height: 0;
-  }
-
-  .track.vertical .scale-tick {
-    position: absolute;
-    right: -0.35rem;
-    top: 0;
-    width: 0.6rem;
-    height: 1px;
-    transform: translateY(-50%);
-    background-color: var(--m3c-outline-variant);
-  }
-
-  .track.vertical .scale-label {
-    position: absolute;
-    right: 0.75rem;
-    top: 0;
-    transform: translateY(-50%);
-  }
-
   .scale-label {
     white-space: nowrap;
     color: var(--m3c-on-surface-variant);
@@ -395,13 +421,6 @@
     height: 0;
   }
 
-  .track.vertical .marker {
-    top: var(--at);
-    left: 4.5rem;
-    right: 0;
-    height: 0;
-  }
-
   .tick {
     position: absolute;
     background-color: var(--m3c-outline);
@@ -415,21 +434,12 @@
     transform: translateX(-50%);
   }
 
-  .track.vertical .tick {
-    left: -0.35rem;
-    top: 0;
-    width: 1.25rem;
-    height: 2px;
-    transform: translateY(-50%);
-  }
-
   .tick.multi {
     background-color: var(--m3c-primary);
   }
 
   /* Titles: left-aligned, stacked under each other, starting at the tick. */
   .labels {
-    position: absolute;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -437,14 +447,9 @@
   }
 
   .track.horizontal .labels {
+    position: absolute;
     top: 0.55rem;
     width: 9.5rem;
-  }
-
-  .track.vertical .labels {
-    left: 1.15rem;
-    top: calc(var(--lines, 1) * -0.62rem);
-    max-width: calc(100% - 1.35rem);
   }
 
   .timeline-anchor {

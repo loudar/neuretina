@@ -3,7 +3,9 @@ import type { TimelineEvent } from "../web/src/lib/api.ts";
 import {
   MAX_SCALE_MARKS,
   MIN_MARKER_GAP_PX,
+  formatEventDay,
   formatEventWhen,
+  groupTimelineDays,
   groupTimelineEvents,
   timelineScale,
 } from "../web/src/lib/timeline.ts";
@@ -82,6 +84,30 @@ describe("groupTimelineEvents", () => {
     const ids = groups.flatMap((group) => group.events.map((entry) => entry.id));
     expect(ids).toHaveLength(events.length);
     expect(new Set(ids).size).toBe(events.length);
+  });
+});
+
+describe("groupTimelineDays", () => {
+  test("groups by calendar day, oldest first and time-ordered within a day", () => {
+    const days = groupTimelineDays([
+      event({ id: "late", date: "2026-03-02" }),
+      event({ id: "evening", date: "2026-03-01", time: "21:00" }),
+      event({ id: "morning", date: "2026-03-01", time: "09:00" }),
+      event({ id: "other", date: "2026-03-02" }),
+    ]);
+
+    expect(days.map((day) => day.key)).toEqual(["2026-03-01", "2026-03-02"]);
+    expect(days[0]?.events.map((entry) => entry.id)).toEqual(["morning", "evening"]);
+    expect(days[1]?.events.map((entry) => entry.id)).toEqual(["late", "other"]);
+    expect(groupTimelineDays([])).toEqual([]);
+  });
+});
+
+describe("formatEventDay", () => {
+  test("shows the day without the year", () => {
+    const label = formatEventDay(event({ id: "a", date: "2026-03-12" }));
+    expect(label.length).toBeGreaterThan(0);
+    expect(label).not.toContain("2026");
   });
 });
 

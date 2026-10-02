@@ -36,6 +36,13 @@ export function formatEventWhen(event: TimelineEvent): string {
   return event.time ? `${text} · ${event.time}` : text;
 }
 
+/** Chronological order; events without a time sit at the start of their day. */
+export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
+  return [...events].sort(
+    (a, b) => eventTime(a) - eventTime(b) || a.id.localeCompare(b.id),
+  );
+}
+
 /**
  * Places events on a 0..1 axis (earliest → latest) and merges ones that would
  * sit closer than `minGap` pixels into a single marker. A marker sits at the
@@ -48,9 +55,7 @@ export function groupTimelineEvents(
 ): TimelineGroup[] {
   if (events.length === 0) return [];
 
-  const sorted = [...events].sort(
-    (a, b) => eventTime(a) - eventTime(b) || a.id.localeCompare(b.id),
-  );
+  const sorted = sortTimelineEvents(events);
   const times = sorted.map(eventTime);
   const first = times[0] ?? 0;
   const last = times[times.length - 1] ?? first;
@@ -78,6 +83,32 @@ export function groupTimelineEvents(
     position: cluster.position,
     events: cluster.events,
   }));
+}
+
+/** One calendar day of the compact vertical layout, earliest event first. */
+export interface TimelineDay {
+  key: string;
+  events: TimelineEvent[];
+}
+
+/**
+ * Groups events into calendar days. The vertical layout stacks these days in
+ * order with a fixed `--space-small` gap instead of stretching them apart by
+ * their distance in time, so a handful of days never leaves empty stretches.
+ */
+export function groupTimelineDays(events: TimelineEvent[]): TimelineDay[] {
+  const days: TimelineDay[] = [];
+  for (const event of sortTimelineEvents(events)) {
+    const current = days.at(-1);
+    if (current && current.key === event.date) current.events.push(event);
+    else days.push({ key: event.date, events: [event] });
+  }
+  return days;
+}
+
+/** "28 Sep" for the day rail of the vertical layout. */
+export function formatEventDay(event: TimelineEvent): string {
+  return formatDay(eventTime(event));
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
