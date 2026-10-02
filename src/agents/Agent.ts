@@ -3,7 +3,7 @@ import type { EventBus } from "../core/events/EventBus.ts";
 import type { LlmMessage, LlmProvider, LlmUsage } from "../capabilities/llm/LlmProvider.ts";
 import { errorMessage } from "../core/errors.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import { toolInputDetail, toolResultDetail } from "../core/status/detail.ts";
+import { invokeTool } from "./toolInvocation.ts";
 import type { Tool } from "./Tool.ts";
 
 export interface AgentOptions {
@@ -236,73 +236,27 @@ export class Agent {
     args: Record<string, unknown>,
     context: AgentContext,
   ): Promise<AgentToolInvocation> {
-    const { bus, logger, correlationId } = context;
-    const source = `agent:${this.name}`;
-    const started = Date.now();
-
-    bus.publish(
-      "agent.tool.invoked",
-      { agent: this.name, correlationId, tool: name, args },
-      { source, correlationId },
-    );
-
-    // The activity feed keeps every tool call (inputs, code, outputs) as a
-    // child span of the step, so it stays readable after the run finished.
-    const span = context.statuses?.begin(`tool:${crypto.randomUUID()}`, name, {
-      correlationId,
-      ...(context.statusId ? { parentId: context.statusId } : {}),
-      kind: "tool",
-      detail: toolInputDetail(args),
+    const outcome = await invokeTool(this.tools.get(name), name, args, {
+      agent: this.name,
+      source: `agent:${this.name}`,
+      correlationId: context.correlationId,
+      bus: context.bus,
+      logger: context.logger,
+      ...(context.statuses ? { statuses: context.statuses } : {}),
+      ...(context.statusId ? { statusId: context.statusId } : {}),
     });
 
-    const tool = this.tools.get(name);
-    if (!tool) {
-      const error = `Unknown tool "${name}"`;
-      span?.failed(`${name} failed`, toolResultDetail(args, undefined, error));
-      bus.publish(
-        "agent.tool.failed",
-        { agent: this.name, correlationId, tool: name, error },
-        { source, correlationId },
-      );
-      return { tool: name, args, error, durationMs: 0 };
+    if (outcome.error !== undefined) {
+      context.logger.warn("tool failed", { tool: name, error: outcome.error });
     }
 
-    try {
-      const result = await tool.execute(args, {
-        correlationId,
-        bus,
-        logger,
-        agent: this.name,
-        ...(context.statuses ? { statuses: context.statuses } : {}),
-        ...(span ? { statusId: span.id } : {}),
-      });
-      const durationMs = Date.now() - started;
-      const summary = summarizeResult(result);
-      span?.done(name, toolResultDetail(args, result));
-      bus.publish(
-        "agent.tool.succeeded",
-        {
-          agent: this.name,
-          correlationId,
-          tool: name,
-          durationMs,
-          summary,
-        },
-        { source, correlationId },
-      );
-      return { tool: name, args, result, durationMs };
-    } catch (error) {
-      const durationMs = Date.now() - started;
-      const message = errorMessage(error);
-      span?.failed(`${name} failed`, toolResultDetail(args, undefined, message));
-      bus.publish(
-        "agent.tool.failed",
-        { agent: this.name, correlationId, tool: name, error: message },
-        { source, correlationId },
-      );
-      logger.warn("tool failed", { tool: name, error: message });
-      return { tool: name, args, error: message, durationMs };
-    }
+    return {
+      tool: name,
+      args,
+      ...(outcome.result !== undefined ? { result: outcome.result } : {}),
+      ...(outcome.error !== undefined ? { error: outcome.error } : {}),
+      durationMs: outcome.durationMs,
+    };
   }
 }
 
@@ -320,11 +274,4 @@ function serializeToolResult(invocation: AgentToolInvocation): string {
   return `${text.slice(0, MAX_TOOL_RESULT_CHARS)}…[truncated]`;
 }
 
-function summarizeResult(result: unknown): string {
-  if (result && typeof result === "object" && "results" in result) {
-    const results = (result as { results: unknown[] }).results;
-    return `${results.length} results`;
-  }
-  const text = JSON.stringify(result ?? null);
-  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
-}
+

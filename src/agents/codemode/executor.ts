@@ -1,6 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { errorMessage } from "../../core/errors.ts";
-import { toolInputDetail, toolResultDetail } from "../../core/status/detail.ts";
+import { invokeTool } from "../toolInvocation.ts";
 import type {
   CodeModeExecutor,
   CodeModeJob,
@@ -89,6 +88,16 @@ async function runInSubprocess(
       }
     };
 
+    const invocation = {
+      agent: job.context.agent ?? "codemode",
+      source: job.context.agent ? `agent:${job.context.agent}` : "codemode",
+      correlationId: job.context.correlationId,
+      bus: job.context.bus,
+      logger: job.context.logger,
+      ...(job.context.statuses ? { statuses: job.context.statuses } : {}),
+      ...(job.context.statusId ? { statusId: job.context.statusId } : {}),
+    };
+
     const handleCall = async (message: {
       id: number;
       name: string;
@@ -96,7 +105,8 @@ async function runInSubprocess(
     }) => {
       const tool = job.tools.get(message.name);
       if (!tool) {
-        send({ type: "result", id: message.id, error: `Unknown tool "${message.name}"` });
+        const outcome = await invokeTool(undefined, message.name, message.args, invocation);
+        send({ type: "result", id: message.id, error: outcome.error });
         resetIdle();
         return;
       }
@@ -113,67 +123,30 @@ async function runInSubprocess(
       activeCalls += 1;
       clearTimeout(idleTimer);
 
-      const agent = job.context.agent ?? "codemode";
-      const source = job.context.agent ? `agent:${job.context.agent}` : "codemode";
-      const started = Date.now();
-      // Nested under the run_code span, so the feed shows the program's calls
-      // with their inputs and outputs as part of the step.
-      const span = job.context.statuses?.begin(`tool:${crypto.randomUUID()}`, message.name, {
-        correlationId: job.context.correlationId,
-        ...(job.context.statusId ? { parentId: job.context.statusId } : {}),
-        kind: "tool",
-        detail: toolInputDetail(message.args),
-      });
-      job.context.bus.publish(
-        "agent.tool.invoked",
-        {
-          agent,
-          correlationId: job.context.correlationId,
-          tool: message.name,
-          args: message.args,
-        },
-        { source, correlationId: job.context.correlationId },
-      );
-
       try {
-        const result = await tool.execute(message.args, job.context);
+        const outcome = await invokeTool(tool, message.name, message.args, invocation);
         if (settled) return;
-        const durationMs = Date.now() - started;
-        calls.push({ tool: message.name, args: message.args, result, durationMs });
-        span?.done(message.name, toolResultDetail(message.args, result));
-        job.context.bus.publish(
-          "agent.tool.succeeded",
-          {
-            agent,
-            correlationId: job.context.correlationId,
+        if (outcome.error !== undefined) {
+          calls.push({
             tool: message.name,
-            durationMs,
-            summary: summarize(result),
-          },
-          { source, correlationId: job.context.correlationId },
-        );
-        send({ type: "result", id: message.id, result });
-      } catch (error) {
-        if (settled) return;
-        const durationMs = Date.now() - started;
-        const message2 = errorMessage(error);
-        calls.push({ tool: message.name, args: message.args, error: message2, durationMs });
-        span?.failed(`${message.name} failed`, toolResultDetail(message.args, undefined, message2));
-        job.context.bus.publish(
-          "agent.tool.failed",
-          {
-            agent,
-            correlationId: job.context.correlationId,
+            args: message.args,
+            error: outcome.error,
+            durationMs: outcome.durationMs,
+          });
+          job.context.logger.warn("code-mode tool failed", {
             tool: message.name,
-            error: message2,
-          },
-          { source, correlationId: job.context.correlationId },
-        );
-        job.context.logger.warn("code-mode tool failed", {
-          tool: message.name,
-          error: message2,
-        });
-        send({ type: "result", id: message.id, error: message2 });
+            error: outcome.error,
+          });
+          send({ type: "result", id: message.id, error: outcome.error });
+        } else {
+          calls.push({
+            tool: message.name,
+            args: message.args,
+            result: outcome.result,
+            durationMs: outcome.durationMs,
+          });
+          send({ type: "result", id: message.id, result: outcome.result });
+        }
       } finally {
         activeCalls -= 1;
         resetIdle();
@@ -263,13 +236,4 @@ function sandboxEnv(): Record<string, string> {
     if (value !== undefined) env[key] = value;
   }
   return env;
-}
-
-function summarize(result: unknown): string {
-  if (result && typeof result === "object" && "results" in result) {
-    const results = (result as { results?: unknown[] }).results;
-    return `${Array.isArray(results) ? results.length : 0} results`;
-  }
-  const text = JSON.stringify(result ?? null);
-  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
 }
