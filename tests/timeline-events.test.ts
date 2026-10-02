@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createLogger } from "../src/core/logger.ts";
 import { levenshteinDistance, textSimilarity, tokenSimilarity } from "../src/core/text.ts";
 import { EventRepository, type TimelineEvent } from "../src/domain/events/EventRepository.ts";
-import { EventExtractor, findCandidates, shortenTitle } from "../src/workflows/EventExtraction.ts";
+import {
+  EventExtractor,
+  findCandidates,
+  findDuplicatePairs,
+  shortenTitle,
+} from "../src/workflows/EventExtraction.ts";
 import {
   renderTimelineHtml,
   renderTimelineMarkdown,
@@ -144,6 +149,76 @@ describe("duplicate matching", () => {
     expect(candidates("2026-09-29", "OpenAI unveils Decisions API at Dev Day")).toContain("devday");
     // A different company's news on the same day is not a candidate.
     expect(candidates("2026-09-29", "Nvidia ships containment software")).not.toContain("devday");
+  });
+});
+
+describe("existing event dedup", () => {
+  test("finds reworded duplicates across nearby days", () => {
+    const a = event({
+      id: "a",
+      date: "2026-09-29",
+      title: "Google challenges EU DMA orders in court",
+    });
+    const b = event({
+      id: "b",
+      date: "2026-09-30",
+      title: "Google appeals two EU Digital Markets Act orders",
+    });
+
+    const pairs = findDuplicatePairs([a, b]);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0]?.keep.id).toBe("a");
+    expect(pairs[0]?.drop.id).toBe("b");
+  });
+
+  test("merges stored duplicates through the review model", async () => {
+    const events = new EventRepository(new SqliteDatabase(":memory:"));
+    const older = events.upsert({
+      date: "2026-09-29",
+      title: "Google challenges EU DMA orders in court",
+      description: "Old note.",
+      tags: ["regulation"],
+      entities: ["Google"],
+    });
+    const newer = events.upsert({
+      date: "2026-09-30",
+      title: "Google appeals two EU Digital Markets Act orders",
+      description: "Newer detail.",
+      tags: ["markets"],
+      entities: ["EU"],
+    });
+
+    const llm = stubLlm((request) => {
+      const system = request.messages[0]?.content ?? "";
+      if (system.includes("extract dated events")) {
+        return completion(JSON.stringify({ events: [] }));
+      }
+      if (system.includes("You review a newly suggested event")) {
+        return completion(
+          JSON.stringify({
+            action: "update",
+            id: older.id,
+            date: "2026-09-29",
+            title: "Google appeals DMA orders",
+            description: "Merged detail.",
+            entities: ["Google", "EU"],
+          }),
+        );
+      }
+      return completion("{}");
+    });
+
+    const extractor = new EventExtractor({ llm, events, logger: log });
+    const result = await extractor.extract({ report: "# Report", sources: [] });
+
+    expect(result.merged).toBe(1);
+    expect(events.count()).toBe(1);
+    const kept = events.get(older.id);
+    expect(kept.title).toBe("Google appeals DMA orders");
+    expect(kept.description).toBe("Merged detail.");
+    expect(kept.tags).toEqual(["regulation", "markets"]);
+    expect(kept.entities).toEqual(["Google", "EU"]);
+    expect(() => events.get(newer.id)).toThrow();
   });
 });
 

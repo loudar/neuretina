@@ -855,15 +855,22 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         report: text.text,
         sources: finalSources(ctx),
       });
-      if (result.events.length === 0) {
+      const notes = [
+        result.newTags.length > 0 ? `${result.newTags.length} new tag(s)` : "",
+        result.merged > 0 ? `${result.merged} duplicate(s) merged` : "",
+      ].filter(Boolean);
+      if (result.events.length === 0 && result.merged === 0) {
         span?.done("No dated events found");
         return { outputs: {} };
       }
       span?.done(
         `Events ready (${result.events.length} event(s)${
-          result.newTags.length > 0 ? `, ${result.newTags.length} new tag(s)` : ""
+          notes.length > 0 ? `, ${notes.join(", ")}` : ""
         })`,
       );
+      // Only new/updated events rebuild this report's timeline; merges clean
+      // the stored events, which every timeline renders from.
+      if (result.events.length === 0) return { outputs: {} };
       return {
         outputs: {
           events: { ids: result.events.map((event) => event.id), newTags: result.newTags },

@@ -13,6 +13,11 @@ import type { EventStore, TimelineEvent } from "../domain/events/EventRepository
 const DUPLICATE_THRESHOLD = 0.6;
 /** On the same day a looser title match is enough to review. */
 const SAME_DAY_THRESHOLD = 0.45;
+/** Close days use a looser match than unrelated dates (reworded coverage). */
+const NEAR_DAY_THRESHOLD = 0.5;
+const NEAR_DAY_WINDOW_DAYS = 2;
+/** Most existing duplicate pairs one extraction may review; bounds LLM cost. */
+const MAX_DEDUPE_REVIEWS = 8;
 /** Confidence a selected tag must reach to be applied. */
 const TAG_CONFIDENCE = 0.5;
 /** Most events one report may contribute. */
@@ -40,6 +45,8 @@ export interface ExtractionResult {
   events: TimelineEvent[];
   /** Tags invented during this extraction. */
   newTags: string[];
+  /** Stored duplicates that were merged away during this extraction. */
+  merged: number;
 }
 
 export interface EventExtractorDeps {
@@ -91,8 +98,6 @@ export class EventExtractor {
     sources: ReportSource[];
   }): Promise<ExtractionResult> {
     const suggestions = await this.suggest(input);
-    if (suggestions.length === 0) return { events: [], newTags: [] };
-
     const known = this.deps.events.list({ limit: 500 });
     const tagOptions = this.deps.events.tags();
     const events: TimelineEvent[] = [];
@@ -120,7 +125,65 @@ export class EventExtractor {
       else known.unshift(event);
     }
 
-    return { events, newTags };
+    // Duplicates that slipped through earlier runs (or were extracted before
+    // this pass existed) are merged here, so timelines stay readable.
+    const merged = await this.dedupeExisting();
+
+    return { events, newTags, merged };
+  }
+
+  /**
+   * Reviews and merges duplicates among the stored events themselves. Each
+   * event takes part in at most one merge per run, and the number of LLM
+   * reviews is capped. Returns how many duplicates were merged away.
+   */
+  private async dedupeExisting(): Promise<number> {
+    const pairs = findDuplicatePairs(this.deps.events.list({ limit: 500 })).slice(
+      0,
+      MAX_DEDUPE_REVIEWS,
+    );
+    let merged = 0;
+
+    for (const { keep, drop, score } of pairs) {
+      // An earlier merge may already have removed one of the pair.
+      if (!this.exists(keep.id) || !this.exists(drop.id)) continue;
+      const reviewed = await this.review(
+        {
+          date: drop.date,
+          time: drop.time,
+          entities: drop.entities,
+          title: drop.title,
+          description: drop.description,
+        },
+        [{ event: keep, score }],
+      );
+      if (!reviewed) continue;
+
+      const target = this.deps.events.get(reviewed.id);
+      this.deps.events.upsert({
+        id: target.id,
+        date: reviewed.date,
+        time: reviewed.time,
+        entities: [...target.entities, ...reviewed.entities, ...drop.entities],
+        tags: mergeTags(target.tags, drop.tags),
+        title: reviewed.title,
+        description: reviewed.description,
+        sourceReportId: target.sourceReportId ?? drop.sourceReportId,
+      });
+      this.deps.events.remove(drop.id);
+      merged += 1;
+    }
+
+    return merged;
+  }
+
+  private exists(id: string): boolean {
+    try {
+      this.deps.events.get(id);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** One LLM call: dated events learned from the report and its sources. */
@@ -363,16 +426,80 @@ export function findCandidates(
 ): Candidate[] {
   const candidates: Candidate[] = [];
   for (const event of known) {
-    const score = Math.max(
-      textSimilarity(suggestion.title, event.title),
-      tokenSimilarity(suggestion.title, event.title),
-    );
-    const sameDay = event.date === suggestion.date;
-    if (score >= DUPLICATE_THRESHOLD || (sameDay && score >= SAME_DAY_THRESHOLD)) {
+    const score = titleScore(suggestion.title, event.title);
+    const days = daysApart(event.date, suggestion.date);
+    if (
+      score >= DUPLICATE_THRESHOLD ||
+      (days === 0 && score >= SAME_DAY_THRESHOLD) ||
+      (days <= NEAR_DAY_WINDOW_DAYS && score >= NEAR_DAY_THRESHOLD)
+    ) {
       candidates.push({ event, score });
     }
   }
   return candidates.sort((a, b) => b.score - a.score).slice(0, 3);
+}
+
+export interface DuplicatePair {
+  /** Older event kept (its id survives in timelines and shares). */
+  keep: TimelineEvent;
+  /** Later event merged into `keep` and removed. */
+  drop: TimelineEvent;
+  score: number;
+}
+
+/**
+ * Potential duplicate pairs among the stored events themselves, strongest
+ * first. Each event appears in at most one pair so one pass cannot chain
+ * merges; the caller reviews them with the LLM.
+ */
+export function findDuplicatePairs(events: TimelineEvent[]): DuplicatePair[] {
+  const pairs: DuplicatePair[] = [];
+  for (let i = 0; i < events.length; i += 1) {
+    for (let j = i + 1; j < events.length; j += 1) {
+      const a = events[i]!;
+      const b = events[j]!;
+      const score = titleScore(a.title, b.title);
+      const days = daysApart(a.date, b.date);
+      if (
+        score < DUPLICATE_THRESHOLD &&
+        !(days === 0 && score >= SAME_DAY_THRESHOLD) &&
+        !(days <= NEAR_DAY_WINDOW_DAYS && score >= NEAR_DAY_THRESHOLD)
+      ) {
+        continue;
+      }
+      const [keep, drop] = compareEvents(a, b) <= 0 ? [a, b] : [b, a];
+      pairs.push({ keep, drop, score });
+    }
+  }
+
+  pairs.sort((a, b) => b.score - a.score);
+  const used = new Set<string>();
+  const picked: DuplicatePair[] = [];
+  for (const pair of pairs) {
+    if (used.has(pair.keep.id) || used.has(pair.drop.id)) continue;
+    used.add(pair.keep.id);
+    used.add(pair.drop.id);
+    picked.push(pair);
+  }
+  return picked;
+}
+
+function titleScore(a: string, b: string): number {
+  return Math.max(textSimilarity(a, b), tokenSimilarity(a, b));
+}
+
+/** Chronological tie-break: earlier date wins, then earlier creation. */
+function compareEvents(a: TimelineEvent, b: TimelineEvent): number {
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+  return a.id.localeCompare(b.id);
+}
+
+function daysApart(a: string, b: string): number {
+  const left = Date.parse(a);
+  const right = Date.parse(b);
+  if (Number.isNaN(left) || Number.isNaN(right)) return Number.POSITIVE_INFINITY;
+  return Math.abs(left - right) / 86_400_000;
 }
 
 /**
@@ -463,6 +590,8 @@ const REVIEW_PROMPT = `You review a newly suggested event against existing store
 Decide:
 - "update": the suggestion and a candidate describe the same real-world happening, even when worded differently or when only one of them carries a detail (e.g. same company, body, product or decision). Return that candidate's id and the merged fields, preferring the most specific date/time and the most complete description.
 - "add": a genuinely different happening, even if it is related, by the same company, or about the same product line. Sharing a company or a model family is not enough.
+
+Reworded coverage of one happening is still one event: "Google challenges EU DMA orders in court", "Google appeals two EU Digital Markets Act orders" and "Google asks EU court to suspend DMA search-data order" all describe the same challenge — update.
 
 Always merge the title down to 4-5 words (never more than 6), the sharpest shared phrasing, e.g. "Google appeals DMA orders", "Anthropic releases Sonnet 5.5".
 
