@@ -69,6 +69,7 @@ import {
   asOptionalRecord,
   asRecord,
   clampNumber,
+  idOf,
   optionalString,
   publish,
   publishDeliveryUpdated,
@@ -275,7 +276,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("topic.update", (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
     const patch: { name?: string; description?: string; muted?: boolean } = {};
 
     if (record.name !== undefined) patch.name = requireString(record, "name");
@@ -298,7 +299,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("topic.delete", (payload, context) => {
-    const topic = topics.remove(requireString(asRecord(payload), "id"));
+    const topic = topics.remove(idOf(payload));
     publish(bus, "topic.deleted", { id: topic.id, name: topic.name }, context);
     return { ok: true };
   });
@@ -329,7 +330,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("job.update", (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
 
     const patch: UpdateJobInput = {};
     if (record.name !== undefined) patch.name = requireString(record, "name");
@@ -351,14 +352,14 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("job.delete", (payload, context) => {
-    const job = jobs.remove(requireString(asRecord(payload), "id"));
+    const job = jobs.remove(idOf(payload));
     scheduler.unregister(job.id);
     publish(bus, "job.deleted", { id: job.id, name: job.name }, context);
     return { ok: true };
   });
 
   router.register("job.run", (payload) => {
-    const job = jobs.get(requireString(asRecord(payload), "id"));
+    const job = jobs.get(idOf(payload));
     const runId = crypto.randomUUID();
     // Failures are recorded as job.failed events by the scheduler.
     void scheduler.runNow(job, runId).catch(() => undefined);
@@ -401,7 +402,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("workflow.run.get", (payload) => {
-    const run = runs.get(requireString(asRecord(payload), "id"));
+    const run = runs.get(idOf(payload));
     return {
       ...run,
       artifacts: artifacts.list({ correlationId: run.id, limit: 100 }),
@@ -429,7 +430,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   // the run and every artifact it produced so far are deleted. The response
   // returns immediately; completion shows up as a `workflow.deleted` event.
   router.register("workflow.run.cancel", (payload, context) => {
-    const id = requireString(asRecord(payload), "id");
+    const id = idOf(payload);
     const run = runs.get(id);
 
     void runner
@@ -496,7 +497,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("workflow.user.update", (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
 
     // No row yet: updating a registered (built-in) workflow under its own id
     // starts customizing it, so the UI needs no separate create call. The id
@@ -535,7 +536,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("workflow.user.remove", (payload, context) => {
-    const id = requireString(asRecord(payload), "id");
+    const id = idOf(payload);
 
     // A core workflow survives losing its customization: scheduled jobs and
     // delivery channels reference the workflow itself, not the name/topics
@@ -565,16 +566,13 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return reports.list(limit);
   });
 
-  router.register("report.get", (payload) => {
-    const record = asRecord(payload);
-    return reports.get(requireString(record, "id"));
-  });
+  router.register("report.get", (payload) => reports.get(idOf(payload)));
 
   // The anonymous read-only link for a report: the share token is created on
   // first use. The URL is absolute when APP_URL is configured, else relative
   // so the web can prefix its own origin.
   router.register("report.share", (payload) => {
-    const id = requireString(asRecord(payload), "id");
+    const id = idOf(payload);
     reports.get(id);
     const token = reports.shareToken(id);
     if (!token) throw new Error("Sharing is not available for this report");
@@ -584,7 +582,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("report.audio", (payload) => {
-    const id = requireString(asRecord(payload), "id");
+    const id = idOf(payload);
     const audio = reports.getAudio(id);
     if (!audio) return null;
     const report = reports.get(id);
@@ -596,7 +594,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("report.delete", (payload, context) => {
-    const id = requireString(asRecord(payload), "id");
+    const id = idOf(payload);
     const report = reports.remove(id);
     publish(bus, "artifact.deleted", { artifactId: report.artifactId, kind: "report" }, context);
     publish(bus, "report.deleted", { correlationId: context.correlationId, reportId: report.id }, context);
@@ -608,7 +606,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   // delivery channels.
   router.register("report.audio.generate", async (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
     const deliver = record.deliver !== false;
     const regenerate = record.regenerate === true;
     const report = reports.get(id);
@@ -724,7 +722,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   // are used.
   router.register("report.send", async (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
     const channels = optionalChannelIds(record);
     const report = reports.get(id);
     const audio = reports.getAudio(id);
@@ -767,7 +765,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("delivery.channel.update", (payload, context) => {
     const record = asRecord(payload);
-    const id = requireString(record, "id");
+    const id = idOf(payload);
 
     const patch: UpdateChannelInput = {};
     if (record.name !== undefined) patch.name = requireString(record, "name");
@@ -786,7 +784,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("delivery.channel.delete", (payload, context) => {
     const channel: DeliveryChannel = deliveries.removeChannel(
-      requireString(asRecord(payload), "id"),
+      idOf(payload),
     );
     logger.info("delivery channel deleted", { id: channel.id, type: channel.type });
     publishDeliveryUpdated(bus, "delete", context.correlationId);
@@ -796,7 +794,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   // Live check of one channel's configuration; failures are reported in the
   // result (not as an error) so the UI can show the reason inline.
   router.register("delivery.channel.verify", async (payload) => {
-    const channel = deliveries.channel(requireString(asRecord(payload), "id"));
+    const channel = deliveries.channel(idOf(payload));
     try {
       const sender = createDeliverySender(channel.type, channel.config);
       return { ok: true, detail: await sender.verify() };
@@ -862,7 +860,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("artifact.get", (payload) => {
-    return artifacts.get(requireString(asRecord(payload), "id"));
+    return artifacts.get(idOf(payload));
   });
 
   router.register("artifact.search", (payload) => {
@@ -876,7 +874,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("artifact.content", (payload) => {
-    const artifact = artifacts.get(requireString(asRecord(payload), "id"));
+    const artifact = artifacts.get(idOf(payload));
     return {
       id: artifact.id,
       kind: artifact.kind,
@@ -886,7 +884,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("artifact.data", (payload) => {
-    const artifact = artifacts.get(requireString(asRecord(payload), "id"), { includeData: true });
+    const artifact = artifacts.get(idOf(payload), { includeData: true });
     if (!artifact.data) return null;
     return {
       id: artifact.id,
@@ -898,7 +896,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   router.register("artifact.delete", (payload, context) => {
-    const artifact = artifacts.remove(requireString(asRecord(payload), "id"));
+    const artifact = artifacts.remove(idOf(payload));
     if (artifact.kind === "report") reports.forgetShare(artifact.id);
     publish(bus, "artifact.deleted", { artifactId: artifact.id, kind: artifact.kind }, context);
     return { ok: true, artifactId: artifact.id, kind: artifact.kind };

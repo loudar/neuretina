@@ -18,5 +18,3 @@ export interface EventInput<T = unknown> {
 }
 
 export type EventHandler = (event: DomainEvent) => unknown;
-
-export type EventPattern = string;

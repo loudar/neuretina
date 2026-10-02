@@ -338,174 +338,71 @@ export interface SettingInfo {
   stored: boolean;
 }
 
-/**
- * Provider connection presets shared by the dynamic settings sections
- * (LLM, decision models, web search, finance data); they prefill the add/edit
- * form.
- */
-export interface ConnectionPreset {
-  /** Display name of the provider, e.g. "Perplexity". */
-  label: string;
-  defaultBaseUrl: string;
-  /** Default model selector; providers without models leave this empty. */
-  defaultModel?: string;
-  /** Model names the provider ships; empty/absent = no model field. */
-  models?: string[];
-  /** Account-scoped (Cloudflare): the URL embeds the account id and model. */
-  accountScoped?: boolean;
-  /** Label for the endpoint field; defaults to "API base URL". */
-  endpointLabel?: string;
-  /** Set false for keyless providers (Yahoo Finance). */
-  apiKey?: boolean;
-}
+// Connection types, presets and labels come from the capability modules the
+// server uses, so the UI and the engine cannot drift apart.
+import {
+  DECISION_PROVIDER_PRESETS,
+  DECISION_PROVIDER_IDS,
+  decisionModelLabel,
+  type DecisionModelConnection,
+  type DecisionProviderId,
+  type DecisionProviderPreset,
+} from "../../../src/capabilities/decision/DecisionProviders.ts";
+import {
+  FINANCE_PROVIDER_PRESETS,
+  type FinanceConnection,
+  type FinanceProviderId,
+  type FinanceProviderPreset,
+} from "../../../src/capabilities/finance/FinanceProviders.ts";
+import {
+  LLM_PROVIDER_PRESETS,
+  LLM_PROVIDER_IDS,
+  llmProviderLabel,
+  type LlmConnection,
+  type LlmProviderId,
+  type LlmProviderPreset,
+} from "../../../src/capabilities/llm/LlmProviders.ts";
+import {
+  SEARCH_PROVIDER_PRESETS,
+  type SearchConnection,
+  type SearchProviderId,
+  type SearchProviderPreset,
+} from "../../../src/capabilities/search/SearchProviders.ts";
 
-/**
- * Hosted decision-model connections. Jev (TypeSafe) and Clef (Cloudflare)
- * share the SystemOne API, so the same connection shape covers both.
- */
-export type DecisionProviderId = "jev" | "clef";
-
-export interface DecisionModelConnection {
-  id: string;
-  provider: DecisionProviderId;
-  model: string;
-  baseUrl: string;
-  accountId?: string;
-  apiKey?: string;
-}
-
-export const DECISION_PROVIDER_PRESETS: Record<DecisionProviderId, ConnectionPreset> = {
-  jev: {
-    label: "TypeSafe",
-    defaultBaseUrl: "https://api.typesafe.ai/v1/systemone",
-    defaultModel: "jev-latest",
-    models: ["jev-latest"],
-    accountScoped: false,
-    endpointLabel: "SystemOne endpoint",
-  },
-  clef: {
-    label: "Cloudflare",
-    defaultBaseUrl: "https://api.cloudflare.com/client/v4",
-    defaultModel: "clef",
-    models: ["clef", "clef-flash"],
-    accountScoped: true,
-  },
+export {
+  DECISION_PROVIDER_PRESETS,
+  DECISION_PROVIDER_IDS,
+  decisionModelLabel,
+  LLM_PROVIDER_PRESETS,
+  LLM_PROVIDER_IDS,
+  llmProviderLabel,
+  SEARCH_PROVIDER_PRESETS,
+  FINANCE_PROVIDER_PRESETS,
+};
+export type {
+  DecisionModelConnection,
+  DecisionProviderId,
+  DecisionProviderPreset,
+  FinanceConnection,
+  FinanceProviderId,
+  FinanceProviderPreset,
+  LlmConnection,
+  LlmProviderId,
+  LlmProviderPreset,
+  SearchConnection,
+  SearchProviderId,
+  SearchProviderPreset,
 };
 
-export const DECISION_PROVIDER_IDS: DecisionProviderId[] = ["jev", "clef"];
+/** Any provider's preset; the settings form reads only the shared fields. */
+export type ConnectionPreset =
+  | LlmProviderPreset
+  | DecisionProviderPreset
+  | SearchProviderPreset
+  | FinanceProviderPreset;
 
-/** The URL a decision request is posted to; undefined when incomplete. */
-export function decisionModelEndpoint(
-  connection: DecisionModelConnection,
-): string | undefined {
-  const preset = DECISION_PROVIDER_PRESETS[connection.provider];
-  if (!preset) return undefined;
-  const baseUrl = connection.baseUrl.trim().replace(/\/+$/, "");
-  if (!baseUrl) return undefined;
-  if (preset.accountScoped) {
-    const accountId = connection.accountId?.trim();
-    if (!accountId) return undefined;
-    return `${baseUrl}/accounts/${encodeURIComponent(accountId)}/ai/run/@cf/cloudflare/${encodeURIComponent(connection.model)}`;
-  }
-  return baseUrl;
-}
-
-/** "{provider} - {model name}", e.g. "TypeSafe - jev-latest". */
-export function decisionModelLabel(connection: DecisionModelConnection): string {
-  return `${DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider} - ${connection.model}`;
-}
-
-/** LLM connections; one connection is one provider+model pairing. */
-export type LlmProviderId = "opencode" | "openai" | "openrouter" | "ollama";
-
-export interface LlmConnection {
-  id: string;
-  provider: LlmProviderId;
-  model: string;
-  baseUrl: string;
-  apiKey?: string;
-}
-
-export const LLM_PROVIDER_PRESETS: Record<LlmProviderId, ConnectionPreset> = {
-  opencode: {
-    label: "OpenCode",
-    defaultBaseUrl: "https://opencode.ai/zen/go/v1",
-    defaultModel: "deepseek-v4.1-flash",
-    models: ["deepseek-v4.1-flash"],
-  },
-  openai: {
-    label: "OpenAI",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    defaultModel: "gpt-5",
-    models: ["gpt-5", "gpt-5-mini"],
-  },
-  openrouter: {
-    label: "OpenRouter",
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-    defaultModel: "deepseek/deepseek-v4.1-flash",
-    models: ["deepseek/deepseek-v4.1-flash"],
-  },
-  ollama: {
-    label: "Ollama",
-    defaultBaseUrl: "http://localhost:11434/v1",
-    defaultModel: "llama3.3",
-    models: ["llama3.3"],
-    apiKey: false,
-  },
-};
-
-export const LLM_PROVIDER_IDS: LlmProviderId[] = ["opencode", "openai", "openrouter", "ollama"];
-
-/** "{provider} - {model}", e.g. "OpenAI - gpt-5". */
-export function llmProviderLabel(connection: LlmConnection): string {
-  return `${LLM_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider} - ${connection.model}`;
-}
-
-/** Web-search connections; one per provider keeps the tool names stable. */
-export type SearchProviderId = "perplexity" | "exa";
-
-export interface SearchConnection {
-  id: string;
-  provider: SearchProviderId;
-  baseUrl: string;
-  apiKey?: string;
-}
-
-export const SEARCH_PROVIDER_PRESETS: Record<SearchProviderId, ConnectionPreset> = {
-  perplexity: { label: "Perplexity", defaultBaseUrl: "https://api.perplexity.ai" },
-  exa: { label: "Exa", defaultBaseUrl: "https://api.exa.ai" },
-};
-
-export const SEARCH_PROVIDER_IDS: SearchProviderId[] = ["perplexity", "exa"];
-
-/** Finance-data connections; one per provider keeps the tool names stable. */
-export type FinanceProviderId = "perplexity" | "yahoo";
-
-export interface FinanceConnection {
-  id: string;
-  provider: FinanceProviderId;
-  baseUrl: string;
-  model?: string;
-  apiKey?: string;
-}
-
-export const FINANCE_PROVIDER_PRESETS: Record<FinanceProviderId, ConnectionPreset> = {
-  perplexity: {
-    label: "Perplexity",
-    defaultBaseUrl: "https://api.perplexity.ai",
-    defaultModel: "perplexity/glm-5.3-flash",
-    models: ["perplexity/glm-5.3-flash"],
-  },
-  yahoo: {
-    label: "Yahoo Finance",
-    defaultBaseUrl: "https://query1.finance.yahoo.com",
-    defaultModel: "",
-    models: [],
-    apiKey: false,
-  },
-};
-
-export const FINANCE_PROVIDER_IDS: FinanceProviderId[] = ["perplexity", "yahoo"];
+export const SEARCH_PROVIDER_IDS = Object.keys(SEARCH_PROVIDER_PRESETS) as SearchProviderId[];
+export const FINANCE_PROVIDER_IDS = Object.keys(FINANCE_PROVIDER_PRESETS) as FinanceProviderId[];
 
 /** Parses a stored connection-list setting; rows missing required fields are dropped. */
 function parseConnections<T>(value: string | null | undefined, fields: Array<keyof T & string>): T[] {

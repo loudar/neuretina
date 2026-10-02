@@ -16,22 +16,10 @@ import { DEFAULT_SEARCH_DOMAINS } from "./env.ts";
 export type SettingKind = "string" | "secret" | "number" | "boolean" | "list" | "enum" | "json";
 export type SettingSource = "env" | "db" | "default";
 
-export interface SettingDefinition {
-  /** Environment variable name; also the key used for the database override. */
-  key: string;
-  group: string;
-  label: string;
-  kind: SettingKind;
-  /** Allowed values for `enum` settings. */
-  options?: string[];
-  /** Value used when neither the environment nor the database provides one. */
-  default?: string;
-  /** User-owned setting: the deployment environment cannot set it. */
-  userOnly?: boolean;
-  /** Shape check for parsed `json` values. */
-  validate?: (value: unknown) => boolean;
+/** A setting the service can read, validate and apply (spec plus behavior). */
+export type SettingDefinition = Omit<SettingSpec, "path"> & {
   apply(config: AppConfig, value: string | undefined): void;
-}
+};
 
 export interface SettingInfo {
   key: string;
@@ -327,26 +315,22 @@ const SETTING_SPECS: SettingSpec[] = [
   },
 ];
 
-export const SETTING_DEFINITIONS: SettingDefinition[] = SETTING_SPECS.map((spec) => ({
-  key: spec.key,
-  group: spec.group,
-  label: spec.label,
-  kind: spec.kind,
-  options: spec.options,
-  default: spec.default,
-  userOnly: spec.userOnly,
-  validate: spec.validate,
+export const SETTING_DEFINITIONS: SettingDefinition[] = SETTING_SPECS.map(({ path, ...spec }) => ({
+  ...spec,
   apply: (config, value) => {
     const parsed = parseSetting(spec, value);
     // A cleared or malformed JSON value must not blank the config default
     // (applyAll restores the base config before every pass).
     if (parsed === undefined && spec.kind === "json") return;
-    setPath(config, spec.path, parsed);
+    setPath(config, path, parsed);
   },
 }));
 
 /** Parses a raw setting value into the shape its config path expects. */
-function parseSetting(spec: SettingSpec, value: string | undefined): unknown {
+function parseSetting(
+  spec: Pick<SettingSpec, "kind" | "default">,
+  value: string | undefined,
+): unknown {
   if (spec.kind === "number") return toNumber(value, Number(spec.default ?? 0));
   if (spec.kind === "json") {
     if (!value) return undefined;

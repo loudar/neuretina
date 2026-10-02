@@ -31,6 +31,11 @@ export function requireString(record: Record<string, unknown>, key: string): str
   return value.trim();
 }
 
+/** The `id` of a command payload, required. */
+export function idOf(payload: unknown): string {
+  return requireString(asRecord(payload), "id");
+}
+
 export function optionalString(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   if (value === undefined || value === null || value === "") return undefined;

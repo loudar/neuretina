@@ -111,11 +111,6 @@ export function derivesFrom(id: string, primitive: string): boolean {
   return false;
 }
 
-/** True when an input accepting `accepted` can consume an output of `produced`. */
-export function acceptsPort(accepted: string, produced: string): boolean {
-  return derivesFrom(produced, accepted);
-}
-
 /**
  * Value convention for text-derived ports: the core `text`, plus an optional
  * `narration` (spoken form) and `reference` (stored artifact id) and a
