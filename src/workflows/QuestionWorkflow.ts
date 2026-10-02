@@ -1,6 +1,5 @@
 import { Agent } from "../agents/Agent.ts";
-import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
-import { ReportSearchTool } from "../agents/tools/ReportSearchTool.ts";
+import { createResearchTools } from "./researchTools.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
@@ -162,28 +161,12 @@ export class QuestionWorkflow implements Workflow<QuestionWorkflowInput, Questio
   }
 
   private createAgent(contextId: string): Agent {
-    const providers =
-      this.deps.searchProviders && this.deps.searchProviders.length > 0
-        ? this.deps.searchProviders
-        : [this.deps.webSearch];
     return new Agent({
       name: "assistant",
       description: "Answers follow-up questions about briefings",
       systemPrompt: ANSWER_SYSTEM_PROMPT,
       llm: this.deps.llm,
-      tools: [
-        ...createWebSearchTools(providers, {
-          limit: this.deps.defaults.resultsPerProvider,
-          recency: this.deps.defaults.recency,
-          language: this.deps.defaults.language,
-          domains: this.deps.defaults.searchDomains,
-        }),
-        createSocialSearchTool(this.deps.socialSearch, {
-          limit: this.deps.defaults.resultsPerProvider,
-          recency: this.deps.defaults.recency,
-        }),
-        new ReportSearchTool(this.deps.reports, contextId),
-      ],
+      tools: createResearchTools(this.deps, { contextId }),
       maxSteps: 4,
       maxToolCalls: 3,
       temperature: 0.2,

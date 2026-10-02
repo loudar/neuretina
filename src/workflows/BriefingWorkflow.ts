@@ -1,8 +1,5 @@
 import { wordCount } from "../core/text.ts";
 import { Agent, AGENT_STEP_LIMIT_MESSAGE } from "../agents/Agent.ts";
-import { SearchTool } from "../agents/tools/SearchTool.ts";
-import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
-import { ReportSearchTool } from "../agents/tools/ReportSearchTool.ts";
 import { ReportGetTool } from "../agents/tools/ReportGetTool.ts";
 import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
@@ -44,6 +41,7 @@ import type { EventStore, TimelineEvent } from "../domain/events/EventRepository
 import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
 import { markdownToHtml } from "../core/markdown.ts";
 import { collectQueries, collectSources } from "./agentResults.ts";
+import { createResearchTools } from "./researchTools.ts";
 import { EventExtractor } from "./EventExtraction.ts";
 import {
   renderTimelineHtml,
@@ -1082,29 +1080,17 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     // Code mode: the researcher writes one program that calls the real tools
     // inside a sandbox, so searches run in parallel and intermediate results
     // never round-trip through the model.
-    const providers =
-      this.deps.searchProviders && this.deps.searchProviders.length > 0
-        ? this.deps.searchProviders
-        : [this.deps.webSearch];
     const finance =
       this.deps.financeProviders && this.deps.financeProviders.length > 0
         ? this.deps.financeProviders
         : [this.deps.finance];
-    const tools = [
-      ...createWebSearchTools(providers, {
-        limit: this.deps.defaults.resultsPerProvider,
-        recency: this.deps.defaults.recency,
-        language: this.deps.defaults.language,
-        domains: this.deps.defaults.searchDomains,
-      }),
-      createSocialSearchTool(this.deps.socialSearch, {
-        limit: this.deps.defaults.resultsPerProvider,
-        recency: this.deps.defaults.recency,
-      }),
-      new ReportSearchTool(this.deps.reports, contextId),
-      new ReportGetTool(this.deps.reports),
-      ...finance.map((provider) => new FinanceSearchTool(provider)),
-    ];
+    const tools = createResearchTools(this.deps, {
+      contextId,
+      extra: [
+        new ReportGetTool(this.deps.reports),
+        ...finance.map((provider) => new FinanceSearchTool(provider)),
+      ],
+    });
 
     return new Agent({
       name: "researcher",

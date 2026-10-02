@@ -1,8 +1,6 @@
 import { Agent } from "../agents/Agent.ts";
-import { SearchTool } from "../agents/tools/SearchTool.ts";
-import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
-import { ReportSearchTool } from "../agents/tools/ReportSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
+import { createResearchTools } from "./researchTools.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
 import { addAgentCost } from "../core/cost/agentCosts.ts";
@@ -250,34 +248,10 @@ export class FollowupResearch {
   }
 
   private createCodeModeTool(): CodeModeTool {
-    const { defaults } = this.deps;
-    const providers =
-      this.deps.searchProviders && this.deps.searchProviders.length > 0
-        ? this.deps.searchProviders
-        : [this.deps.webSearch];
-    const tools = [
-      new SearchTool({
-        provider: this.deps.webSearch,
-        toolName: "search.wikipedia",
-        description:
-          "Search Wikipedia (all language editions) for background, definitions and context.",
-        domains: ["wikipedia.org"],
-        allowScope: false,
-        defaultLimit: 5,
-      }),
-      ...createWebSearchTools(providers, {
-        limit: defaults.resultsPerProvider,
-        recency: defaults.recency,
-        language: defaults.language,
-        domains: defaults.searchDomains,
-      }),
-      createSocialSearchTool(this.deps.socialSearch, {
-        limit: defaults.resultsPerProvider,
-        recency: defaults.recency,
-      }),
-      new ReportSearchTool(this.deps.reports, this.deps.contextId),
-    ];
-
+    const tools = createResearchTools(this.deps, {
+      contextId: this.deps.contextId,
+      wikipedia: true,
+    });
     return new CodeModeTool({ tools, maxToolCalls: 6 });
   }
 }
