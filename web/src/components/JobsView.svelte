@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, ListItem, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Icon, ListItem, Switch, TextFieldOutlined } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
@@ -12,9 +12,10 @@
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
+  import DataList from "./DataList.svelte";
   import DeleteIconButton from "./DeleteIconButton.svelte";
-import DataList from "./DataList.svelte";
   import Pane from "./Pane.svelte";
+  import ScheduledTaskDialog from "./ScheduledTaskDialog.svelte";
 
   interface Props {
     defaultCron?: string;
@@ -24,17 +25,11 @@ import DataList from "./DataList.svelte";
 
   let jobs = $state<ScheduledJob[]>([]);
   let workflows = $state<WorkflowInfo[]>([]);
-  let busy = $state(false);
   let saving = $state(false);
   let running = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
-
-  let name = $state("");
-  let cron = $state("0 7 * * *");
-  let workflow = $state("");
-  let voiceEnabled = $state(true);
-  let defaultCronApplied = false;
+  let dialogOpen = $state(false);
 
   let editName = $state("");
   let editCron = $state("");
@@ -42,7 +37,6 @@ import DataList from "./DataList.svelte";
   const route = $derived(router.current);
   const jobId = $derived(route.segments[0] ?? null);
   const selected = $derived(jobs.find((job) => job.id === jobId) ?? null);
-  const workflowOptions = $derived(workflows.map((entry) => ({ text: entry.id, value: entry.id })));
 
   // Seed the edit fields when a different job is opened; a background refresh
   // of the list must not clobber unsaved edits.
@@ -61,9 +55,6 @@ import DataList from "./DataList.svelte";
   async function refresh(): Promise<void> {
     try {
       [jobs, workflows] = await Promise.all([commands.jobs.list(), commands.workflows.list()]);
-      if (workflows.length > 0 && !workflows.some((entry) => entry.id === workflow)) {
-        workflow = workflows[0]!.id;
-      }
       if (jobId && !jobs.some((job) => job.id === jobId)) {
         router.navigate(paths.jobs(), { replace: true });
       }
@@ -74,28 +65,8 @@ import DataList from "./DataList.svelte";
 
   useRefresh(["job."], refresh);
 
-  $effect(() => {
-    if (!defaultCronApplied && defaultCron) {
-      cron = defaultCron;
-      defaultCronApplied = true;
-    }
-  });
-
-  async function create(): Promise<void> {
-    if (busy) return;
-    busy = true;
-    try {
-      await commands.jobs.create({
-        name: name.trim(),
-        cron: cron.trim(),
-        workflow,
-        input: { generateAudio: voiceEnabled },
-      });
-    } catch (error) {
-      reportError(error);
-    } finally {
-      busy = false;
-    }
+  function onSaved(job: ScheduledJob): void {
+    jobs = [...jobs.filter((entry) => entry.id !== job.id), job];
   }
 
   function select(job: ScheduledJob): void {
@@ -170,30 +141,11 @@ import DataList from "./DataList.svelte";
 </script>
 
 <Pane variant="list" title="Scheduled tasks">
-  <div class="add-form">
-    <TextFieldOutlined label="Name" bind:value={name} />
-    <TextFieldOutlined label="Cron expression" bind:value={cron} enter={create} />
-    <Select label="Workflow" options={workflowOptions} bind:value={workflow} />
-    <div class="add-row">
-      <label
-        class="inline-toggle"
-        title={voiceEnabled
-          ? "Voice + text — switch off for text-only delivery"
-          : "Text only — switch on to include the voice message"}
-      >
-        <Switch
-          bind:checked={voiceEnabled}
-          icons="both"
-          checkedIcon={iconMic}
-          uncheckedIcon={iconMicOff}
-        />
-        <span class="toggle-label">Voice</span>
-      </label>
-      <Button variant="filled" iconType="left" onclick={create} disabled={busy || name.trim() === ""}>
-        <Icon icon={iconAdd} /> Add task
-      </Button>
-    </div>
-  </div>
+  {#snippet actions()}
+    <Button variant="tonal" iconType="left" onclick={() => (dialogOpen = true)}>
+      <Icon icon={iconAdd} /> Add task
+    </Button>
+  {/snippet}
 
   <DataList items={jobs} empty="No scheduled tasks.">
     {#snippet children(job)}
@@ -278,6 +230,8 @@ import DataList from "./DataList.svelte";
   {/if}
 </Pane>
 
+<ScheduledTaskDialog bind:open={dialogOpen} {workflows} {defaultCron} onsaved={onSaved} />
+
 <ConfirmDeleteDialog
   bind:open={confirmingDelete}
   headline="Delete this task?"
@@ -288,14 +242,6 @@ import DataList from "./DataList.svelte";
 />
 
 <style>
-  .add-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-small);
-  }
-
-
   .entry.disabled {
     opacity: 0.65;
   }
