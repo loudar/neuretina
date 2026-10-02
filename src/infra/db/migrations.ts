@@ -426,6 +426,38 @@ export const migrations: Migration[] = [
       UPDATE user_workflows SET stop_after = 'report' WHERE stop_after = 'brief';
     `,
   },
+  {
+    // Some reports were converted by an earlier revision of migration 21 that
+    // failed to fill in `artifactIds`. Rebuild the ordered list from the
+    // artifacts that still point at the report as their parent.
+    id: 22,
+    name: "repair_report_artifact_ids",
+    sql: `
+      WITH children AS (
+        SELECT parent_id AS report_id, json_group_array(id) AS ids
+        FROM (
+          SELECT parent_id, id,
+                 CASE kind
+                   WHEN 'timeline' THEN 0
+                   WHEN 'audio' THEN 1
+                   WHEN 'report-text' THEN 2
+                   ELSE 3
+                 END AS ord
+          FROM artifacts
+          WHERE parent_id IS NOT NULL
+          ORDER BY ord, created_at
+        )
+        GROUP BY parent_id
+      )
+      UPDATE artifacts
+      SET metadata = json_set(metadata, '$.artifactIds', json(COALESCE(
+        (SELECT ids FROM children WHERE children.report_id = artifacts.id),
+        json('[]')
+      )))
+      WHERE kind = 'report'
+        AND json_array_length(metadata, '$.artifactIds') = 0;
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

@@ -32,14 +32,23 @@ export interface MatrixTriggerResult {
   answer?: string;
 }
 
+/** One Matrix conversation the listener watches. */
+export interface MatrixTriggerRoom {
+  /** Fixed room to watch. */
+  roomId?: string;
+  /** Direct-message peer whose room is watched when no `roomId` is set. */
+  dmUserId?: string;
+  /** If set, only these matrix user ids may issue commands here. */
+  allowedSenders?: string[];
+}
+
 export interface MatrixCommandListenerOptions {
   client: MatrixClient;
   kv: KeyValueStore;
   bus: EventBus;
   logger: Logger;
-  roomId?: string;
-  /** If set, only these matrix user ids may issue commands. */
-  allowedSenders?: string[];
+  /** Every enabled Matrix channel's conversation, watched with one sync loop. */
+  rooms: MatrixTriggerRoom[];
   /** Handles a parsed command and returns the reply text. */
   onCommand: (command: ChatCommand) => Promise<string>;
   /** Handles any allowed message; workflows decide whether to answer. */
@@ -86,6 +95,8 @@ export class MatrixCommandListener implements ChatCommandSource {
   private running = false;
   private abort: AbortController | null = null;
   private userId: string | null = null;
+  /** Resolved room id → the channel config it belongs to. */
+  private readonly watched = new Map<string, MatrixTriggerRoom>();
   private readonly ownMessages = new Set<string>();
   private readonly ownMessageOrder: string[] = [];
 
@@ -98,22 +109,38 @@ export class MatrixCommandListener implements ChatCommandSource {
     });
   }
 
-  get roomId(): string | undefined {
-    return this.options.roomId;
-  }
-
   async start(): Promise<void> {
     if (this.running) return;
 
-    const { client, roomId, logger } = this.options;
-    if (!client.configured || !roomId) {
+    const { client, logger } = this.options;
+    const configured = this.options.rooms.filter((room) => room.roomId || room.dmUserId);
+    if (!client.configured || configured.length === 0) {
       logger.info("command listener disabled (Matrix room not configured)");
       return;
     }
 
     this.userId = await client.ensureUserId();
+    // Direct-message channels have no fixed room: resolve (or open) the room
+    // the bot delivers into and watch that alongside the fixed rooms.
+    for (const room of configured) {
+      try {
+        const roomId = room.roomId ?? (await client.ensureDirectRoom(room.dmUserId!));
+        this.watched.set(roomId, room);
+      } catch (error) {
+        logger.warn("matrix room is not available", {
+          roomId: room.roomId,
+          dmUserId: room.dmUserId,
+          error: errorMessage(error),
+        });
+      }
+    }
+    if (this.watched.size === 0) {
+      logger.warn("command listener disabled (no Matrix room could be resolved)");
+      return;
+    }
+
     this.running = true;
-    logger.info("command listener started", { roomId });
+    logger.info("command listener started", { rooms: [...this.watched.keys()] });
 
     void this.loop().catch((error) => {
       logger.error("command listener crashed", { error: errorMessage(error) });
@@ -187,44 +214,49 @@ export class MatrixCommandListener implements ChatCommandSource {
   }
 
   private async process(response: SyncResponse): Promise<void> {
-    const { roomId, client, bus, logger } = this.options;
-    const room = response.rooms?.join?.[roomId!];
-    if (!room) return;
+    const { logger } = this.options;
+    const joined = response.rooms?.join ?? {};
 
-    for (const event of room.timeline?.events ?? []) {
-      if (event.type !== "m.room.message") continue;
-      if (!event.sender || event.sender === this.userId) continue;
-      if (!event.event_id) continue;
+    for (const [roomId, room] of Object.entries(joined)) {
+      const config = this.watched.get(roomId);
+      if (!config) continue;
 
-      if (this.options.allowedSenders?.length && !this.options.allowedSenders.includes(event.sender)) {
-        logger.warn("ignoring message from non-allowed sender", { sender: event.sender });
-        continue;
+      for (const event of room.timeline?.events ?? []) {
+        if (event.type !== "m.room.message") continue;
+        if (!event.sender || event.sender === this.userId) continue;
+        if (!event.event_id) continue;
+
+        if (config.allowedSenders?.length && !config.allowedSenders.includes(event.sender)) {
+          logger.warn("ignoring message from non-allowed sender", { sender: event.sender });
+          continue;
+        }
+
+        const content = event.content ?? {};
+        if (content.msgtype !== "m.text" || typeof content.body !== "string") continue;
+
+        const body = stripReplyFallback(content.body);
+        const quotedId = quotedEventIdOf(content);
+
+        // Commands are plain messages (not replies).
+        const parsed = quotedId ? null : parseChatCommand(body);
+        if (parsed) {
+          await this.handleCommand(roomId, parsed, event);
+          continue;
+        }
+
+        await this.handleMessage(roomId, body, event, quotedId);
       }
-
-      const content = event.content ?? {};
-      if (content.msgtype !== "m.text" || typeof content.body !== "string") continue;
-
-      const body = stripReplyFallback(content.body);
-      const quotedId = quotedEventIdOf(content);
-
-      // Commands are plain messages (not replies).
-      const parsed = quotedId ? null : parseChatCommand(body);
-      if (parsed) {
-        await this.handleCommand(parsed, event);
-        continue;
-      }
-
-      await this.handleMessage(body, event, quotedId);
     }
   }
 
   private async handleCommand(
+    roomId: string,
     parsed: { command: string; args: string },
     event: MatrixEvent,
   ): Promise<void> {
-    const { roomId, client, bus, logger } = this.options;
+    const { client, bus, logger } = this.options;
     const command: ChatCommand = {
-      channel: roomId!,
+      channel: roomId,
       sender: event.sender!,
       command: parsed.command,
       args: parsed.args,
@@ -268,17 +300,18 @@ export class MatrixCommandListener implements ChatCommandSource {
   }
 
   private async handleMessage(
+    roomId: string,
     body: string,
     event: MatrixEvent,
     quotedId: string | undefined,
   ): Promise<void> {
-    const { roomId, client, bus, logger, onMessage } = this.options;
+    const { client, bus, logger, onMessage } = this.options;
     if (!onMessage) return;
 
     const trimmed = body.trim();
     if (!trimmed) return;
 
-    const channel = roomId!;
+    const channel = roomId;
     const sender = event.sender!;
     const replyToBot = quotedId ? await this.quotedIsFromBot(channel, quotedId) : false;
     const chain = quotedId ? await this.resolveReplyChain(channel, quotedId) : [];

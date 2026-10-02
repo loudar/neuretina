@@ -55,7 +55,10 @@ import { registerCommands } from "../commands/registerCommands.ts";
 import { StartupService } from "../startup/StartupService.ts";
 import { KeyValueRepository, type KeyValueStore } from "../domain/kv/KeyValueRepository.ts";
 import { MatrixClient } from "../providers/messaging/MatrixClient.ts";
-import { MatrixCommandListener } from "../providers/messaging/MatrixCommandListener.ts";
+import {
+  MatrixCommandListener,
+  type MatrixTriggerRoom,
+} from "../providers/messaging/MatrixCommandListener.ts";
 import { createChatCommandHandler } from "../chat/ChatCommands.ts";
 import { createLlmProvider } from "../providers/llm/createLlmProvider.ts";
 import {
@@ -522,17 +525,31 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     },
   });
 
+  /** Every enabled Matrix channel's conversation, watched by one sync loop. */
+  const matrixRooms = (): MatrixTriggerRoom[] =>
+    deliveries
+      .channels()
+      .filter((channel) => channel.type === "matrix" && channel.enabled)
+      .map((channel) => {
+        const config = matrixChannelConfig(channel.config) ?? {};
+        return {
+          ...(config.roomId ? { roomId: config.roomId } : {}),
+          ...(config.dmUserId ? { dmUserId: config.dmUserId } : {}),
+          ...(config.allowedSenders ? { allowedSenders: config.allowedSenders } : {}),
+        };
+      })
+      .filter((room) => room.roomId || room.dmUserId);
+
   const createChatListener = (client: MatrixClient): MatrixCommandListener | null => {
-    const matrix = matrixConnection();
-    if (!matrix?.roomId) return null;
+    const rooms = matrixRooms();
+    if (rooms.length === 0) return null;
 
     return new MatrixCommandListener({
       client,
       kv,
       bus,
       logger: logger.child("matrix-chat"),
-      roomId: matrix.roomId,
-      allowedSenders: matrix.allowedSenders,
+      rooms,
       onCommand: createChatCommandHandler({
         config,
         jobs,

@@ -198,8 +198,7 @@ function setupListener(options: {
     kv,
     bus,
     logger: log,
-    roomId: "!room:matrix.test",
-    allowedSenders: options.allowedSenders,
+    rooms: [{ roomId: "!room:matrix.test", allowedSenders: options.allowedSenders }],
     onCommand:
       options.onCommand ??
       (async (command) => {
@@ -313,6 +312,91 @@ describe("MatrixCommandListener", () => {
 
     const reply = sent.find((request) => request.body?.includes("Answer text"));
     expect(reply?.body).toContain('"event_id":"$m5"');
+  });
+
+  test("watches a direct-message room when the channel has no fixed room", async () => {
+    const db = new SqliteDatabase(":memory:");
+    const kv = new KeyValueRepository(db);
+    const bus = new EventBus(new EventStore(db), log);
+    const client = new MatrixClient({ homeserverUrl: "https://matrix.test", accessToken: "tok" });
+    const messages: MatrixTriggerInput[] = [];
+    let createdRooms = 0;
+
+    mockFetch(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url.includes("/account/whoami")) return Response.json({ user_id: "@bot:matrix.test" });
+      if (url.includes("/account_data/m.direct") && method === "GET") {
+        return new Response("not found", { status: 404 });
+      }
+      if (url.includes("/createRoom")) {
+        createdRooms += 1;
+        return Response.json({ room_id: "!dm:matrix.test" });
+      }
+      if (url.includes("/account_data/m.direct") && method === "PUT") return Response.json({});
+      if (url.includes("/_matrix/client/v3/sync")) {
+        const since = new URL(url).searchParams.get("since");
+        if (!since) return Response.json({ next_batch: "d0" });
+        if (since === "d0") {
+          return Response.json({
+            next_batch: "d1",
+            rooms: {
+              join: {
+                "!dm:matrix.test": {
+                  timeline: {
+                    events: [
+                      {
+                        type: "m.room.message",
+                        sender: "@user:matrix.test",
+                        event_id: "$q1",
+                        content: {
+                          msgtype: "m.text",
+                          body: "> <@bot:matrix.test> Morning report\n\nwhy?",
+                          "m.relates_to": { "m.in_reply_to": { event_id: "$botmsg" } },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return Response.json({ next_batch: since });
+      }
+      if (url.includes("/event/")) {
+        return Response.json({ sender: "@bot:matrix.test", content: { body: "Morning report" } });
+      }
+      if (url.includes("/send/m.room.message/")) return Response.json({ event_id: "$evt" });
+      return new Response("not found", { status: 404 });
+    });
+
+    const listener = new MatrixCommandListener({
+      client,
+      kv,
+      bus,
+      logger: log,
+      rooms: [{ dmUserId: "@user:matrix.test" }],
+      onCommand: async () => "ack",
+      onMessage: async (input) => {
+        messages.push(input);
+        return { answer: "Answer text" };
+      },
+    });
+
+    const answered = waitForEvent(bus, "chat.question.answered");
+    await listener.start();
+    await answered;
+    listener.stop();
+
+    expect(createdRooms).toBe(1);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      channel: "!dm:matrix.test",
+      body: "why?",
+      replyToBot: true,
+    });
   });
 
   test("answers thread replies and legacy reply markers quoting the bot", async () => {
