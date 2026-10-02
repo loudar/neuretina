@@ -1,87 +1,33 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, Select, Switch, TextFieldOutlined } from "m3-svelte";
+  import { Button, Icon, Switch } from "m3-svelte";
   import iconAdd from "@ktibow/iconset-material-symbols/add";
-  import iconChat from "@ktibow/iconset-material-symbols/chat";
   import iconCopy from "@ktibow/iconset-material-symbols/content-copy";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconEdit from "@ktibow/iconset-material-symbols/edit";
-  import iconForum from "@ktibow/iconset-material-symbols/forum";
-  import iconMail from "@ktibow/iconset-material-symbols/mail";
   import { commands } from "../lib/commands";
-  import type { DeliveryChannelInfo, DeliveryChannelType } from "../lib/api";
+  import type { DeliveryChannelInfo } from "../lib/api";
+  import {
+    DELIVERY_TYPE_ICONS,
+    DELIVERY_TYPE_LABELS,
+    configSummary,
+  } from "../lib/delivery";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { useRefresh } from "../lib/refresh.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
-import DataList from "./DataList.svelte";
+  import DataList from "./DataList.svelte";
+  import DeliveryChannelDialog from "./DeliveryChannelDialog.svelte";
   import Pane from "./Pane.svelte";
-  import SecretField from "./SecretField.svelte";
 
   let channels = $state<DeliveryChannelInfo[]>([]);
-
   let toggling = $state<string | null>(null);
   let testing = $state<string | null>(null);
-  let savingChannel = $state(false);
   let deleting = $state(false);
-
-  let channelDialogOpen = $state(false);
-  let editingId = $state<string | null>(null);
-  let dialogType = $state<DeliveryChannelType>("matrix");
   let confirmingDelete = $state(false);
   let deleteTarget = $state<DeliveryChannelInfo | null>(null);
 
-  interface ChannelForm {
-    name: string;
-    homeserverUrl: string;
-    roomId: string;
-    dmUserId: string;
-    accessToken: string;
-    username: string;
-    password: string;
-    allowedSenders: string;
-    webhookUrl: string;
-    host: string;
-    port: string;
-    secure: boolean;
-    from: string;
-    to: string;
-  }
-
-  const emptyForm: ChannelForm = {
-    name: "",
-    homeserverUrl: "",
-    roomId: "",
-    dmUserId: "",
-    accessToken: "",
-    username: "",
-    password: "",
-    allowedSenders: "",
-    webhookUrl: "",
-    host: "",
-    port: "587",
-    secure: true,
-    from: "",
-    to: "",
-  };
-
-  let form = $state<ChannelForm>({ ...emptyForm });
-
-  const TYPE_LABELS: Record<DeliveryChannelType, string> = {
-    matrix: "Matrix",
-    discord: "Discord",
-    email: "Email",
-  };
-
-  const TYPE_ICONS: Record<DeliveryChannelType, typeof iconChat> = {
-    matrix: iconChat,
-    discord: iconForum,
-    email: iconMail,
-  };
-
-  const typeOptions = [
-    { icon: TYPE_ICONS.matrix, text: "Matrix", value: "matrix" },
-    { icon: TYPE_ICONS.discord, text: "Discord", value: "discord" },
-    { icon: TYPE_ICONS.email, text: "Email", value: "email" },
-  ];
+  let dialogOpen = $state(false);
+  let editChannel = $state<DeliveryChannelInfo | null>(null);
+  let duplicateChannel = $state<DeliveryChannelInfo | null>(null);
 
   async function refresh(): Promise<void> {
     try {
@@ -122,117 +68,28 @@ import DataList from "./DataList.svelte";
     }
   }
 
-  function formFromConfig(channel: DeliveryChannelInfo): ChannelForm {
-    const config = channel.config;
-    const text = (key: string): string => {
-      const value = config[key];
-      return typeof value === "string" || typeof value === "number" ? String(value) : "";
-    };
-    return {
-      name: channel.name,
-      homeserverUrl: text("homeserverUrl"),
-      roomId: text("roomId"),
-      dmUserId: text("dmUserId"),
-      accessToken: text("accessToken"),
-      username: text("username"),
-      password: text("password"),
-      allowedSenders: text("allowedSenders"),
-      webhookUrl: text("webhookUrl"),
-      host: text("host"),
-      port: text("port") || "587",
-      secure: config.secure !== false,
-      from: text("from"),
-      to: text("to"),
-    };
-  }
-
   function openAdd(): void {
-    editingId = null;
-    dialogType = "matrix";
-    form = { ...emptyForm };
-    channelDialogOpen = true;
+    editChannel = null;
+    duplicateChannel = null;
+    dialogOpen = true;
   }
 
   function openEdit(channel: DeliveryChannelInfo): void {
-    editingId = channel.id;
-    dialogType = channel.type;
-    form = formFromConfig(channel);
-    channelDialogOpen = true;
+    editChannel = channel;
+    duplicateChannel = null;
+    dialogOpen = true;
   }
 
   function openDuplicate(channel: DeliveryChannelInfo): void {
-    editingId = null;
-    dialogType = channel.type;
-    form = { ...formFromConfig(channel), name: `${channel.name} (copy)` };
-    channelDialogOpen = true;
+    editChannel = null;
+    duplicateChannel = channel;
+    dialogOpen = true;
   }
 
-  const canSaveChannel = $derived.by(() => {
-    if (savingChannel || !form.name.trim()) return false;
-    if (dialogType === "matrix") {
-      return (
-        form.homeserverUrl.trim() !== "" &&
-        (form.roomId.trim() !== "" || form.dmUserId.trim() !== "")
-      );
-    }
-    if (dialogType === "discord") return form.webhookUrl.trim() !== "";
-    return form.host.trim() !== "";
-  });
-
-  // Config values are stored as strings; the SMTP port is a number.
-  function configFromForm(): Record<string, unknown> {
-    if (dialogType === "matrix") {
-      return {
-        homeserverUrl: form.homeserverUrl.trim(),
-        roomId: form.roomId.trim(),
-        dmUserId: form.dmUserId.trim(),
-        accessToken: form.accessToken.trim(),
-        username: form.username.trim(),
-        password: form.password.trim(),
-        allowedSenders: form.allowedSenders.trim(),
-      };
-    }
-    if (dialogType === "discord") {
-      return { webhookUrl: form.webhookUrl.trim() };
-    }
-    return {
-      host: form.host.trim(),
-      port: Number(form.port.trim()) || 587,
-      secure: form.secure,
-      username: form.username.trim(),
-      password: form.password.trim(),
-      from: form.from.trim(),
-      to: form.to.trim(),
-    };
-  }
-
-  async function saveChannel(): Promise<void> {
-    if (!canSaveChannel) return;
-    savingChannel = true;
-    try {
-      const config = configFromForm();
-      if (editingId) {
-        const updated = await commands.delivery.updateChannel(editingId, {
-          name: form.name.trim(),
-          config,
-        });
-        channels = channels.map((entry) => (entry.id === updated.id ? updated : entry));
-        reportSuccess(`Channel "${updated.name}" saved`);
-      } else {
-        const created = await commands.delivery.createChannel({
-          type: dialogType,
-          name: form.name.trim(),
-          config,
-        });
-        channels = [...channels, created];
-        reportSuccess(`Channel "${created.name}" added`);
-      }
-      channelDialogOpen = false;
-    } catch (error) {
-      reportError(error);
-    } finally {
-      savingChannel = false;
-    }
+  function onSaved(channel: DeliveryChannelInfo, created: boolean): void {
+    channels = created
+      ? [...channels, channel]
+      : channels.map((entry) => (entry.id === channel.id ? channel : entry));
   }
 
   async function removeChannel(): Promise<void> {
@@ -249,21 +106,6 @@ import DataList from "./DataList.svelte";
     } finally {
       deleting = false;
     }
-  }
-
-  function configSummary(channel: DeliveryChannelInfo): string {
-    const secrets = new Set(["accessToken", "password", "webhookUrl"]);
-    const parts: string[] = [];
-    for (const [key, value] of Object.entries(channel.config)) {
-      if (typeof value === "boolean") {
-        parts.push(`${key}: ${value ? "on" : "off"}`);
-      } else if (typeof value === "string" && value !== "") {
-        parts.push(`${key}: ${secrets.has(key) ? "••••" : value}`);
-      } else if (typeof value === "number") {
-        parts.push(`${key}: ${String(value)}`);
-      }
-    }
-    return parts.join(" · ");
   }
 </script>
 
@@ -286,10 +128,10 @@ import DataList from "./DataList.svelte";
         <article class="row">
           <div class="info">
             <div class="name">
-              <Icon icon={TYPE_ICONS[channel.type]} size={18} />
+              <Icon icon={DELIVERY_TYPE_ICONS[channel.type]} size={18} />
               <span>{channel.name}</span>
               <span class="provider-tag" data-provider={channel.type}>
-                {TYPE_LABELS[channel.type]}
+                {DELIVERY_TYPE_LABELS[channel.type]}
               </span>
             </div>
             <p class="desc muted">{configSummary(channel) || "Not configured."}</p>
@@ -339,132 +181,17 @@ import DataList from "./DataList.svelte";
     </DataList>
   </section>
 
-  <Dialog headline={editingId ? "Edit channel" : "Add channel"} bind:open={channelDialogOpen}>
-    <div class="channel-form">
-      {#if editingId}
-        <div class="type-row">
-          <span class="muted">Type</span>
-          <span class="provider-tag" data-provider={dialogType}>{TYPE_LABELS[dialogType]}</span>
-        </div>
-      {:else}
-        <Select
-          label="Type"
-          options={typeOptions}
-          value={dialogType}
-          onchange={(event) => {
-            const value = event.currentTarget.value;
-            if (value === "matrix" || value === "discord" || value === "email") dialogType = value;
-          }}
-        />
-      {/if}
-      <TextFieldOutlined label="Name" bind:value={form.name} enter={() => void saveChannel()} />
-      {#if dialogType === "matrix"}
-        <TextFieldOutlined
-          label="Homeserver URL"
-          bind:value={form.homeserverUrl}
-          placeholder="https://matrix.example.org"
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="Room ID"
-          bind:value={form.roomId}
-          placeholder="!room:matrix.example.org"
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="DM user (Matrix ID)"
-          bind:value={form.dmUserId}
-          placeholder="@alice:matrix.example.org"
-          enter={() => void saveChannel()}
-        />
-        <SecretField
-          label="Access token"
-          bind:value={form.accessToken}
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="Username"
-          autocomplete="off"
-          bind:value={form.username}
-          enter={() => void saveChannel()}
-        />
-        <SecretField
-          label="Password"
-          bind:value={form.password}
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="Allowed senders (comma separated)"
-          bind:value={form.allowedSenders}
-          enter={() => void saveChannel()}
-        />
-        <p class="muted hint">
-          Authenticate with an access token or username + password. Set a room ID to post into a
-          room, or a DM user to let the bot open (or reuse) the direct message room with that
-          person. Allowed senders is an optional comma-separated allowlist.
-        </p>
-      {:else if dialogType === "discord"}
-        <TextFieldOutlined
-          label="Webhook URL"
-          bind:value={form.webhookUrl}
-          placeholder="https://discord.com/api/webhooks/…"
-          enter={() => void saveChannel()}
-        />
-      {:else}
-        <TextFieldOutlined
-          label="Host"
-          bind:value={form.host}
-          placeholder="smtp.example.org"
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="Port"
-          type="number"
-          bind:value={form.port}
-          enter={() => void saveChannel()}
-        />
-        <label class="secure-toggle">
-          <Switch bind:checked={form.secure} />
-          <span>Secure connection (TLS)</span>
-        </label>
-        <TextFieldOutlined
-          label="Username"
-          autocomplete="off"
-          bind:value={form.username}
-          enter={() => void saveChannel()}
-        />
-        <SecretField
-          label="Password"
-          bind:value={form.password}
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="From"
-          bind:value={form.from}
-          placeholder="reports@example.org"
-          enter={() => void saveChannel()}
-        />
-        <TextFieldOutlined
-          label="To (comma separated)"
-          bind:value={form.to}
-          enter={() => void saveChannel()}
-        />
-      {/if}
-    </div>
-    {#snippet buttons()}
-      <Button variant="text" onclick={() => (channelDialogOpen = false)} disabled={savingChannel}>
-        Cancel
-      </Button>
-      <Button variant="filled" onclick={() => void saveChannel()} disabled={!canSaveChannel}>
-        Save
-      </Button>
-    {/snippet}
-  </Dialog>
+  <DeliveryChannelDialog
+    bind:open={dialogOpen}
+    channel={editChannel}
+    duplicate={duplicateChannel}
+    onsaved={onSaved}
+  />
 
   <ConfirmDeleteDialog
     bind:open={confirmingDelete}
     headline="Delete this channel?"
-    message={`Channel "${deleteTarget?.name}" (${deleteTarget ? TYPE_LABELS[deleteTarget.type] : ""}) will be removed and detached from all workflows. This cannot be undone.`}
+    message={`Channel "${deleteTarget?.name}" (${deleteTarget ? DELIVERY_TYPE_LABELS[deleteTarget.type] : ""}) will be removed and detached from all workflows. This cannot be undone.`}
     busy={deleting}
     onconfirm={() => void removeChannel()}
     oncancel={() => (confirmingDelete = false)}
@@ -524,32 +251,5 @@ import DataList from "./DataList.svelte";
     flex-wrap: wrap;
     gap: var(--space-small);
     flex: 0 0 auto;
-  }
-
-  .secure-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-small);
-    color: var(--m3c-on-surface-variant);
-    font-size: var(--font-medium);
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .type-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-small);
-  }
-
-  .hint {
-    margin: 0;
-  }
-
-  .channel-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-large);
-    width: min(24rem, 100%);
   }
 </style>

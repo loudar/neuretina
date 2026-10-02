@@ -36,6 +36,42 @@ export function formatEventWhen(event: TimelineEvent): string {
   return event.time ? `${text} · ${event.time}` : text;
 }
 
+/** Up to this many titles show per marker; the rest collapse into one row. */
+export const MAX_STACKED_LABELS = 2;
+
+/** One title (or the "+n more…" row) shown under a timeline marker. */
+export interface TimelineLabelEntry {
+  key: string;
+  label: string;
+  events: TimelineEvent[];
+  more?: boolean;
+}
+
+/** At most two titles per marker; anything beyond becomes one "+n more…" row. */
+export function timelineLabelEntries(group: {
+  key: string;
+  events: TimelineEvent[];
+}): TimelineLabelEntry[] {
+  const entries: TimelineLabelEntry[] = group.events
+    .slice(0, MAX_STACKED_LABELS)
+    .map((event) => ({ key: event.id, label: event.title, events: [event] }));
+  const rest = group.events.slice(MAX_STACKED_LABELS);
+  if (rest.length > 0) {
+    entries.push({
+      key: `${group.key}:more`,
+      label: `+${rest.length} more…`,
+      events: rest,
+      more: true,
+    });
+  }
+  return entries;
+}
+
+/** Number of label lines a marker stacks, for sizing the track. */
+export function timelineLabelLines(group: { events: TimelineEvent[] }): number {
+  return Math.min(group.events.length, MAX_STACKED_LABELS + 1);
+}
+
 /** Chronological order; events without a time sit at the start of their day. */
 export function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   return [...events].sort(

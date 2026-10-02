@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Dialog, Icon, Switch } from "m3-svelte";
+  import { Button, Icon } from "m3-svelte";
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconLabel from "@ktibow/iconset-material-symbols/label";
   import iconLink from "@ktibow/iconset-material-symbols/link";
@@ -7,7 +7,7 @@
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands } from "../lib/commands";
-  import type { Report, DeliveryChannelInfo } from "../lib/api";
+  import type { Report } from "../lib/api";
   import { copyText } from "../lib/clipboard";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
@@ -17,20 +17,17 @@
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
   import MarkdownView from "./MarkdownView.svelte";
   import Pane from "./Pane.svelte";
+  import ResendReportDialog from "./ResendReportDialog.svelte";
   import TimelineView from "./TimelineView.svelte";
 
   let reports = $state<Report[]>([]);
   let selected = $state<Report | null>(null);
   let audioUrl = $state<string | null>(null);
-  let resending = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
   let generating = $state(false);
 
   let resendOpen = $state(false);
-  let resendChannels = $state<DeliveryChannelInfo[]>([]);
-  let resendSelected = $state<string[]>([]);
-  let resendLoading = $state(false);
 
   const route = $derived(router.current);
   const reportId = $derived(route.segments[0] ?? null);
@@ -83,59 +80,6 @@
     }
     void loadReport(id);
   });
-
-  // Re-send targets the channels currently attached to the report's workflow;
-  // the dialog picks a subset of them per send.
-  async function openResend(): Promise<void> {
-    const report = selected;
-    if (!report) return;
-    resendOpen = true;
-    resendChannels = [];
-    resendSelected = [];
-    resendLoading = true;
-    try {
-      const [channels, deliveryWorkflows] = await Promise.all([
-        commands.delivery.channels(),
-        commands.delivery.workflows(),
-      ]);
-      const attached = deliveryWorkflows.find((entry) => entry.workflow === report.workflow);
-      const attachedChannels = attached
-        ? channels.filter((channel) => attached.channelIds.includes(channel.id))
-        : [];
-      resendChannels = attachedChannels;
-      resendSelected = attachedChannels.slice(0, 1).map((channel) => channel.id);
-    } catch (error) {
-      reportError(error);
-    } finally {
-      resendLoading = false;
-    }
-  }
-
-  function toggleResendChannel(id: string): void {
-    resendSelected = resendSelected.includes(id)
-      ? resendSelected.filter((entry) => entry !== id)
-      : [...resendSelected, id];
-  }
-
-  async function resend(): Promise<void> {
-    if (!selected || resending || resendSelected.length === 0) return;
-    resending = true;
-    try {
-      const result = await commands.reports.send(selected.id, resendSelected);
-      const sent = result.results.filter((entry) => entry.status === "sent").length;
-      const failed = result.results.length - sent;
-      if (sent === 0) {
-        reportError(`Report delivery failed on all ${failed} channel(s)`);
-      } else {
-        reportSuccess(`Report sent to ${sent} channel(s)${failed > 0 ? `, ${failed} failed` : ""}`);
-      }
-      resendOpen = false;
-    } catch (error) {
-      reportError(error);
-    } finally {
-      resending = false;
-    }
-  }
 
   async function copyLink(): Promise<void> {
     if (!selected) return;
@@ -248,7 +192,7 @@
       >
         <Icon icon={iconLink} /> Copy link
       </Button>
-      <Button variant="tonal" iconType="left" onclick={() => void openResend()} disabled={resending}>
+      <Button variant="tonal" iconType="left" onclick={() => (resendOpen = true)}>
         <Icon icon={iconSend} /> Re-send
       </Button>
       <span class="danger">
@@ -291,45 +235,7 @@
     <p class="muted">Select a report to read it and play the audio.</p>
   {/if}
 
-  <Dialog headline="Re-send this report?" bind:open={resendOpen}>
-    <p>
-      Deliver "{selected?.topics.join(", ") || "Untitled report"}" to the selected delivery
-      channels.
-    </p>
-    {#if resendLoading}
-      <p class="muted">Loading channels…</p>
-    {:else if resendChannels.length === 0}
-      <p class="muted">No delivery channels attached to this workflow.</p>
-    {:else}
-      <div class="resend-channels">
-        {#each resendChannels as channel (channel.id)}
-          <label
-            class="resend-channel"
-            title={channel.enabled ? "" : "This channel is disabled"}
-          >
-            <Switch
-              checked={resendSelected.includes(channel.id)}
-              onchange={() => toggleResendChannel(channel.id)}
-            />
-            <span>{channel.name}{channel.enabled ? "" : " (disabled)"}</span>
-            <span class="provider-tag" data-provider={channel.type}>{channel.type}</span>
-          </label>
-        {/each}
-      </div>
-    {/if}
-    {#snippet buttons()}
-      <Button variant="text" onclick={() => (resendOpen = false)} disabled={resending}>
-        Cancel
-      </Button>
-      <Button
-        variant="filled"
-        onclick={() => void resend()}
-        disabled={resending || resendSelected.length === 0}
-      >
-        {resending ? "Sending…" : "Send"}
-      </Button>
-    {/snippet}
-  </Dialog>
+  <ResendReportDialog report={selected} bind:open={resendOpen} />
 
   <ConfirmDeleteDialog
     bind:open={confirmingDelete}
@@ -347,20 +253,6 @@
   audio {
     width: 100%;
     margin-bottom: var(--space-medium);
-  }
-
-  .resend-channels {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-small);
-  }
-
-  .resend-channel {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-small);
-    cursor: pointer;
-    user-select: none;
   }
 
   .report-body {
