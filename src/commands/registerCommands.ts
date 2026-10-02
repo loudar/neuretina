@@ -40,23 +40,27 @@ import type {
 import { assertChannelType } from "../domain/delivery/DeliveryRepository.ts";
 import { createDeliverySender } from "../providers/delivery/DeliverySenders.ts";
 import {
+  isConnection,
+  type Connection,
+  type ConnectionPresets,
+} from "../capabilities/connections.ts";
+import {
   DECISION_PROVIDER_PRESETS,
   decisionModelEndpoint,
-  isDecisionModelConnection,
   type DecisionModelConnection,
 } from "../capabilities/decision/DecisionProviders.ts";
 import {
-  isSearchConnection,
+  SEARCH_PROVIDER_PRESETS,
   type SearchConnection,
 } from "../capabilities/search/SearchProviders.ts";
 import {
-  isFinanceConnection,
+  FINANCE_PROVIDER_PRESETS,
   type FinanceConnection,
 } from "../capabilities/finance/FinanceProviders.ts";
 import {
   activeLlmConnection,
   DEFAULT_LLM_CONNECTION,
-  isLlmConnection,
+  LLM_PROVIDER_PRESETS,
   type LlmConnection,
 } from "../capabilities/llm/LlmProviders.ts";
 import { createSearchProvider } from "../providers/search/createSearchProvider.ts";
@@ -160,105 +164,51 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return settings.clear(requireString(asRecord(payload), "key"));
   });
 
-  // Live pre-flight for an LLM connection: a stored connection by id, or the
-  // unsaved form values from the LLM settings section. Failures are reported
-  // in the result so the UI can show them inline.
-  router.register("llm.provider.verify", async (payload) => {
-    const record = asRecord(payload);
-    const id = optionalString(record, "id");
-    const stored = id
-      ? (Array.isArray(config.llmProviders) ? config.llmProviders : []).find(
-          (connection) => connection.id === id,
-        )
-      : undefined;
-    if (id && !stored) throw new NotFoundError(`LLM provider ${id} not found`);
-
-    const connection = stored ?? adHocLlmConnection(record);
-    const provider = createLlmProvider(connection, crypto.randomUUID());
-
-    try {
-      return { ok: true, detail: await provider.verify() };
-    } catch (error) {
-      return { ok: false, detail: errorMessage(error) };
-    }
+  // Live pre-flight for a provider connection: a stored connection by id, or
+  // the unsaved form values from its settings section.
+  registerConnectionVerify<LlmConnection>(router, {
+    command: "llm.provider.verify",
+    noun: "LLM provider",
+    presets: LLM_PROVIDER_PRESETS,
+    stored: () => config.llmProviders,
+    build: (connection) => createLlmProvider(connection, crypto.randomUUID()),
   });
 
-  // Live pre-flight for a hosted decision model: a stored connection by id,
-  // or the unsaved form values from the Decision models settings section.
-  // Failures are reported in the result so the UI can show them inline.
-  router.register("decision.model.verify", async (payload) => {
-    const record = asRecord(payload);
-    const id = optionalString(record, "id");
-    const stored = id
-      ? (Array.isArray(config.decisionModels) ? config.decisionModels : []).find(
-          (connection) => connection.id === id,
-        )
-      : undefined;
-    if (id && !stored) throw new NotFoundError(`Decision model ${id} not found`);
-
-    const connection = stored ?? adHocDecisionConnection(record);
-    const endpoint = decisionModelEndpoint(connection);
-    if (!endpoint) throw new ValidationError("The decision-model connection is incomplete");
-
-    const model = new SystemOneDecisionModel({
-      id: connection.id,
-      provider: DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider,
-      model: connection.model,
-      endpoint,
-      ...(connection.apiKey ? { apiKey: connection.apiKey } : {}),
-    });
-
-    try {
-      return { ok: true, detail: await model.verify() };
-    } catch (error) {
-      return { ok: false, detail: errorMessage(error) };
-    }
+  registerConnectionVerify<DecisionModelConnection>(router, {
+    command: "decision.model.verify",
+    noun: "Decision model",
+    presets: DECISION_PROVIDER_PRESETS,
+    stored: () => config.decisionModels,
+    build: (connection) => {
+      const endpoint = decisionModelEndpoint(connection);
+      if (!endpoint) throw new ValidationError("The decision-model connection is incomplete");
+      return new SystemOneDecisionModel({
+        id: connection.id,
+        provider: DECISION_PROVIDER_PRESETS[connection.provider]?.label ?? connection.provider,
+        model: connection.model,
+        endpoint,
+        ...(connection.apiKey ? { apiKey: connection.apiKey } : {}),
+      });
+    },
   });
 
-  // Live pre-flight for a web-search connection: a stored connection by id,
-  // or the unsaved form values from the Web search settings section.
-  router.register("search.provider.verify", async (payload) => {
-    const record = asRecord(payload);
-    const id = optionalString(record, "id");
-    const stored = id
-      ? (Array.isArray(config.searchProviders) ? config.searchProviders : []).find(
-          (connection) => connection.id === id,
-        )
-      : undefined;
-    if (id && !stored) throw new NotFoundError(`Search provider ${id} not found`);
-
-    const connection = stored ?? adHocSearchConnection(record);
-    const provider = createSearchProvider(connection, {
-      defaultLimit: config.defaults.searchResultsPerProvider,
-    });
-
-    try {
-      return { ok: true, detail: isVerifiable(provider) ? await provider.verify() : "configured" };
-    } catch (error) {
-      return { ok: false, detail: errorMessage(error) };
-    }
+  registerConnectionVerify<SearchConnection>(router, {
+    command: "search.provider.verify",
+    noun: "Search provider",
+    presets: SEARCH_PROVIDER_PRESETS,
+    stored: () => config.searchProviders,
+    build: (connection) =>
+      createSearchProvider(connection, {
+        defaultLimit: config.defaults.searchResultsPerProvider,
+      }),
   });
 
-  // Live pre-flight for a finance-data connection: a stored connection by id,
-  // or the unsaved form values from the Finance data settings section.
-  router.register("finance.provider.verify", async (payload) => {
-    const record = asRecord(payload);
-    const id = optionalString(record, "id");
-    const stored = id
-      ? (Array.isArray(config.financeProviders) ? config.financeProviders : []).find(
-          (connection) => connection.id === id,
-        )
-      : undefined;
-    if (id && !stored) throw new NotFoundError(`Finance provider ${id} not found`);
-
-    const connection = stored ?? adHocFinanceConnection(record);
-    const provider = createFinanceProvider(connection);
-
-    try {
-      return { ok: true, detail: isVerifiable(provider) ? await provider.verify() : "configured" };
-    } catch (error) {
-      return { ok: false, detail: errorMessage(error) };
-    }
+  registerConnectionVerify<FinanceConnection>(router, {
+    command: "finance.provider.verify",
+    noun: "Finance provider",
+    presets: FINANCE_PROVIDER_PRESETS,
+    stored: () => config.financeProviders,
+    build: (connection) => createFinanceProvider(connection),
   });
 
   router.register("topic.list", (payload) => topics.list(optionalString(asRecord(payload), "contextId")));
@@ -1004,25 +954,42 @@ function validateStopAfter(
   return step;
 }
 
-/** Validates unsaved LLM form values from the settings dialog. */
-function adHocLlmConnection(record: Record<string, unknown>): LlmConnection {
-  const candidate: Record<string, unknown> = {
-    id: "unsaved",
-    provider: record.provider,
-    model: record.model,
-    baseUrl: record.baseUrl,
-  };
-  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
-  if (!isLlmConnection(candidate)) {
-    throw new ValidationError(
-      `"provider", "model" and "baseUrl" must describe an LLM connection`,
-    );
-  }
-  return candidate;
+interface ConnectionVerifyOptions<T extends Connection> {
+  command: string;
+  noun: string;
+  presets: ConnectionPresets;
+  stored: () => T[];
+  build: (connection: T) => object;
 }
 
-/** Validates unsaved decision-model form values from the settings dialog. */
-function adHocDecisionConnection(record: Record<string, unknown>): DecisionModelConnection {
+function registerConnectionVerify<T extends Connection>(
+  router: CommandRouter,
+  options: ConnectionVerifyOptions<T>,
+): void {
+  const { command, noun, presets, stored, build } = options;
+  router.register(command, async (payload) => {
+    const record = asRecord(payload);
+    const id = optionalString(record, "id");
+    const connections = stored();
+    const storedConnection = id
+      ? (Array.isArray(connections) ? connections : []).find((entry) => entry.id === id)
+      : undefined;
+    if (id && !storedConnection) throw new NotFoundError(`${noun} ${id} not found`);
+
+    const provider = build(storedConnection ?? adHocConnection<T>(record, presets, noun));
+    try {
+      return { ok: true, detail: isVerifiable(provider) ? await provider.verify() : "configured" };
+    } catch (error) {
+      return { ok: false, detail: errorMessage(error) };
+    }
+  });
+}
+
+function adHocConnection<T extends Connection>(
+  record: Record<string, unknown>,
+  presets: ConnectionPresets,
+  noun: string,
+): T {
   const candidate: Record<string, unknown> = {
     id: "unsaved",
     provider: record.provider,
@@ -1031,43 +998,10 @@ function adHocDecisionConnection(record: Record<string, unknown>): DecisionModel
   };
   if (typeof record.accountId === "string") candidate.accountId = record.accountId;
   if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
-  if (!isDecisionModelConnection(candidate)) {
-    throw new ValidationError(
-      `"provider", "model" and "baseUrl" must describe a decision-model connection`,
-    );
+  if (!isConnection(candidate, presets)) {
+    throw new ValidationError(`The values do not describe a valid ${noun}`);
   }
-  return candidate;
-}
-
-/** Validates unsaved web-search form values from the settings dialog. */
-function adHocSearchConnection(record: Record<string, unknown>): SearchConnection {
-  const candidate: Record<string, unknown> = {
-    id: "unsaved",
-    provider: record.provider,
-    baseUrl: record.baseUrl,
-  };
-  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
-  if (!isSearchConnection(candidate)) {
-    throw new ValidationError(`"provider" and "baseUrl" must describe a web-search connection`);
-  }
-  return candidate;
-}
-
-/** Validates unsaved finance-data form values from the settings dialog. */
-function adHocFinanceConnection(record: Record<string, unknown>): FinanceConnection {
-  const candidate: Record<string, unknown> = {
-    id: "unsaved",
-    provider: record.provider,
-    model: record.model,
-    baseUrl: record.baseUrl,
-  };
-  if (typeof record.apiKey === "string") candidate.apiKey = record.apiKey;
-  if (!isFinanceConnection(candidate)) {
-    throw new ValidationError(
-      `"provider", "baseUrl" and "model" must describe a finance-data connection`,
-    );
-  }
-  return candidate;
+  return candidate as T;
 }
 
 /** The definition user workflow instances are built from (the briefing pipeline). */

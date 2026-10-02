@@ -1,8 +1,8 @@
 import {
-  isSearchConnection,
+  SEARCH_PROVIDER_PRESETS,
   type SearchConnection,
-  type SearchProviderId,
 } from "../../capabilities/search/SearchProviders.ts";
+import { filterConnections } from "../../capabilities/connections.ts";
 import type { SearchProvider } from "../../capabilities/search/SearchProvider.ts";
 import { ExaSearchProvider } from "./ExaSearchProvider.ts";
 import { PerplexitySearchProvider } from "./PerplexitySearchProvider.ts";
@@ -12,23 +12,18 @@ export interface SearchProviderOptions {
   defaultLimit?: number;
 }
 
-/** One provider per configured connection; malformed and duplicate rows are skipped. */
+/** One provider per configured connection; malformed rows are skipped. */
 export function createSearchProviders(
   connections: SearchConnection[],
   options: SearchProviderOptions = {},
 ): SearchProvider[] {
-  if (!Array.isArray(connections)) return [];
-  const providers: SearchProvider[] = [];
-  const seen = new Set<SearchProviderId>();
-  for (const connection of connections) {
-    if (!isSearchConnection(connection) || seen.has(connection.provider)) continue;
-    seen.add(connection.provider);
-    providers.push(createSearchProvider(connection, options));
-  }
-  return providers;
+  return filterConnections<SearchConnection>(
+    connections,
+    SEARCH_PROVIDER_PRESETS,
+    "provider",
+  ).map((connection) => createSearchProvider(connection, options));
 }
 
-/** Builds the concrete provider for one web-search connection. */
 export function createSearchProvider(
   connection: SearchConnection,
   options: SearchProviderOptions = {},

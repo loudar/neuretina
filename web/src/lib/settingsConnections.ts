@@ -7,13 +7,9 @@ import { commands } from "./commands";
 import type {
   ConnectionPreset,
   DecisionModelConnection,
-  DecisionProviderId,
   FinanceConnection,
-  FinanceProviderId,
   LlmConnection,
-  LlmProviderId,
   SearchConnection,
-  SearchProviderId,
 } from "./api";
 import {
   DECISION_PROVIDER_IDS,
@@ -32,13 +28,23 @@ import {
   SEARCH_PROVIDER_PRESETS,
 } from "./api";
 
-/** Editable shape every connection form produces. */
 export interface ConnectionForm {
   provider: string;
   model: string;
   baseUrl: string;
   accountId: string;
   apiKey: string;
+}
+
+function buildConnection(form: ConnectionForm, id: string): Record<string, unknown> {
+  return {
+    id,
+    provider: form.provider,
+    baseUrl: form.baseUrl.trim(),
+    ...(form.model.trim() ? { model: form.model.trim() } : {}),
+    ...(form.accountId.trim() ? { accountId: form.accountId.trim() } : {}),
+    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+  };
 }
 
 /**
@@ -94,23 +100,8 @@ export const LLM_CONNECTION_GROUP: ConnectionGroupConfig = {
     accountId: "",
     apiKey: connection.apiKey ?? "",
   }),
-  build: (form, id) => ({
-    id,
-    provider: form.provider as LlmProviderId,
-    model: form.model.trim(),
-    baseUrl: form.baseUrl.trim(),
-    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
-  }),
-  verify: (payload) =>
-    commands.llm.verify(
-      payload as {
-        id?: string;
-        provider?: LlmProviderId;
-        model?: string;
-        baseUrl?: string;
-        apiKey?: string;
-      },
-    ),
+  build: buildConnection,
+  verify: commands.llm.verify,
   activeTitle: "Active provider",
   activeSummary: (selected: LlmConnection | null) =>
     selected ? llmProviderLabel(selected) : "default OpenCode pairing",
@@ -138,25 +129,8 @@ export const DECISION_CONNECTION_GROUP: ConnectionGroupConfig = {
     accountId: connection.accountId ?? "",
     apiKey: connection.apiKey ?? "",
   }),
-  build: (form, id) => ({
-    id,
-    provider: form.provider as DecisionProviderId,
-    model: form.model.trim(),
-    baseUrl: form.baseUrl.trim(),
-    ...(form.accountId.trim() ? { accountId: form.accountId.trim() } : {}),
-    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
-  }),
-  verify: (payload) =>
-    commands.decision.verify(
-      payload as {
-        id?: string;
-        provider?: DecisionProviderId;
-        model?: string;
-        baseUrl?: string;
-        accountId?: string;
-        apiKey?: string;
-      },
-    ),
+  build: buildConnection,
+  verify: commands.decision.verify,
   removeNote: "Decisions fall back to the local model or the LLM.",
   activeTitle: "Active model",
   activeSummary: (selected: DecisionModelConnection | null) =>
@@ -186,21 +160,8 @@ export const SEARCH_CONNECTION_GROUP: ConnectionGroupConfig = {
     accountId: "",
     apiKey: connection.apiKey ?? "",
   }),
-  build: (form, id) => ({
-    id,
-    provider: form.provider as SearchProviderId,
-    baseUrl: form.baseUrl.trim(),
-    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
-  }),
-  verify: (payload) =>
-    commands.search.verify(
-      payload as {
-        id?: string;
-        provider?: SearchProviderId;
-        baseUrl?: string;
-        apiKey?: string;
-      },
-    ),
+  build: buildConnection,
+  verify: commands.search.verify,
   activeTitle: "Active provider",
   activeSummary: (selected: SearchConnection | null) =>
     selected ? searchConnectionLabel(selected) : "no provider configured",
@@ -230,23 +191,8 @@ export const FINANCE_CONNECTION_GROUP: ConnectionGroupConfig = {
     accountId: "",
     apiKey: connection.apiKey ?? "",
   }),
-  build: (form, id) => ({
-    id,
-    provider: form.provider as FinanceProviderId,
-    baseUrl: form.baseUrl.trim(),
-    ...(form.model.trim() ? { model: form.model.trim() } : {}),
-    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
-  }),
-  verify: (payload) =>
-    commands.finance.verify(
-      payload as {
-        id?: string;
-        provider?: FinanceProviderId;
-        baseUrl?: string;
-        model?: string;
-        apiKey?: string;
-      },
-    ),
+  build: buildConnection,
+  verify: commands.finance.verify,
 };
 
 function searchConnectionLabel(connection: SearchConnection): string {

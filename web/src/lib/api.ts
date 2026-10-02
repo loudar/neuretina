@@ -1,18 +1,18 @@
 // Connection types, presets and labels come from the capability modules the
 // server uses, so the UI and the engine cannot drift apart.
+import type { ConnectionPreset } from "../../../src/capabilities/connections.ts";
 import {
   DECISION_PROVIDER_PRESETS,
   DECISION_PROVIDER_IDS,
   decisionModelLabel,
   type DecisionModelConnection,
   type DecisionProviderId,
-  type DecisionProviderPreset,
 } from "../../../src/capabilities/decision/DecisionProviders.ts";
 import {
+  FINANCE_PROVIDER_IDS,
   FINANCE_PROVIDER_PRESETS,
   type FinanceConnection,
   type FinanceProviderId,
-  type FinanceProviderPreset,
 } from "../../../src/capabilities/finance/FinanceProviders.ts";
 import {
   LLM_PROVIDER_PRESETS,
@@ -20,13 +20,12 @@ import {
   llmProviderLabel,
   type LlmConnection,
   type LlmProviderId,
-  type LlmProviderPreset,
 } from "../../../src/capabilities/llm/LlmProviders.ts";
 import {
+  SEARCH_PROVIDER_IDS,
   SEARCH_PROVIDER_PRESETS,
   type SearchConnection,
   type SearchProviderId,
-  type SearchProviderPreset,
 } from "../../../src/capabilities/search/SearchProviders.ts";
 import type { SearchMedia } from "../../../src/capabilities/search/SearchProvider.ts";
 import type { SettingInfo, SettingKind, SettingSource } from "../../../src/config/settings.ts";
@@ -213,36 +212,25 @@ export {
   DECISION_PROVIDER_PRESETS,
   DECISION_PROVIDER_IDS,
   decisionModelLabel,
+  FINANCE_PROVIDER_IDS,
+  FINANCE_PROVIDER_PRESETS,
   LLM_PROVIDER_PRESETS,
   LLM_PROVIDER_IDS,
   llmProviderLabel,
+  SEARCH_PROVIDER_IDS,
   SEARCH_PROVIDER_PRESETS,
-  FINANCE_PROVIDER_PRESETS,
 };
 export type {
+  ConnectionPreset,
   DecisionModelConnection,
   DecisionProviderId,
-  DecisionProviderPreset,
   FinanceConnection,
   FinanceProviderId,
-  FinanceProviderPreset,
   LlmConnection,
   LlmProviderId,
-  LlmProviderPreset,
   SearchConnection,
   SearchProviderId,
-  SearchProviderPreset,
 };
-
-/** Any provider's preset; the settings form reads only the shared fields. */
-export type ConnectionPreset =
-  | LlmProviderPreset
-  | DecisionProviderPreset
-  | SearchProviderPreset
-  | FinanceProviderPreset;
-
-export const SEARCH_PROVIDER_IDS = Object.keys(SEARCH_PROVIDER_PRESETS) as SearchProviderId[];
-export const FINANCE_PROVIDER_IDS = Object.keys(FINANCE_PROVIDER_PRESETS) as FinanceProviderId[];
 
 /** Parses a stored connection-list setting; rows missing required fields are dropped. */
 function parseConnections<T>(value: string | null | undefined, fields: Array<keyof T & string>): T[] {
@@ -261,24 +249,20 @@ function parseConnections<T>(value: string | null | undefined, fields: Array<key
   }
 }
 
-/** Parses the stored DECISION_MODELS value into connection rows. */
 export function parseDecisionModelConnections(
   value: string | null | undefined,
 ): DecisionModelConnection[] {
   return parseConnections<DecisionModelConnection>(value, ["id", "provider", "model", "baseUrl"]);
 }
 
-/** Parses the stored LLM_PROVIDERS value into connection rows. */
 export function parseLlmConnections(value: string | null | undefined): LlmConnection[] {
   return parseConnections<LlmConnection>(value, ["id", "provider", "model", "baseUrl"]);
 }
 
-/** Parses the stored SEARCH_PROVIDERS value into connection rows. */
 export function parseSearchConnections(value: string | null | undefined): SearchConnection[] {
   return parseConnections<SearchConnection>(value, ["id", "provider", "baseUrl"]);
 }
 
-/** Parses the stored FINANCE_PROVIDERS value into connection rows. */
 export function parseFinanceConnections(value: string | null | undefined): FinanceConnection[] {
   return parseConnections<FinanceConnection>(value, ["id", "provider", "baseUrl"]);
 }

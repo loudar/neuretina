@@ -1,26 +1,21 @@
 import {
-  isFinanceConnection,
+  FINANCE_PROVIDER_PRESETS,
   type FinanceConnection,
-  type FinanceProviderId,
 } from "../../capabilities/finance/FinanceProviders.ts";
+import { filterConnections } from "../../capabilities/connections.ts";
 import type { FinanceProvider } from "../../capabilities/finance/FinanceProvider.ts";
 import { PerplexityFinanceProvider } from "./PerplexityFinanceProvider.ts";
 import { YahooFinanceProvider } from "./YahooFinanceProvider.ts";
 
-/** One provider per configured connection; malformed and duplicate rows are skipped. */
+/** One provider per configured connection; malformed rows are skipped. */
 export function createFinanceProviders(connections: FinanceConnection[]): FinanceProvider[] {
-  if (!Array.isArray(connections)) return [];
-  const providers: FinanceProvider[] = [];
-  const seen = new Set<FinanceProviderId>();
-  for (const connection of connections) {
-    if (!isFinanceConnection(connection) || seen.has(connection.provider)) continue;
-    seen.add(connection.provider);
-    providers.push(createFinanceProvider(connection));
-  }
-  return providers;
+  return filterConnections<FinanceConnection>(
+    connections,
+    FINANCE_PROVIDER_PRESETS,
+    "provider",
+  ).map((connection) => createFinanceProvider(connection));
 }
 
-/** Builds the concrete provider for one finance-data connection. */
 export function createFinanceProvider(connection: FinanceConnection): FinanceProvider {
   switch (connection.provider) {
     case "perplexity":

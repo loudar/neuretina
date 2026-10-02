@@ -7,17 +7,13 @@ import type {
   ReportAudio,
   DataBundle,
   DataImportSummary,
-  DecisionProviderId,
   DeliveryAttachmentInfo,
   DeliveryChannelInfo,
   DeliveryChannelType,
   DeliveryRecord,
   DeliveryTargetInfo,
   DeliveryWorkflowInfo,
-  FinanceProviderId,
-  LlmProviderId,
   ScheduledJob,
-  SearchProviderId,
   SettingInfo,
   TimelineEvent,
   Topic,
@@ -49,47 +45,23 @@ export const commands = {
   },
 
   llm: {
-    /** Live pre-flight: stored connection by id, or unsaved dialog values. */
-    verify: (connection: {
-      id?: string;
-      provider?: LlmProviderId;
-      model?: string;
-      baseUrl?: string;
-      apiKey?: string;
-    }) => send<{ ok: boolean; detail: string }>("llm.provider.verify", connection),
+    verify: (connection: Record<string, unknown>) =>
+      send<{ ok: boolean; detail: string }>("llm.provider.verify", connection),
   },
 
   decision: {
-    /** Live pre-flight: stored connection by id, or unsaved dialog values. */
-    verify: (connection: {
-      id?: string;
-      provider?: DecisionProviderId;
-      model?: string;
-      baseUrl?: string;
-      accountId?: string;
-      apiKey?: string;
-    }) => send<{ ok: boolean; detail: string }>("decision.model.verify", connection),
+    verify: (connection: Record<string, unknown>) =>
+      send<{ ok: boolean; detail: string }>("decision.model.verify", connection),
   },
 
   search: {
-    /** Live pre-flight: stored connection by id, or unsaved dialog values. */
-    verify: (connection: {
-      id?: string;
-      provider?: SearchProviderId;
-      baseUrl?: string;
-      apiKey?: string;
-    }) => send<{ ok: boolean; detail: string }>("search.provider.verify", connection),
+    verify: (connection: Record<string, unknown>) =>
+      send<{ ok: boolean; detail: string }>("search.provider.verify", connection),
   },
 
   finance: {
-    /** Live pre-flight: stored connection by id, or unsaved dialog values. */
-    verify: (connection: {
-      id?: string;
-      provider?: FinanceProviderId;
-      baseUrl?: string;
-      model?: string;
-      apiKey?: string;
-    }) => send<{ ok: boolean; detail: string }>("finance.provider.verify", connection),
+    verify: (connection: Record<string, unknown>) =>
+      send<{ ok: boolean; detail: string }>("finance.provider.verify", connection),
   },
 
   contexts: {
