@@ -319,7 +319,7 @@ describe("EventExtractor decision model selection", () => {
     registry.register(stubDecision("laya", "ai", () => local++));
 
     const { extractor } = extractorWith({ decisions: registry, decisionModel: "conn-1" });
-    const result = await extractor.extract({ brief: "# Brief", sources: [] });
+    const result = await extractor.extract({ report: "# Report", sources: [] });
 
     expect(result.events[0]?.tags).toEqual(["markets"]);
     expect(hosted).toBe(1);
@@ -333,7 +333,7 @@ describe("EventExtractor decision model selection", () => {
     registry.register(stubDecision("laya", "ai", () => local++));
 
     const { extractor } = extractorWith({ decisions: registry });
-    const result = await extractor.extract({ brief: "# Brief", sources: [] });
+    const result = await extractor.extract({ report: "# Report", sources: [] });
 
     expect(result.events[0]?.tags).toEqual(["ai"]);
     expect(local).toBe(1);
@@ -345,7 +345,7 @@ describe("EventExtractor decision model selection", () => {
     registry.register(stubDecision("laya", "markets", () => local++));
 
     const { extractor } = extractorWith({ decisions: registry, decisionModel: "removed" });
-    const result = await extractor.extract({ brief: "# Brief", sources: [] });
+    const result = await extractor.extract({ report: "# Report", sources: [] });
 
     expect(result.events[0]?.tags).toEqual(["markets"]);
     expect(local).toBe(1);

@@ -19,8 +19,8 @@ const voice: OutboundVoiceMessage = {
   audio: new Uint8Array([1, 2, 3, 4]),
   mimeType: "audio/ogg",
   durationMs: 3000,
-  filename: "brief.ogg",
-  caption: "Morning brief",
+  filename: "report.ogg",
+  caption: "Morning report",
 };
 
 interface Call {

@@ -223,42 +223,42 @@ describe("password-protected gateway", () => {
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 
-  test("serves a brief anonymously through its share token", async () => {
-    const brief = kernel.briefs.create({
+  test("serves a report anonymously through its share token", async () => {
+    const report = kernel.reports.create({
       topics: ["Rust"],
-      markdown: "# Shared brief",
+      markdown: "# Shared report",
       narration: "spoken",
       sources: [],
     });
-    const token = kernel.briefs.shareToken(brief.id)!;
-    kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg");
+    const token = kernel.reports.shareToken(report.id)!;
+    kernel.reports.attachAudio(report.id, new Uint8Array([1, 2, 3]), "audio/ogg");
 
     // No session cookie: the token is the only credential.
-    const response = await fetch(`${base}/api/share/brief/${token}`);
+    const response = await fetch(`${base}/api/share/report/${token}`);
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { brief: { id: string; markdown: string } };
-    expect(body.brief.id).toBe(brief.id);
-    expect(body.brief.markdown).toBe("# Shared brief");
+    const body = (await response.json()) as { report: { id: string; markdown: string } };
+    expect(body.report.id).toBe(report.id);
+    expect(body.report.markdown).toBe("# Shared report");
 
-    const audio = await fetch(`${base}/api/share/brief/${token}/audio`);
+    const audio = await fetch(`${base}/api/share/report/${token}/audio`);
     expect(audio.status).toBe(200);
     expect(audio.headers.get("content-type")).toBe("audio/ogg");
     expect(new Uint8Array(await audio.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
 
-    expect((await fetch(`${base}/api/share/brief/unknown`)).status).toBe(404);
-    expect((await fetch(`${base}/api/share/brief/unknown/audio`)).status).toBe(404);
+    expect((await fetch(`${base}/api/share/report/unknown`)).status).toBe(404);
+    expect((await fetch(`${base}/api/share/report/unknown/audio`)).status).toBe(404);
   });
 
-  test("includes the timeline artifact and its events in a shared brief", async () => {
+  test("includes the timeline artifact and its events in a shared report", async () => {
     const event = kernel.events.upsert({
       date: "2026-09-30",
       title: "Rust 1.90 released",
       description: "Faster builds.",
       entities: ["Rust"],
     });
-    const brief = kernel.briefs.create({
+    const report = kernel.reports.create({
       topics: ["Rust"],
-      markdown: "# Shared brief",
+      markdown: "# Shared report",
       narration: "spoken",
       sources: [],
     });
@@ -267,26 +267,24 @@ describe("password-protected gateway", () => {
       contentType: "text/markdown",
       content: "## Timeline",
       metadata: { eventIds: [event.id] },
-      parentId: brief.artifactId,
+      parentId: report.artifactId,
     });
-    kernel.artifacts.updateMetadata(brief.artifactId, { timelineArtifactId: timeline.id });
-    const token = kernel.briefs.shareToken(brief.id)!;
+    kernel.reports.attach(report.id, timeline.id);
+    const token = kernel.reports.shareToken(report.id)!;
 
-    const response = await fetch(`${base}/api/share/brief/${token}`);
+    const response = await fetch(`${base}/api/share/report/${token}`);
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
-      brief: {
-        timelineArtifactId?: string;
+      report: {
         timeline?: {
           artifact: { id: string; kind: string };
           events: Array<{ id: string; title: string }>;
         };
       };
     };
-    expect(body.brief.timelineArtifactId).toBe(timeline.id);
-    expect(body.brief.timeline?.artifact.id).toBe(timeline.id);
-    expect(body.brief.timeline?.artifact.kind).toBe("timeline");
-    expect(body.brief.timeline?.events.map((entry) => entry.id)).toEqual([event.id]);
+    expect(body.report.timeline?.artifact.id).toBe(timeline.id);
+    expect(body.report.timeline?.artifact.kind).toBe("timeline");
+    expect(body.report.timeline?.events.map((entry) => entry.id)).toEqual([event.id]);
   });
 });
 

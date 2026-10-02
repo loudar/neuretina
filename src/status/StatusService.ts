@@ -11,7 +11,7 @@ export interface StatusServiceDeps {
 
 /**
  * Derives coarse status-feed entries from bus events (job lifecycle, compiled
- * briefs, failures, chat commands). Fine-grained spans ("reasoning", "calling
+ * reports, failures, chat commands). Fine-grained spans ("reasoning", "calling
  * tool x", "waiting for x") are instrumented directly by agents and workflows
  * via the hub.
  */
@@ -48,27 +48,27 @@ export class StatusService {
       this.jobHandles.delete(key);
     });
 
-    bus.subscribe("brief.generated", (event) => {
+    bus.subscribe("report.generated", (event) => {
       const payload = event.payload as {
-        briefId: string;
+        reportId: string;
         topics: string[];
         sources: number;
         characters: number;
       };
       hub.push(
-        `Brief compiled: ${payload.topics.join(", ")} (${payload.sources} sources, ${payload.characters} chars)`,
+        `Report compiled: ${payload.topics.join(", ")} (${payload.sources} sources, ${payload.characters} chars)`,
         {
           state: "done",
-          activityId: `brief:${payload.briefId}`,
+          activityId: `report:${payload.reportId}`,
           correlationId: event.correlationId,
         },
       );
     });
 
-    bus.subscribe("brief.skipped", (event) => {
+    bus.subscribe("report.skipped", (event) => {
       const payload = event.payload as { reason: string; topics?: string[] };
       const topics = payload.topics?.length ? ` (${payload.topics.join(", ")})` : "";
-      hub.push(`Brief skipped${topics}: ${payload.reason}`, {
+      hub.push(`Report skipped${topics}: ${payload.reason}`, {
         state: "failed",
         correlationId: event.correlationId,
       });

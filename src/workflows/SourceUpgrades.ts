@@ -8,7 +8,7 @@ import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { WorkflowContext } from "../core/workflow/Workflow.ts";
-import type { BriefSource } from "../domain/briefs/BriefRepository.ts";
+import type { ReportSource } from "../domain/reports/ReportRepository.ts";
 import { collectSources } from "./agentResults.ts";
 
 export interface SourceUpgrade {
@@ -21,12 +21,12 @@ export interface SourceUpgrade {
 export interface SourceUpgradeInput {
   topics: string[];
   markdown: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
 }
 
 export interface SourceUpgradeOutcome {
   markdown: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
   upgraded: number;
 }
 
@@ -45,7 +45,7 @@ export interface SourceUpgradesDeps {
 /** At most this many source replacements per briefing. */
 export const MAX_SOURCE_UPGRADES = 5;
 
-const SOURCE_UPGRADES_SYSTEM_PROMPT = `You run the source upgrades pass on a finished briefing. You receive the brief and its numbered source list. Many claims are backed by secondary coverage — news articles about something. Your job is to trace those claims back to the PRIMARY source and, where the primary source is more precise, align the claim with it.
+const SOURCE_UPGRADES_SYSTEM_PROMPT = `You run the source upgrades pass on a finished briefing. You receive the report and its numbered source list. Many claims are backed by secondary coverage — news articles about something. Your job is to trace those claims back to the PRIMARY source and, where the primary source is more precise, align the claim with it.
 
 A primary source is where the information originated: an official announcement or press release, a company blog or investor-relations page, a filing, a regulator or government publication, the original dataset, documentation, or the announcement post itself. News coverage about the announcement is secondary; the announcement is primary.
 
@@ -61,13 +61,13 @@ Rules:
 - Finding no primary source is a valid answer.
 
 Finish with a single JSON object and nothing else:
-{"markdown": "<the full brief, revised only where required>", "upgrades": [{"for": 4, "title": "<primary source title>", "url": "<primary source URL>"}]}
-Return the brief text unchanged when no wording revision is needed.`;
+{"markdown": "<the full report, revised only where required>", "upgrades": [{"for": 4, "title": "<primary source title>", "url": "<primary source URL>"}]}
+Return the report text unchanged when no wording revision is needed.`;
 
 /**
  * After the draft (and its implications) is settled, one more research agent
  * traces claims back to primary sources such as official announcements, and
- * replaces the matching entries in the brief's source list. Citation numbers
+ * replaces the matching entries in the report's source list. Citation numbers
  * stay stable, so the revised text keeps pointing at the right sources.
  */
 export class SourceUpgrades {
@@ -147,7 +147,7 @@ export class SourceUpgrades {
       }
 
       status?.done(
-        `Primary sources: ${upgraded} upgrade(s)${revision ? ", brief revised" : ""}`,
+        `Primary sources: ${upgraded} upgrade(s)${revision ? ", report revised" : ""}`,
       );
       return { markdown: revision ?? input.markdown, sources, upgraded };
     } catch (error) {
@@ -163,7 +163,7 @@ export class SourceUpgrades {
 function buildSourceUpgradePrompt(input: SourceUpgradeInput): string {
   return JSON.stringify({
     topics: input.topics,
-    brief: input.markdown,
+    report: input.markdown,
     sources: input.sources.map((source, index) => ({
       n: index + 1,
       title: source.title,
@@ -201,10 +201,10 @@ export function parseSourceUpgrades(
 }
 
 export function applySourceUpgrades(
-  sources: BriefSource[],
+  sources: ReportSource[],
   upgrades: SourceUpgrade[],
-  found: BriefSource[],
-): BriefSource[] {
+  found: ReportSource[],
+): ReportSource[] {
   if (upgrades.length === 0) return sources;
 
   const byUrl = new Map(found.map((source) => [source.url, source]));
@@ -225,7 +225,7 @@ export function applySourceUpgrades(
   return next;
 }
 
-function countReplacements(previous: BriefSource[], next: BriefSource[]): number {
+function countReplacements(previous: ReportSource[], next: ReportSource[]): number {
   let count = 0;
   for (let index = 0; index < next.length; index++) {
     if (previous[index]?.url !== next[index]?.url) count++;

@@ -43,7 +43,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     !overridden.runs ||
     !overridden.artifacts ||
     !overridden.topics ||
-    !overridden.briefs ||
+    !overridden.reports ||
     !overridden.jobs ||
     !overridden.kv ||
     !overridden.deliveries ||
@@ -120,32 +120,26 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     bus: adminRuntime.bus,
     adminUser,
     runtimeFor: (username) => runtimeFor(username),
-    // Share tokens are per account; find the runtime that owns the brief.
-    sharedBrief: (token) => {
+    // Share tokens are per account; find the runtime that owns the report.
+    sharedReport: (token) => {
       for (const runtime of runtimes.values()) {
-        const brief = runtime.briefs.findByShareToken(token);
-        if (!brief) continue;
+        const report = runtime.reports.findByShareToken(token);
+        if (!report) continue;
         return {
-          brief,
-          audio: () => runtime.briefs.getAudio(brief.id),
+          report,
+          audio: () => runtime.reports.getAudio(report.id),
           timeline: () => {
-            const artifactId = brief.timelineArtifactId;
-            if (!artifactId) return null;
-            try {
-              const artifact = runtime.artifacts.get(artifactId);
-              const ids = Array.isArray(artifact.metadata.eventIds)
-                ? artifact.metadata.eventIds.filter(
-                    (id): id is string => typeof id === "string" && id.length > 0,
-                  )
-                : [];
-              return {
-                artifact,
-                events: ids.length > 0 ? runtime.events.list({ ids }) : [],
-              };
-            } catch {
-              // The artifact was removed after the brief was linked.
-              return null;
-            }
+            const artifact = report.artifacts.find((entry) => entry.kind === "timeline");
+            if (!artifact) return null;
+            const ids = Array.isArray(artifact.metadata.eventIds)
+              ? artifact.metadata.eventIds.filter(
+                  (id): id is string => typeof id === "string" && id.length > 0,
+                )
+              : [];
+            return {
+              artifact,
+              events: ids.length > 0 ? runtime.events.list({ ids }) : [],
+            };
           },
         };
       }
@@ -183,7 +177,7 @@ export async function createKernel(overrides: KernelOverrides = {}): Promise<Ker
     runs: adminRuntime.runs,
     artifacts: adminRuntime.artifacts,
     topics: adminRuntime.topics,
-    briefs: adminRuntime.briefs,
+    reports: adminRuntime.reports,
     jobs: adminRuntime.jobs,
     deliveries: adminRuntime.deliveries,
     userWorkflows: adminRuntime.userWorkflows,

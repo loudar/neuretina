@@ -225,7 +225,7 @@ import DataList from "./DataList.svelte";
 <ConfirmDeleteDialog
   bind:open={confirmingDelete}
   headline="Delete this topic?"
-  message={`"${selected?.name}" will be permanently removed. Existing briefs are kept. This cannot be undone.`}
+  message={`"${selected?.name}" will be permanently removed. Existing reports are kept. This cannot be undone.`}
   busy={deleting}
   onconfirm={remove}
   oncancel={() => (confirmingDelete = false)}

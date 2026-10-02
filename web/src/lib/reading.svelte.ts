@@ -1,12 +1,12 @@
 /**
- * Reading preferences shared by every markdown view (brief details, artifact
+ * Reading preferences shared by every markdown view (report details, artifact
  * details), so the two stay in sync.
  */
 export type ReadingSize = "small" | "medium" | "large";
 
 export const READING_SIZES: ReadingSize[] = ["small", "medium", "large"];
 
-const STORAGE_KEY = "briefs.readingSize";
+const STORAGE_KEY = "reports.readingSize";
 
 const READING_SIZE_CSS: Record<ReadingSize, string> = {
   small: "var(--font-medium)",

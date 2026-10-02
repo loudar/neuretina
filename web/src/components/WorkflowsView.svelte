@@ -587,7 +587,7 @@
     if (run.output === undefined || run.output === null) return "–";
     const output = run.output as Record<string, unknown>;
     if (typeof output.answer === "string") return output.answer;
-    if (typeof output.briefId === "string") return `brief ${output.briefId}`;
+    if (typeof output.reportId === "string") return `report ${output.reportId}`;
     if (typeof output.markdown === "string") return `${output.markdown.slice(0, 200)}…`;
     return JSON.stringify(run.output).slice(0, 300);
   }

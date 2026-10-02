@@ -23,7 +23,7 @@ export interface CodeModeToolOptions {
   executor?: CodeModeExecutor;
 }
 
-/** A search result plus the provider it came from, for brief attribution. */
+/** A search result plus the provider it came from, for report attribution. */
 export interface CodeModeSource extends SearchResult {
   provider: string;
 }
@@ -39,7 +39,7 @@ export interface CodeModeResult {
   toolUsages: Array<{ tool: string; usage: unknown }>;
   /** Every query/question the program passed to a tool. */
   queries: string[];
-  /** Search sources gathered inside the sandbox, for the brief's source list. */
+  /** Search sources gathered inside the sandbox, for the report's source list. */
   results: CodeModeSource[];
   durationMs: number;
 }
@@ -50,7 +50,7 @@ const DESCRIPTION_INTRO = `Run JavaScript to do research in one step, instead of
 
 The function must return a JSON-serializable value — that value is all you get back, so filter, merge and trim inside the code (Promise.all, loops, if-statements) and return compact findings rather than raw tool output. console.log is captured and returned with the result.
 
-Tool calls never throw: a failed call resolves to { error: string, results: [], briefs: [], data: [], answer: "" } instead of rejecting, so one flaky provider cannot abort your program. Check .error when it matters and carry on with the calls that succeeded.
+Tool calls never throw: a failed call resolves to { error: string, results: [], reports: [], data: [], answer: "" } instead of rejecting, so one flaky provider cannot abort your program. Check .error when it matters and carry on with the calls that succeeded.
 
 Example:
 async () => {
@@ -80,10 +80,10 @@ const TOOL_DOCS: Record<string, string> = {
   Perplexity's finance agent: a synthesized answer plus structured market and financial data for public companies and ETFs. Ask a business question naming the company or ticker.`,
   "finance.yahoo": `finance.yahoo({ question }) -> same shape
   Yahoo Finance quotes: latest price, change, day and 52-week ranges and volume for the tickers matched from the question.`,
-  past_briefs: `past_briefs({ query?, limit? }) -> { briefs: [{ id, date, topics, excerpt }] }
+  past_reports: `past_reports({ query?, limit? }) -> { reports: [{ id, date, topics, excerpt }] }
   Search earlier briefings by topic or keyword, to build on what was already covered.`,
-  past_brief: `past_brief({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
-  Open one earlier briefing in full, using an id from past_briefs.`,
+  past_report: `past_report({ id }) -> { id, date, topics, markdown, sources: [{ title, url }] }
+  Open one earlier briefing in full, using an id from past_reports.`,
 };
 
 function describeTools(tools: Tool[]): string {

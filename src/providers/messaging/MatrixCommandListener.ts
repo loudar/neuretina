@@ -90,7 +90,7 @@ export class MatrixCommandListener implements ChatCommandSource {
   private readonly ownMessageOrder: string[] = [];
 
   constructor(private readonly options: MatrixCommandListenerOptions) {
-    // Messages the bot sends through the messaging provider (briefs, notices,
+    // Messages the bot sends through the messaging provider (reports, notices,
     // re-sends) count as "ours" for follow-up replies too.
     options.bus.subscribeTopics(["message.text.sent", "message.voice.sent"], (event) => {
       const eventId = (event.payload as { eventId?: unknown }).eventId;

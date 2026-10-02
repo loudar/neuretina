@@ -4,7 +4,7 @@ import { KeyValueRepository } from "../src/domain/kv/KeyValueRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { JobRepository } from "../src/domain/jobs/JobRepository.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
-import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { ReportRepository } from "../src/domain/reports/ReportRepository.ts";
 import { WorkflowRunRepository } from "../src/domain/runs/WorkflowRunRepository.ts";
 import { StatusRepository } from "../src/domain/status/StatusRepository.ts";
 
@@ -12,8 +12,8 @@ function db(): SqliteDatabase {
   return new SqliteDatabase(":memory:");
 }
 
-function briefsRepo(): BriefRepository {
-  return new BriefRepository(new ArtifactRepository(db()));
+function reportsRepo(): ReportRepository {
+  return new ReportRepository(new ArtifactRepository(db()));
 }
 
 describe("KeyValueRepository", () => {
@@ -86,7 +86,7 @@ describe("JobRepository", () => {
     const repo = new JobRepository(db());
 
     const job = repo.create({
-      name: "morning-brief",
+      name: "morning-report",
       cron: "0 7 * * *",
       timezone: "Europe/Berlin",
       workflow: "briefing",
@@ -111,11 +111,11 @@ describe("JobRepository", () => {
   });
 });
 
-describe("BriefRepository", () => {
-  test("stores briefs with audio and returns them without the blob by default", () => {
-    const repo = briefsRepo();
+describe("ReportRepository", () => {
+  test("stores reports with audio and returns them without the blob by default", () => {
+    const repo = reportsRepo();
 
-    const brief = repo.create({
+    const report = repo.create({
       correlationId: "corr-1",
       topics: ["Rust"],
       markdown: "# Rust\nAll good",
@@ -123,28 +123,61 @@ describe("BriefRepository", () => {
       sources: [{ title: "Example", url: "https://example.com", provider: "perplexity" }],
     });
 
-    repo.attachAudio(brief.id, new Uint8Array([9, 9, 9]), "audio/ogg", 4200);
+    repo.attachAudio(report.id, new Uint8Array([9, 9, 9]), "audio/ogg", 4200);
 
-    const stored = repo.get(brief.id, false);
+    const stored = repo.get(report.id, false);
     expect(stored.hasAudio).toBe(true);
     expect(stored.audio).toBeUndefined();
     expect(stored.audioDurationMs).toBe(4200);
-    expect(stored.artifactId).toBe(brief.id);
+    expect(stored.artifactId).toBe(report.id);
     expect(stored.audioArtifactId).toBeTruthy();
 
-    const withAudio = repo.get(brief.id, true);
+    const withAudio = repo.get(report.id, true);
     expect(withAudio.audio).toEqual(new Uint8Array([9, 9, 9]));
 
-    const audio = repo.getAudio(brief.id);
+    const audio = repo.getAudio(report.id);
     expect(audio?.mimeType).toBe("audio/ogg");
     expect(audio?.audio.byteLength).toBe(3);
 
-    expect(repo.latest()?.id).toBe(brief.id);
+    expect(repo.latest()?.id).toBe(report.id);
     expect(repo.list()).toHaveLength(1);
   });
 
+  test("holds any list of artifacts in a specific order", () => {
+    const artifacts = new ArtifactRepository(db());
+    const repo = new ReportRepository(artifacts);
+    const report = repo.create({
+      topics: ["Rust"],
+      markdown: "# Rust",
+      narration: "n",
+      sources: [],
+    });
+    const image = artifacts.create({ kind: "image", contentType: "image/png", metadata: {} });
+    const dataset = artifacts.create({
+      kind: "dataset",
+      contentType: "application/json",
+      content: "[]",
+      metadata: {},
+    });
+
+    repo.attach(report.id, image.id);
+    repo.attach(report.id, dataset.id);
+    expect(repo.get(report.id).artifacts.map((entry) => entry.id)).toEqual([
+      report.textArtifact!.id,
+      image.id,
+      dataset.id,
+    ]);
+
+    repo.order(report.id, [dataset.id, report.textArtifact!.id, image.id]);
+    expect(repo.get(report.id).artifacts.map((entry) => entry.id)).toEqual([
+      dataset.id,
+      report.textArtifact!.id,
+      image.id,
+    ]);
+  });
+
   test("search matches markdown and topics, and returns latest without a query", () => {
-    const repo = briefsRepo();
+    const repo = reportsRepo();
     const rust = repo.create({
       topics: ["Rust"],
       markdown: "# Rust\nOwnership news",
@@ -158,26 +191,26 @@ describe("BriefRepository", () => {
       sources: [],
     });
 
-    expect(repo.search("Ownership").map((brief) => brief.id)).toEqual([rust.id]);
-    expect(repo.search("regulation").map((brief) => brief.id)).toEqual([ai.id]);
+    expect(repo.search("Ownership").map((report) => report.id)).toEqual([rust.id]);
+    expect(repo.search("regulation").map((report) => report.id)).toEqual([ai.id]);
     expect(repo.search(undefined, 1)[0]?.id).toBe(ai.id);
     expect(repo.search(undefined, 10)).toHaveLength(2);
   });
 
-  test("removes briefs and reports missing ones", () => {
-    const repo = briefsRepo();
-    const brief = repo.create({
+  test("removes reports and reports missing ones", () => {
+    const repo = reportsRepo();
+    const report = repo.create({
       topics: ["Rust"],
       markdown: "# Rust",
       narration: "n",
       sources: [],
     });
 
-    const removed = repo.remove(brief.id);
-    expect(removed.id).toBe(brief.id);
+    const removed = repo.remove(report.id);
+    expect(removed.id).toBe(report.id);
     expect(repo.list()).toHaveLength(0);
-    expect(repo.getAudio(brief.id)).toBeNull();
-    expect(() => repo.remove(brief.id)).toThrow(/not found/);
+    expect(repo.getAudio(report.id)).toBeNull();
+    expect(() => repo.remove(report.id)).toThrow(/not found/);
   });
 });
 
@@ -232,7 +265,7 @@ describe("WorkflowRunRepository", () => {
 
     const checkpoint = {
       research: { notes: "Notes", sources: [], queries: ["t"], missingTopics: [] },
-      briefId: "brief-1",
+      reportId: "report-1",
     };
     repo.saveCheckpoint(run.id, checkpoint);
 

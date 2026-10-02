@@ -6,7 +6,7 @@ import { extractJson } from "../core/json.ts";
 import type { Logger } from "../core/logger.ts";
 import { textSimilarity, tokenSimilarity, wordCount } from "../core/text.ts";
 import type { DecisionModelRegistry } from "../capabilities/decision/DecisionModel.ts";
-import type { BriefSource } from "../domain/briefs/BriefRepository.ts";
+import type { ReportSource } from "../domain/reports/ReportRepository.ts";
 import type { EventStore, TimelineEvent } from "../domain/events/EventRepository.ts";
 
 /** Title similarity at which two events are treated as potential duplicates. */
@@ -15,8 +15,8 @@ const DUPLICATE_THRESHOLD = 0.6;
 const SAME_DAY_THRESHOLD = 0.45;
 /** Confidence a selected tag must reach to be applied. */
 const TAG_CONFIDENCE = 0.5;
-/** Most events one brief may contribute. */
-const MAX_EVENTS_PER_BRIEF = 8;
+/** Most events one report may contribute. */
+const MAX_EVENTS_PER_REPORT = 8;
 /** Hard cap on title length; the prompts ask the model for 4-5 words. */
 const MAX_TITLE_WORDS = 7;
 /** A clause before a colon/dash is kept only when it is at least this long. */
@@ -74,7 +74,7 @@ interface ReviewedEvent {
 }
 
 /**
- * Turns a finished brief into dated events:
+ * Turns a finished report into dated events:
  * suggestions → potential duplicates (edit distance + shared key terms,
  * thresholded) → LLM review of the candidates → upsert.
  *
@@ -86,9 +86,9 @@ export class EventExtractor {
   constructor(private readonly deps: EventExtractorDeps) {}
 
   async extract(input: {
-    briefId?: string;
-    brief: string;
-    sources: BriefSource[];
+    reportId?: string;
+    report: string;
+    sources: ReportSource[];
   }): Promise<ExtractionResult> {
     const suggestions = await this.suggest(input);
     if (suggestions.length === 0) return { events: [], newTags: [] };
@@ -111,7 +111,7 @@ export class EventExtractor {
         tags: mergeTags(target?.tags, tags),
         title: reviewed?.title ?? suggestion.title,
         description: reviewed?.description ?? suggestion.description,
-        sourceBriefId: input.briefId,
+        sourceReportId: input.reportId,
       });
 
       events.push(event);
@@ -123,14 +123,14 @@ export class EventExtractor {
     return { events, newTags };
   }
 
-  /** One LLM call: dated events learned from the brief and its sources. */
+  /** One LLM call: dated events learned from the report and its sources. */
   private async suggest(input: {
-    brief: string;
-    sources: BriefSource[];
+    report: string;
+    sources: ReportSource[];
   }): Promise<EventSuggestion[]> {
     const parsed = (await this.complete(SUGGEST_PROMPT, {
       today: isoDate(),
-      brief: input.brief,
+      report: input.report,
       sources: input.sources.map((source) => ({
         title: source.title,
         url: source.url,
@@ -153,7 +153,7 @@ export class EventExtractor {
         title,
         description: typeof record.description === "string" ? record.description.trim() : "",
       });
-      if (suggestions.length >= MAX_EVENTS_PER_BRIEF) break;
+      if (suggestions.length >= MAX_EVENTS_PER_REPORT) break;
     }
     return suggestions;
   }

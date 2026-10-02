@@ -105,8 +105,8 @@ export interface AppEvents {
   };
   "artifact.deleted": { artifactId: string; kind: string };
 
-  "brief.research.started": { correlationId: string; topics: string[] };
-  "brief.research.completed": {
+  "report.research.started": { correlationId: string; topics: string[] };
+  "report.research.completed": {
     correlationId: string;
     topics: string[];
     sources: number;
@@ -114,25 +114,25 @@ export interface AppEvents {
     queries: string[];
     missingTopics?: string[];
   };
-  "brief.generated": {
+  "report.generated": {
     correlationId: string;
-    briefId: string;
+    reportId: string;
     artifactId: string;
     topics: string[];
     sources: number;
     characters: number;
   };
-  "brief.skipped": {
+  "report.skipped": {
     correlationId: string;
     reason: string;
     topics?: string[];
     queries?: string[];
   };
-  "brief.deleted": { correlationId: string; briefId: string };
+  "report.deleted": { correlationId: string; reportId: string };
 
   "tts.synthesized": {
     correlationId: string;
-    briefId: string;
+    reportId: string;
     artifactId?: string;
     audioArtifactId?: string;
     characters: number;
@@ -141,7 +141,7 @@ export interface AppEvents {
   };
   "message.voice.sent": {
     correlationId: string;
-    briefId: string;
+    reportId: string;
     channel: string;
     eventId: string;
   };
@@ -172,7 +172,7 @@ export interface AppEvents {
   "delivery.updated": { action: "create" | "update" | "delete" | "attach" | "detach" };
   /** One delivery attempt through a channel, from recording to settlement. */
   "delivery.status": {
-    briefId: string;
+    reportId: string;
     runId?: string;
     channelId: string;
     kind: "text" | "voice";

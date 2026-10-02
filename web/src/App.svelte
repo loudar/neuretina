@@ -19,9 +19,9 @@
   import { mountHoverPopovers } from "./lib/hoverPopover";
   import { authState } from "./lib/auth.svelte";
   import { paths, router } from "./lib/router.svelte";
-  import BriefsView from "./components/BriefsView.svelte";
+  import ReportsView from "./components/ReportsView.svelte";
   import LoginView from "./components/LoginView.svelte";
-  import SharedBriefView from "./components/SharedBriefView.svelte";
+  import SharedReportView from "./components/SharedReportView.svelte";
   import TopicsView from "./components/TopicsView.svelte";
   import JobsView from "./components/JobsView.svelte";
   import WorkflowsView from "./components/WorkflowsView.svelte";
@@ -33,14 +33,14 @@
   const tab = $derived(router.current.tab);
   const config = $derived(configState.value);
 
-  // A delivery link carries a brief's anonymous token; without a session it
+  // A delivery link carries a report's anonymous token; without a session it
   // renders as a bare read-only view instead of the login gate.
   const sharedToken = $derived(
-    router.current.tab === "briefs" ? (router.current.query.token ?? null) : null,
+    router.current.tab === "reports" ? (router.current.query.token ?? null) : null,
   );
 
   const nav = [
-    { label: "Briefs", value: "briefs", icon: iconArticle },
+    { label: "Reports", value: "reports", icon: iconArticle },
     { label: "Topics", value: "topics", icon: iconLabel },
     { label: "Scheduled tasks", value: "jobs", icon: iconSchedule },
     { label: "Workflows", value: "workflows", icon: iconBolt },
@@ -139,7 +139,7 @@
   <div class="boot"><p class="muted">Loading…</p></div>
 {:else if authState.locked}
   {#if sharedToken}
-    <SharedBriefView token={sharedToken} />
+    <SharedReportView token={sharedToken} />
   {:else}
     <LoginView />
   {/if}
@@ -194,8 +194,8 @@
     </div>
   </NavigationRail>
 
-  {#if tab === "briefs"}
-    <BriefsView />
+  {#if tab === "reports"}
+    <ReportsView />
   {:else if tab === "topics"}
     <TopicsView />
   {:else if tab === "jobs"}

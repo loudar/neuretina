@@ -1,9 +1,9 @@
 import type { AgentRunResult } from "../agents/Agent.ts";
-import type { BriefSource } from "../domain/briefs/BriefRepository.ts";
+import type { ReportSource } from "../domain/reports/ReportRepository.ts";
 
 /** Walks an agent run and gathers every search source it touched. */
-export function collectSources(result: AgentRunResult): BriefSource[] {
-  const sources: BriefSource[] = [];
+export function collectSources(result: AgentRunResult): ReportSource[] {
+  const sources: ReportSource[] = [];
   for (const step of result.steps) {
     for (const invocation of step.invocations) {
       const response = invocation.result as
@@ -20,7 +20,7 @@ export function collectSources(result: AgentRunResult): BriefSource[] {
           typeof record.snippet === "string" && record.snippet.trim()
             ? record.snippet.trim()
             : undefined;
-        const media = Array.isArray(record.media) ? (record.media as BriefSource["media"]) : undefined;
+        const media = Array.isArray(record.media) ? (record.media as ReportSource["media"]) : undefined;
         sources.push({
           title:
             typeof record.title === "string" && record.title ? record.title : record.url,

@@ -1,7 +1,7 @@
 /** How timeline artifacts are laid out; shared by every timeline view. */
 export type TimelineOrientation = "horizontal" | "vertical";
 
-const STORAGE_KEY = "briefs.timelineOrientation";
+const STORAGE_KEY = "reports.timelineOrientation";
 
 function readStoredOrientation(): TimelineOrientation {
   let stored: string | null = null;

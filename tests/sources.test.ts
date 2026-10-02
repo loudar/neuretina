@@ -7,9 +7,9 @@ import {
   providerLabel,
   sourceDomain,
 } from "../web/src/lib/sources.ts";
-import type { BriefSource } from "../web/src/lib/api.ts";
+import type { ReportSource } from "../web/src/lib/api.ts";
 
-const sources: BriefSource[] = [
+const sources: ReportSource[] = [
   { title: "A", url: "https://www.cbc.ca/news/a", provider: "perplexity" },
   { title: "B", url: "https://bsky.app/profile/x/post/1", provider: "bluesky" },
   { title: "C", url: "https://cbc.ca/news/c", provider: "perplexity" },
@@ -61,7 +61,7 @@ describe("source grouping", () => {
   });
 
   test("filters across title, url, snippet and media alt text", () => {
-    const all: BriefSource[] = [
+    const all: ReportSource[] = [
       {
         title: "Bird portraits",
         url: "https://bsky.app/profile/alice/post/1",

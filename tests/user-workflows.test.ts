@@ -54,14 +54,14 @@ describe("UserWorkflowRepository", () => {
     const created = repo.add({
       name: "Stop early",
       inputs: { topics: ["t1"] },
-      stopAfter: "brief",
+      stopAfter: "report",
     });
-    expect(created.stopAfter).toBe("brief");
-    expect(repo.get(created.id)?.stopAfter).toBe("brief");
+    expect(created.stopAfter).toBe("report");
+    expect(repo.get(created.id)?.stopAfter).toBe("report");
 
     // A patch without stopAfter keeps the current value.
     const renamed = repo.update(created.id, { name: "Stop early v2" });
-    expect(renamed.stopAfter).toBe("brief");
+    expect(renamed.stopAfter).toBe("report");
 
     // An explicit null clears it.
     const cleared = repo.update(created.id, { stopAfter: null });
@@ -110,7 +110,7 @@ beforeAll(async () => {
     llm: stubLlm((request) => {
       const system = request.messages[0]?.content ?? "";
       if (system.includes("editor")) {
-        return completion(JSON.stringify({ markdown: "# Brief\n\nSomething happened." }));
+        return completion(JSON.stringify({ markdown: "# Report\n\nSomething happened." }));
       }
       return completion(JSON.stringify({ found: true, notes: "Notes: something happened" }));
     }),
@@ -203,15 +203,15 @@ describe("user workflows through the gateway", () => {
         "compile",
         "followups",
         "sources",
-        "brief",
+        "report",
         "events",
         "timeline",
         "audio",
       ]);
       expect(
         entry?.steps
-          .find((step) => step.id === "brief")
-          ?.outputs.some((output) => output.kind === "brief" && output.deliverable),
+          .find((step) => step.id === "report")
+          ?.outputs.some((output) => output.kind === "report" && output.deliverable),
       ).toBe(true);
       // Built-in workflows are untouched by the enrichment.
       expect(listed.find((workflow) => workflow.id === "briefing")?.user).toBeUndefined();
@@ -256,7 +256,7 @@ describe("user workflows through the gateway", () => {
 
       // A scheduled task referencing the workflow blocks deletion.
       const job = await call<{ id: string }>("job.create", {
-        name: "nightly user brief",
+        name: "nightly user report",
         cron: "0 7 * * *",
         workflow: created.id,
       });
@@ -272,8 +272,8 @@ describe("user workflows through the gateway", () => {
       });
       await call("delivery.attach", {
         workflow: created.id,
-        step: "brief",
-        output: "brief",
+        step: "report",
+        output: "report",
         channelId: channel.id,
       });
       expect(kernel.deliveries.attachments().some((a) => a.workflow === created.id)).toBe(true);
@@ -327,7 +327,7 @@ describe("user workflows through the gateway", () => {
 
   test("restores the built-in briefing when its customization row disappears", async () => {
     const store = new UserWorkflowRepository(new SqliteDatabase(":memory:"));
-    store.upsert("briefing", { name: "Pinned brief", inputs: { topics: ["t1", "t2"] } });
+    store.upsert("briefing", { name: "Pinned report", inputs: { topics: ["t1", "t2"] } });
 
     const bootKernel = await createKernel({
       config: testConfig(),
@@ -338,7 +338,7 @@ describe("user workflows through the gateway", () => {
       // The customization row replaced the core registration with a wrapper.
       const customized = bootKernel.workflows.get("briefing");
       expect(customized).toBeInstanceOf(UserBriefingWorkflow);
-      expect(customized.definition.description).toBe("User briefing workflow: Pinned brief");
+      expect(customized.definition.description).toBe("User briefing workflow: Pinned report");
 
       // Removing the row restores the core implementation under the same id.
       store.remove("briefing");
@@ -359,15 +359,15 @@ describe("user workflows through the gateway", () => {
   test("stops a user workflow after the configured step", async () => {
     const topic = await call<{ id: string }>("topic.create", { name: "Stop topic" });
     const created = await call<UserWorkflowInfo>("workflow.user.create", {
-      name: "Stopped brief",
+      name: "Stopped report",
       inputs: { topics: [topic.id] },
-      stopAfter: "brief",
+      stopAfter: "report",
     });
-    expect(created.stopAfter).toBe("brief");
+    expect(created.stopAfter).toBe("report");
 
     try {
       const listed = await call<Array<{ id: string; stopAfter?: string }>>("workflow.list");
-      expect(listed.find((workflow) => workflow.id === created.id)?.stopAfter).toBe("brief");
+      expect(listed.find((workflow) => workflow.id === created.id)?.stopAfter).toBe("report");
 
       const finished = waitForEvent(
         kernel.bus,
@@ -378,12 +378,12 @@ describe("user workflows through the gateway", () => {
       const output = (
         await finished
       ).payload as {
-        output: { skipped: boolean; briefId?: string; stoppedAfter?: string; audioBytes?: number };
+        output: { skipped: boolean; reportId?: string; stoppedAfter?: string; audioBytes?: number };
       };
 
       expect(output.output.skipped).toBe(false);
-      expect(output.output.stoppedAfter).toBe("brief");
-      expect(output.output.briefId).toBeTruthy();
+      expect(output.output.stoppedAfter).toBe("report");
+      expect(output.output.reportId).toBeTruthy();
       // The audio step comes after the stop step and never ran.
       expect(output.output.audioBytes).toBeUndefined();
     } finally {
@@ -475,20 +475,20 @@ describe("user workflows through the gateway", () => {
       expect(kernel.jobs.list().some((job) => job.workflow === "briefing")).toBe(true);
       await call("delivery.attach", {
         workflow: "briefing",
-        step: "brief",
-        output: "brief",
+        step: "report",
+        output: "report",
         channelId: channel.id,
       });
 
       // No row yet: updating the built-in starts the customization.
       const customized = await call<UserWorkflowInfo>("workflow.user.update", {
         id: "briefing",
-        name: "Focus brief",
+        name: "Focus report",
         inputs: { topics: [alpha.id] },
       });
       expect(customized).toEqual({
         id: "briefing",
-        name: "Focus brief",
+        name: "Focus report",
         inputs: { topics: [alpha.id] },
       });
 
@@ -503,7 +503,7 @@ describe("user workflows through the gateway", () => {
       const entry = listed.find((workflow) => workflow.id === "briefing");
       expect(entry?.user).toBe(true);
       expect(entry?.inputValues).toEqual({ topics: [alpha.id] });
-      expect(entry?.description).toBe("User briefing workflow: Focus brief");
+      expect(entry?.description).toBe("User briefing workflow: Focus report");
 
       // The customized briefing only covers its pinned topics.
       const pinned = waitForEvent(
@@ -527,7 +527,7 @@ describe("user workflows through the gateway", () => {
       expect(kernel.jobs.list().some((job) => job.workflow === "briefing")).toBe(true);
       expect(kernel.deliveries.attachments().some((a) => a.workflow === "briefing")).toBe(true);
 
-      // The restored built-in briefs every active topic again.
+      // The restored built-in reports every active topic again.
       const activeNames = (
         await call<Array<{ id: string; name: string; muted: boolean }>>("topic.list")
       )
@@ -556,8 +556,8 @@ describe("user workflows through the gateway", () => {
         }
         await call("delivery.detach", {
           workflow: "briefing",
-          step: "brief",
-          output: "brief",
+          step: "report",
+          output: "report",
           channelId: channel.id,
         });
         await call("delivery.channel.delete", { id: channel.id });

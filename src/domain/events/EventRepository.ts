@@ -3,7 +3,7 @@ import { NotFoundError, ValidationError } from "../../core/errors.ts";
 import { parseJsonValue } from "../../core/json.ts";
 
 /**
- * A dated event learned from briefs: a row in the events table (never an
+ * A dated event learned from reports: a row in the events table (never an
  * artifact) with a date, an optional time, the entities it relates to,
  * category tags, a title and a description.
  */
@@ -17,8 +17,8 @@ export interface TimelineEvent {
   tags: string[];
   title: string;
   description: string;
-  /** Brief the event was extracted from, when known. */
-  sourceBriefId?: string;
+  /** Report the event was extracted from, when known. */
+  sourceReportId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -32,7 +32,7 @@ export interface EventInput {
   tags?: string[];
   title: string;
   description?: string;
-  sourceBriefId?: string;
+  sourceReportId?: string;
 }
 
 export interface EventFilter {
@@ -67,7 +67,7 @@ interface EventRow {
   tags: string;
   title: string;
   description: string;
-  source_brief_id: string | null;
+  source_report_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -143,7 +143,7 @@ export class EventRepository implements EventStore {
       title,
       description:
         input.description !== undefined ? input.description.trim() : existing?.description ?? "",
-      sourceBriefId: input.sourceBriefId ?? existing?.sourceBriefId,
+      sourceReportId: input.sourceReportId ?? existing?.sourceReportId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -151,7 +151,7 @@ export class EventRepository implements EventStore {
     this.db.raw
       .query(
         `INSERT INTO timeline_events
-           (id, date, time, entities, tags, title, description, source_brief_id, created_at, updated_at)
+           (id, date, time, entities, tags, title, description, source_report_id, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            date = excluded.date,
@@ -160,7 +160,7 @@ export class EventRepository implements EventStore {
            tags = excluded.tags,
            title = excluded.title,
            description = excluded.description,
-           source_brief_id = excluded.source_brief_id,
+           source_report_id = excluded.source_report_id,
            updated_at = excluded.updated_at`,
       )
       .run(
@@ -171,7 +171,7 @@ export class EventRepository implements EventStore {
         JSON.stringify(event.tags),
         event.title,
         event.description,
-        event.sourceBriefId ?? null,
+        event.sourceReportId ?? null,
         event.createdAt,
         event.updatedAt,
       );
@@ -217,7 +217,7 @@ function toEvent(row: EventRow): TimelineEvent {
     tags: parseStringList(row.tags),
     title: row.title,
     description: row.description,
-    sourceBriefId: row.source_brief_id ?? undefined,
+    sourceReportId: row.source_report_id ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

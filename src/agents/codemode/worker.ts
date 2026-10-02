@@ -79,7 +79,7 @@ function callTool(name: string, args: unknown): Promise<unknown> {
  * with whatever succeeded.
  */
 function failedCall(error: string): Record<string, unknown> {
-  return { error, results: [], briefs: [], data: [], answer: "" };
+  return { error, results: [], reports: [], data: [], answer: "" };
 }
 
 let jobResolve: ((job: Job) => void) | undefined;

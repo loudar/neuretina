@@ -1,11 +1,11 @@
 /**
  * Workflow ports carry values of a registered type. Every type is either a
- * primitive (`text`, `audio`, …) or a derivative of one: a `brief` is a
+ * primitive (`text`, `audio`, …) or a derivative of one: a `report` is a
  * `text` plus metadata (narration, sources, the stored artifact), a `tts`
  * voice message is an `audio` clip plus the text it was spoken from.
  *
  * Steps declare inputs by the type they accept, and any derivative of that
- * type satisfies the input — so a `tts` action takes `brief`, `draft` or any
+ * type satisfies the input — so a `tts` action takes `report`, `draft` or any
  * other text derivative, and actions compose across workflows.
  */
 export interface PortMetadataField {
@@ -16,7 +16,7 @@ export interface PortMetadataField {
 }
 
 export interface PortType {
-  /** Stable id used in port specs, e.g. "brief", "tts". */
+  /** Stable id used in port specs, e.g. "report", "tts". */
   id: string;
   title: string;
   description?: string;
@@ -56,8 +56,8 @@ export const PORT_TYPES: readonly PortType[] = [
     metadata: [{ name: "sources", title: "Sources" }],
   },
   {
-    id: "brief",
-    title: "Brief",
+    id: "report",
+    title: "Report",
     base: "text",
     metadata: [
       { name: "narration", title: "Narration" },

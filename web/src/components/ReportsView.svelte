@@ -5,10 +5,9 @@
   import iconLink from "@ktibow/iconset-material-symbols/link";
   import iconMic from "@ktibow/iconset-material-symbols/mic";
   import iconMicOff from "@ktibow/iconset-material-symbols/mic-off";
-  import iconPlay from "@ktibow/iconset-material-symbols/play-arrow";
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands } from "../lib/commands";
-  import type { ArtifactInfo, Brief, DeliveryChannelInfo } from "../lib/api";
+  import type { Report, DeliveryChannelInfo } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -19,16 +18,13 @@
   import Pane from "./Pane.svelte";
   import TimelineView from "./TimelineView.svelte";
 
-  let briefs = $state<Brief[]>([]);
-  let selected = $state<Brief | null>(null);
+  let reports = $state<Report[]>([]);
+  let selected = $state<Report | null>(null);
   let audioUrl = $state<string | null>(null);
-  let timelineArtifact = $state<ArtifactInfo | null>(null);
-  let busy = $state(false);
   let resending = $state(false);
   let confirmingDelete = $state(false);
   let deleting = $state(false);
   let generating = $state(false);
-  let voiceEnabled = $state(true);
 
   let resendOpen = $state(false);
   let resendChannels = $state<DeliveryChannelInfo[]>([]);
@@ -36,7 +32,7 @@
   let resendLoading = $state(false);
 
   const route = $derived(router.current);
-  const briefId = $derived(route.segments[0] ?? null);
+  const reportId = $derived(route.segments[0] ?? null);
 
   // The source filter lives in `?source=`; typing rewrites the current
   // history entry so back/forward are not flooded with filter states.
@@ -48,68 +44,50 @@
 
   function setSourceFilter(value: string): void {
     sourceFilter = value;
-    router.navigate(paths.briefs(briefId, { source: value.trim() || undefined }), { replace: true });
+    router.navigate(paths.reports(reportId, { source: value.trim() || undefined }), { replace: true });
   }
 
   async function refreshList(): Promise<void> {
     try {
-      briefs = await commands.briefs.list();
+      reports = await commands.reports.list();
     } catch (error) {
       reportError(error);
     }
   }
 
-  async function loadBrief(id: string): Promise<void> {
+  async function loadReport(id: string): Promise<void> {
     try {
-      const brief = await commands.briefs.get(id);
-      if (briefId !== id) return;
-      selected = brief;
+      const report = await commands.reports.get(id);
+      if (reportId !== id) return;
+      selected = report;
       audioUrl = null;
-      timelineArtifact = null;
 
-      const [audio, timeline] = await Promise.all([
-        brief.hasAudio ? commands.briefs.audio(id) : Promise.resolve(null),
-        brief.timelineArtifactId
-          ? commands.artifacts.get(brief.timelineArtifactId)
-          : Promise.resolve(null),
-      ]);
-      if (briefId !== id) return;
+      // The artifacts come with the report, in display order; only the audio
+      // bytes need a separate fetch.
+      const audio = report.hasAudio ? await commands.reports.audio(id) : null;
+      if (reportId !== id) return;
       audioUrl = audio?.dataUrl ?? null;
-      timelineArtifact = timeline;
     } catch (error) {
       reportError(error);
     }
   }
 
-  // The URL owns the selection: /briefs/<id> loads the brief, /briefs clears it.
+  // The URL owns the selection: /reports/<id> loads the report, /reports clears it.
   $effect(() => {
-    const id = briefId;
+    const id = reportId;
     if (!id) {
       selected = null;
       audioUrl = null;
       return;
     }
-    void loadBrief(id);
+    void loadReport(id);
   });
 
-  async function runNow(): Promise<void> {
-    busy = true;
-    try {
-      const run = await commands.workflows.run("briefing", { generateAudio: voiceEnabled });
-      // Jump to the fresh run so its activity can be watched live.
-      router.navigate(paths.workflows(run.workflow, run.runId));
-    } catch (error) {
-      reportError(error);
-    } finally {
-      busy = false;
-    }
-  }
-
-  // Re-send targets the channels currently attached to the brief's workflow;
+  // Re-send targets the channels currently attached to the report's workflow;
   // the dialog picks a subset of them per send.
   async function openResend(): Promise<void> {
-    const brief = selected;
-    if (!brief) return;
+    const report = selected;
+    if (!report) return;
     resendOpen = true;
     resendChannels = [];
     resendSelected = [];
@@ -119,7 +97,7 @@
         commands.delivery.channels(),
         commands.delivery.workflows(),
       ]);
-      const attached = deliveryWorkflows.find((entry) => entry.workflow === brief.workflow);
+      const attached = deliveryWorkflows.find((entry) => entry.workflow === report.workflow);
       const attachedChannels = attached
         ? channels.filter((channel) => attached.channelIds.includes(channel.id))
         : [];
@@ -142,13 +120,13 @@
     if (!selected || resending || resendSelected.length === 0) return;
     resending = true;
     try {
-      const result = await commands.briefs.send(selected.id, resendSelected);
+      const result = await commands.reports.send(selected.id, resendSelected);
       const sent = result.results.filter((entry) => entry.status === "sent").length;
       const failed = result.results.length - sent;
       if (sent === 0) {
-        reportError(`Brief delivery failed on all ${failed} channel(s)`);
+        reportError(`Report delivery failed on all ${failed} channel(s)`);
       } else {
-        reportSuccess(`Brief sent to ${sent} channel(s)${failed > 0 ? `, ${failed} failed` : ""}`);
+        reportSuccess(`Report sent to ${sent} channel(s)${failed > 0 ? `, ${failed} failed` : ""}`);
       }
       resendOpen = false;
     } catch (error) {
@@ -162,7 +140,7 @@
     if (!selected || generating) return;
     generating = true;
     try {
-      const result = await commands.briefs.generateAudio(selected.id);
+      const result = await commands.reports.generateAudio(selected.id);
       reportSuccess(
         `Voice generated (${Math.round(result.bytes / 1024)} KB) and sent to Matrix`,
       );
@@ -177,11 +155,11 @@
     if (!selected || deleting) return;
     const target = selected;
     deleting = true;
-    router.navigate(paths.briefs());
+    router.navigate(paths.reports());
     try {
-      await commands.briefs.remove(target.id);
+      await commands.reports.remove(target.id);
       confirmingDelete = false;
-      reportSuccess("Brief deleted");
+      reportSuccess("Report deleted");
     } catch (error) {
       reportError(error);
     } finally {
@@ -190,58 +168,39 @@
   }
 
   useRefresh(
-    ["brief.generated", "tts.synthesized", "message.voice.sent", "brief.deleted", "artifact.deleted"],
+    ["report.generated", "tts.synthesized", "message.voice.sent", "report.deleted", "artifact.deleted"],
     async () => {
       await refreshList();
-      if (!briefId) return;
-      // The open brief may have been deleted (here or elsewhere).
-      if (!briefs.some((brief) => brief.id === briefId)) {
-        router.navigate(paths.briefs(), { replace: true });
+      if (!reportId) return;
+      // The open report may have been deleted (here or elsewhere).
+      if (!reports.some((report) => report.id === reportId)) {
+        router.navigate(paths.reports(), { replace: true });
         return;
       }
-      await loadBrief(briefId);
+      await loadReport(reportId);
     },
   );
 </script>
 
-<Pane variant="list" title="Briefs">
-  {#snippet actions()}
-    <label
-      class="inline-toggle voice-toggle"
-      title={voiceEnabled
-        ? "Voice + text — switch off for text-only delivery"
-        : "Text only — switch on to include the voice message"}
-    >
-      <Switch
-        bind:checked={voiceEnabled}
-        icons="both"
-        checkedIcon={iconMic}
-        uncheckedIcon={iconMicOff}
-      />
-    </label>
-    <Button variant="tonal" iconType="left" onclick={runNow} disabled={busy}>
-      <Icon icon={iconPlay} /> Run now
-    </Button>
-  {/snippet}
-
-  <DataList items={briefs} empty="No briefs yet. Run one now or wait for the scheduled task.">
-    {#snippet children(brief)}
-      <div class="entry" class:selected={selected?.id === brief.id}>
-        <button type="button" class="brief-row" onclick={() => router.navigate(paths.briefs(brief.id))}>
-          <span class="brief-date">{formatListDate(brief.createdAt)}</span>
+<Pane variant="list" title="Reports">
+  <DataList items={reports} empty="No reports yet. They appear when a report workflow runs.">
+    {#snippet children(report)}
+      <div class="entry" class:selected={selected?.id === report.id}>
+        <button type="button" class="report-row" onclick={() => router.navigate(paths.reports(report.id))}>
+          <span class="report-date">{formatListDate(report.createdAt)}</span>
           <span class="badges">
-            <span class="badge topics" title={`${brief.topics.length} topic(s)`}>
-              <Icon icon={iconLabel} size={14} />{brief.topics.length}
+            <span class="badge topics" title={`${report.topics.length} topic(s)`}>
+              <Icon icon={iconLabel} size={14} />{report.topics.length}
             </span>
-            <span class="badge sources" title={`${brief.sources.length} source(s)`}>
-              <Icon icon={iconLink} size={14} />{brief.sources.length}
+            <span class="badge sources" title={`${report.sources.length} source(s)`}>
+              <Icon icon={iconLink} size={14} />{report.sources.length}
             </span>
             <span
               class="badge audio"
-              class:has-audio={brief.hasAudio}
-              title={brief.hasAudio ? "Voice message available" : "Text only — no audio"}
+              class:has-audio={report.hasAudio}
+              title={report.hasAudio ? "Voice message available" : "Text only — no audio"}
             >
-              <Icon icon={brief.hasAudio ? iconMic : iconMicOff} size={14} />{brief.hasAudio
+              <Icon icon={report.hasAudio ? iconMic : iconMicOff} size={14} />{report.hasAudio
                 ? "audio"
                 : "text"}
             </span>
@@ -254,7 +213,7 @@
 
 <Pane
   variant="detail"
-  title={selected ? selected.topics.join(", ") || "Untitled brief" : "Brief details"}
+  title={selected ? selected.topics.join(", ") || "Untitled report" : "Report details"}
   subtitle={selected
     ? `${formatRelativeTime(selected.createdAt)}${selected.audioDurationMs
         ? ` · ${Math.round(selected.audioDurationMs / 1000)}s audio`
@@ -285,33 +244,35 @@
   {/snippet}
 
   {#if selected}
-    <div class="brief-body">
-      {#if timelineArtifact !== null}
-        <div class="timeline">
-          <TimelineView artifact={timelineArtifact} />
-        </div>
-      {/if}
-
-      {#if audioUrl}
-        <audio controls src={audioUrl}></audio>
-      {:else if selected.hasAudio}
-        <p class="muted">Loading audio…</p>
-      {/if}
-
-      <MarkdownView
-        markdown={selected.markdown}
-        sources={selected.sources}
-        filter={sourceFilter}
-        onfilter={setSourceFilter}
-      />
+    <div class="report-body">
+      {#each selected.artifacts as artifact (artifact.id)}
+        {#if artifact.kind === "timeline"}
+          <div class="timeline">
+            <TimelineView {artifact} />
+          </div>
+        {:else if artifact.kind === "audio"}
+          {#if audioUrl}
+            <audio controls src={audioUrl}></audio>
+          {:else}
+            <p class="muted">Loading audio…</p>
+          {/if}
+        {:else if artifact.kind === "report-text"}
+          <MarkdownView
+            markdown={selected.markdown}
+            sources={selected.sources}
+            filter={sourceFilter}
+            onfilter={setSourceFilter}
+          />
+        {/if}
+      {/each}
     </div>
   {:else}
-    <p class="muted">Select a brief to read it and play the audio.</p>
+    <p class="muted">Select a report to read it and play the audio.</p>
   {/if}
 
-  <Dialog headline="Re-send this brief?" bind:open={resendOpen}>
+  <Dialog headline="Re-send this report?" bind:open={resendOpen}>
     <p>
-      Deliver "{selected?.topics.join(", ") || "Untitled brief"}" to the selected delivery
+      Deliver "{selected?.topics.join(", ") || "Untitled report"}" to the selected delivery
       channels.
     </p>
     {#if resendLoading}
@@ -351,8 +312,8 @@
 
   <ConfirmDeleteDialog
     bind:open={confirmingDelete}
-    headline="Delete this brief?"
-    message={`"${selected?.topics.join(", ") || "Untitled brief"}" from ${formatDateTime(
+    headline="Delete this report?"
+    message={`"${selected?.topics.join(", ") || "Untitled report"}" from ${formatDateTime(
       selected?.createdAt,
     )} will be permanently removed, including its audio. This cannot be undone.`}
     busy={deleting}
@@ -381,11 +342,7 @@
     user-select: none;
   }
 
-  .voice-toggle {
-    min-height: 2rem;
-  }
-
-  .brief-body {
+  .report-body {
     width: 100%;
     max-width: 800px;
     margin-inline: auto;
@@ -397,7 +354,7 @@
     border-bottom: 1px solid var(--m3c-outline-variant);
   }
 
-  .brief-row {
+  .report-row {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
@@ -414,11 +371,11 @@
     cursor: pointer;
   }
 
-  .entry:not(.selected) .brief-row:hover {
+  .entry:not(.selected) .report-row:hover {
     background-color: var(--m3c-surface-container-high);
   }
 
-  .brief-date {
+  .report-date {
     width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;

@@ -1,7 +1,7 @@
 # Neuretina
 
 A modular, event-driven TypeScript service that periodically researches topics you care about,
-compiles a neutral brief, turns it into speech, and delivers it as a voice message.
+compiles a neutral report, turns it into speech, and delivers it as a voice message.
 
 Built on **Bun** (runtime, SQLite, HTTP server, cron), **TypeScript 7**, **Svelte 5**, and an
 event bus that every subsystem publishes to from the ground up.
@@ -16,8 +16,8 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
             └─ run_code ─┬─ search.*       → Perplexity / Exa
                          ├─ finance.*      → Perplexity / Yahoo Finance
                          ├─ search.bluesky  → AT Protocol searchPosts
-                         └─ past_briefs     → SQLite brief history
-          compiler LLM → neutral markdown brief + spoken narration
+                         └─ past_reports     → SQLite report history
+          compiler LLM → neutral markdown report + spoken narration
           follow-up subagents → implications/context → recompile
           Qwen3-TTS    → speech audio (local server)
           Matrix       → voice message (MSC3245)
@@ -35,10 +35,10 @@ scheduler (Bun.cron, jobs in SQLite)          Matrix message (reply chain resolv
 | Core | `src/core` | event bus + persisted event store, scheduler, workflow registry, workflow runner, trigger dispatcher, logger, errors |
 | Capabilities | `src/capabilities` | provider-agnostic interfaces: `LlmProvider`, `SearchProvider`, `FinanceProvider`, `TextToSpeechProvider`, `MessagingProvider` |
 | Providers | `src/providers` | concrete integrations (OpenAI-compatible LLM, Perplexity/Exa web search, Perplexity/Yahoo finance data, Bluesky, local Qwen3-TTS, Matrix; the ElevenLabs module is kept but unused) |
-| Domain | `src/domain` | SQLite repositories: contexts, workflow runs, generic artifacts (briefs and their audio are artifacts), topics, scheduled jobs |
-| Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/brief tools it wraps |
+| Domain | `src/domain` | SQLite repositories: contexts, workflow runs, generic artifacts (reports and their audio are artifacts), topics, scheduled jobs |
+| Agents | `src/agents` | generic `Agent` tool-calling runtime + `CodeModeTool` (sandboxed code mode) and the search/finance/report tools it wraps |
 | Workflows | `src/workflows` | `BriefingWorkflow` (research → compile → TTS → delivery) and `QuestionWorkflow` (Matrix follow-up answers) |
-| Command handlers | `src/commands` | application message handlers (contexts, topics, jobs, briefs, workflows, runs) |
+| Command handlers | `src/commands` | application message handlers (contexts, topics, jobs, reports, workflows, runs) |
 | API | `src/api` | bidirectional WebSocket for the UI (commands, events, status), webhook gateway for external ingress, static UI |
 | UI | `web` | Svelte 5 + Vite frontend built on the **M3 Svelte** Material 3 design system |
 
@@ -58,10 +58,10 @@ Everything the engine depends on externally sits behind a small interface, and
 | Financial data | `FinanceProvider` (`src/capabilities/finance`) | `PerplexityFinanceProvider`, `YahooFinanceProvider` |
 | Speech | `TextToSpeechProvider` (`src/capabilities/tts`) | `QwenTtsProvider` (local server) |
 | Messaging | `MessagingProvider` (`src/capabilities/messaging`) | `MatrixMessagingProvider` |
-| Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `BriefStore`, `JobStore`, `KeyValueStore`, `ContextStore`, `WorkflowRunStore` | SQLite repositories (`src/domain`, `src/core/events`) |
+| Persistence | `EventLog`, `ArtifactStore`, `TopicStore`, `ReportStore`, `JobStore`, `KeyValueStore`, `ContextStore`, `WorkflowRunStore` | SQLite repositories (`src/domain`, `src/core/events`) |
 
 `createKernel()` accepts overrides for every provider (`llm`, `searchProviders`, `socialSearch`,
-`financeProviders`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, briefs, jobs,
+`financeProviders`, `tts`, `messaging`) and for storage (`stores: { events, artifacts, topics, reports, jobs,
 kv, contexts, runs }`) — override all stores and the kernel never opens SQLite (`kernel.db` is
 `null`). No consumer imports a concrete provider or database: workflows, agents, tools and command
 handlers only know the interfaces. Providers may implement an optional `verify()` (checked with
@@ -73,11 +73,11 @@ HTTP details.
 The researcher does not call search tools one by one. It gets a single `run_code` tool and writes one
 small JavaScript program per run. The program executes in a sandboxed Bun subprocess where the tools
 are exposed as async functions — `search.perplexity`, `search.exa`, `search.bluesky`,
-`finance.perplexity`, `finance.yahoo`, `past_briefs`, `past_brief` — and reaches the engine's real providers over a stdio bridge. Only the
+`finance.perplexity`, `finance.yahoo`, `past_reports`, `past_report` — and reaches the engine's real providers over a stdio bridge. Only the
 program's return value and captured `console.log` output come back to the model, so searches run in
 parallel with `Promise.all`, results are filtered, merged and trimmed in code, and just the compact
 findings enter the model context. Tool calls never throw: a failed provider call resolves to
-`{ error, results: [], briefs: [], data: [], answer: "" }`, so one flaky search (a Bluesky 504, a
+`{ error, results: [], reports: [], data: [], answer: "" }`, so one flaky search (a Bluesky 504, a
 finance timeout) cannot abort the program — the code carries on with whatever succeeded. This is
 the pattern behind Cloudflare's Code Mode and the CodeAct
 paper: it removes the per-search model round-trip (and the intermediate results) that dominate token
@@ -98,25 +98,25 @@ Every workflow output is stored as a generic **artifact** in one `artifacts` tab
 (markdown, JSON, plain text) and binary payloads (audio) alike. An artifact carries its `kind`,
 `name`, `content_type`, `metadata` (JSON), the `workflow` and `correlationId` of the run that
 produced it, its `contextId`, and an optional `parentId` pointing at the artifact it belongs to.
-Nothing in the storage layer is brief-specific; any future research workflow can persist its
+Nothing in the storage layer is report-specific; any future research workflow can persist its
 outputs the same way.
 
-Briefs are the first typed view over that storage (`src/domain/briefs/BriefRepository.ts`):
+Reports are the first typed view over that storage (`src/domain/reports/ReportRepository.ts`):
 
-- the brief is a `brief` artifact: markdown as `content`, topics/narration/sources in `metadata`;
-- its speech is an `audio` artifact whose `parentId` is the brief, with `briefId`/`durationMs` in
+- the report is a `report` artifact: markdown as `content`, topics/narration/sources in `metadata`;
+- its speech is an `audio` artifact whose `parentId` is the report, with `reportId`/`durationMs` in
   metadata;
-- the brief artifact references it back through `metadata.audioArtifactId`, and `brief.get` /
-  `brief.list` expose both ids (`artifactId`, `audioArtifactId`), so everything is traceable
-  end-to-end: workflow run → brief artifact → audio artifact;
-- deleting the brief artifact cascades to its audio.
+- the report artifact references it back through `metadata.audioArtifactId`, and `report.get` /
+  `report.list` expose both ids (`artifactId`, `audioArtifactId`), so everything is traceable
+  end-to-end: workflow run → report artifact → audio artifact;
+- deleting the report artifact cascades to its audio.
 
 The generic surface is available over the webhook: `artifact.list` (filter by `kind`, `workflow`,
 `parentId`, `correlationId`, `contextId`), `artifact.get`, `artifact.content`, `artifact.data`
 (base64 data URL) and `artifact.delete`. `artifact.created` / `artifact.deleted` events carry the
 artifact id, kind and parent, so the event log records every output of every run. The existing
-`brief.*` commands are a convenience view over the same rows. There is no migration from the old
-`briefs` table — nothing is deployed yet, so pre-artifacts databases are rejected at boot: delete
+`report.*` commands are a convenience view over the same rows. There is no migration from the old
+`reports` table — nothing is deployed yet, so pre-artifacts databases are rejected at boot: delete
 the database file and start fresh.
 
 ### Workflows, contexts and runs
@@ -148,7 +148,7 @@ stores definitions; execution lives in `WorkflowRunner`.
 The Workflows tab is a drill-down: pick a workflow from the list (context filter on top, **Run
 now** per workflow), then pick a run from that workflow's runs sidebar, then inspect the run —
 live status feed, output/error preview and the artifacts it produced. Clicking an artifact opens
-it in a right-hand drawer: briefs render as markdown with citation pills, audio plays inline,
+it in a right-hand drawer: reports render as markdown with citation pills, audio plays inline,
 images preview, other artifacts show their text or metadata. `workflow.list`,
 `workflow.run.list`, `workflow.run.get` and `workflow.run` (manual trigger, optional `contextId`)
 are also available over the webhook.
@@ -265,7 +265,7 @@ one). Besides the built-in local Laya model, hosted connections are configured i
 - **Perplexity** uses the Agent API (`POST {baseUrl}/v1/agent`) with the `finance_search` tool,
   which returns a synthesized answer plus structured data — quotes, financial statements, earnings,
   guidance, analyst estimates, ownership — with citation-ready `perplexity.ai/finance/…` source
-  links that flow into the brief's source list. The default model `perplexity/glm-5.3-flash` is the
+  links that flow into the report's source list. The default model `perplexity/glm-5.3-flash` is the
   best open-weight model on Vals AI Finance Agent v2 (57.9%, ahead of DeepSeek V4 Pro 0813 at
   50.4%, Kimi K3 at 54.4% and MiniMax M3 at 48.3%) and the cheapest capable option. The research
   agent and compiler keep running on the active LLM provider (`deepseek-v4.1-flash` by default).
@@ -289,7 +289,7 @@ interface — no text leaves the machine. Any of the common servers works: vLLM-
 qwen3-tts-server, or a similar wrapper.
 
 - `QWEN_TTS_BASE_URL` — server base URL including `/v1` (required; e.g.
-  `http://127.0.0.1:8880/v1`). Speech is skipped entirely when it is unset, and briefs are
+  `http://127.0.0.1:8880/v1`). Speech is skipped entirely when it is unset, and reports are
   delivered as text.
 - `QWEN_TTS_MODEL` — model name; most local servers accept and ignore it (`tts-1`).
 - `QWEN_TTS_VOICE` — preset speaker (`Ryan`, `vivian`, `serena`, …) or an OpenAI alias
@@ -301,7 +301,7 @@ qwen3-tts-server, or a similar wrapper.
 - `QWEN_TTS_SPEED`, `QWEN_TTS_LANGUAGE` (e.g. `English`) and `QWEN_TTS_API_KEY` are optional.
 - `QWEN_TTS_TIMEOUT_MS` (default 600000) bounds one synthesis request. CPU inference runs several
   times slower than real time (a GGML 0.6B model manages roughly 5-6x real time on a 12-core
-  desktop CPU), so a brief can take minutes; GPU servers answer in seconds.
+  desktop CPU), so a report can take minutes; GPU servers answer in seconds.
 - Some GGML-based servers (e.g. `qwentts.cpp`) reject `response_format: "opus"` and only serve
   `wav`/`pcm`. Keep `QWEN_TTS_FORMAT=opus` and set `QWEN_TTS_REQUEST_FORMAT=wav`: the server is
   asked for WAV and the engine converts it to Ogg/Opus locally with ffmpeg, so the Matrix voice
@@ -311,8 +311,8 @@ qwen3-tts-server, or a similar wrapper.
 - `bun run check:tts` verifies the endpoint (`GET /models`) and synthesizes one short sentence.
 - Resilient by default: transient failures (429/5xx, network errors) are retried twice with
   backoff and error messages include the server's own explanation. If speech generation still
-  fails, the compiled brief is **delivered as a text message instead** — a flaky TTS call never
-  throws away a good brief.
+  fails, the compiled report is **delivered as a text message instead** — a flaky TTS call never
+  throws away a good report.
 
 **ElevenLabs:** set the provider to `elevenlabs` and add `KEY_ELEVENLABS` (plus optionally
 `ELEVENLABS_VOICE_ID`, `ELEVENLABS_MODEL_ID`, `ELEVENLABS_SPEED`) in the same settings group. The
@@ -349,7 +349,7 @@ unauthenticated `searchPosts` with `HTTP 403`, so app-password auth is strongly 
 
 ### Delivery channels
 
-Briefs are delivered through configurable **delivery channels** (Settings → Delivery tab; the
+Reports are delivered through configurable **delivery channels** (Settings → Delivery tab; the
 former `MATRIX_*` environment variables are gone — on the first boot after an upgrade the old
 Matrix configuration is migrated into a channel automatically). Three channel types exist:
 
@@ -424,7 +424,7 @@ and resume automatically, and a re-login transparently resets the sync position.
 
 **Follow-up questions:** every allowed message is handed to the trigger dispatcher (plain messages
 are still treated as commands). The `qa` workflow is bound to Matrix messages that are replies to
-(quotes of) one of the bot's own messages — the brief summary, a notice, or one of its answers —
+(quotes of) one of the bot's own messages — the report summary, a notice, or one of its answers —
 and answers with a short **text** answer, never a voice message. The trigger resolves the whole
 reply chain (`m.in_reply_to` upwards, capped at 10 events / 8k characters, oldest first) and
 passes it to the workflow, so "what about that?" still has a referent. The qa workflow is a normal
@@ -453,18 +453,18 @@ override so the value falls back to `.env` or the built-in default.
 
 **Every navigation state lives in the URL** (`web/src/lib/router.svelte.ts`, history API, no hash):
 the active tab, the open item and the filters are path segments and query parameters, e.g.
-`/briefs/<id>?source=…`, `/topics/<id>`, `/jobs/<id>`, `/artifacts/<id>?q=…`,
+`/reports/<id>?source=…`, `/topics/<id>`, `/jobs/<id>`, `/artifacts/<id>?q=…`,
 `/events/<id>?topic=…` and `/workflows/<workflow>/<run>?context=…&artifact=…`. Links are shareable —
 opening a workflow-run or artifact URL lands directly on it — and browser back/forward work
-throughout. **Run now** (Briefs, Scheduled tasks and Workflows) jumps straight to the new run, so
+throughout. **Run now** (Reports, Scheduled tasks and Workflows) jumps straight to the new run, so
 its live activity starts streaming without any extra clicks; `workflow.run` / `job.run` return the
 run id before the run finishes so the UI can navigate to it.
 
-The Briefs list shows each brief with colour-coded badges (topic count, source count, audio
+The Reports list shows each report with colour-coded badges (topic count, source count, audio
 availability). The details view shows the full summary, plays the stored audio, offers
-**Re-send** to deliver the brief through delivery channels again (formatted summary + voice),
+**Re-send** to deliver the report through delivery channels again (formatted summary + voice),
 **Generate voice**
-for text-only briefs, and can **delete** a brief behind an M3 confirmation dialog.
+for text-only reports, and can **delete** a report behind an M3 confirmation dialog.
 
 The Workflows tab shows contexts, workflow definitions (with **Run now**), recent runs and — when
 you open a run — its live per-run activity feed, output/error preview and the artifacts it
@@ -479,9 +479,9 @@ Run activity is persisted in SQLite, so a run's feed is still there after a rest
 was mid-flight when the process stopped is marked as interrupted.
 
 The Artifacts tab lists every workflow output with a text search over content, names and metadata.
-Opening an artifact renders it (markdown briefs with citation pills, inline audio, image previews,
+Opening an artifact renders it (markdown reports with citation pills, inline audio, image previews,
 text or metadata) and offers **Open run** to jump to the run that produced it and **Delete** to
-remove it (children like a brief's audio go with it). The same view backs the artifact drawer in
+remove it (children like a report's audio go with it). The same view backs the artifact drawer in
 the Workflows tab.
 
 ## Topics and scheduled tasks
@@ -490,7 +490,7 @@ the Workflows tab.
   `topic.delete` / `topic.list` through the webhook), including a **mute toggle** in the list and
   the details pane — muted topics are excluded from every briefing until unmuted. One LLM-planned
   research run covers all topics at once (they may overlap), the compiler merges everything into a
-  single brief, and the researcher can pull concrete market numbers (quotes, revenue, margins,
+  single report, and the researcher can pull concrete market numbers (quotes, revenue, margins,
   guidance, estimates) through the finance tools (Perplexity's Agent API, or keyless Yahoo Finance
   quotes) when a topic involves a public company or the markets.
 - **Delivery is two messages by default:** the compiled summary as a formatted text message
@@ -498,38 +498,38 @@ the Workflows tab.
   written for spoken delivery under a hard brevity budget (under ~150 words) — the compiler is
   TTS-aware (speakable sentences, symbols written out, everyday expressions kept neutral) and the
   narration is derived from the summary itself, so the audio reads the same text minus the links.
-- **Anonymous brief links:** delivered summaries append a "View this Brief" link carrying a
-  per-brief token (`APP_URL/briefs/<id>?token=…`). Recipients without an account open that brief
-  in a read-only view with no navigation; the token unlocks that one brief only.
+- **Anonymous report links:** delivered summaries append a "View this Report" link carrying a
+  per-report token (`APP_URL/reports/<id>?token=…`). Recipients without an account open that report
+  in a read-only view with no navigation; the token unlocks that one report only.
 - **Inline citations:** the compiler receives the numbered source list together with the research
   notes and cites every factual claim with a marker like `[4]`. The UI renders those markers as
   small clickable numbered pills linking to the source, and the Matrix text message turns them
   into clickable links. The markers are stripped from the spoken narration automatically, and the
-  grouped source list below the brief stays as the full reference.
+  grouped source list below the report stays as the full reference.
 - **Voice is optional per run:** scheduled tasks accept `{"generateAudio": false}` (the Jobs UI
-  has a mic toggle at creation and per task), and the manual "Run briefing now" button has its
-  own mic toggle — text-only runs skip TTS entirely and deliver just the formatted summary.
-- **Voice on demand:** a text-only brief can get its audio later from the Briefs view
-  (*Generate voice*) or via `brief.audio.generate { id }` — the speech is generated, stored, and
+  has a mic toggle at creation and per task) — text-only runs skip TTS entirely and deliver just
+  the formatted summary. The Reports view only reads and manages stored reports.
+- **Voice on demand:** a text-only report can get its audio later from the Reports view
+  (*Generate voice*) or via `report.audio.generate { id }` — the speech is generated, stored, and
   automatically sent to Matrix as a voice message. `regenerate: true` forces new audio,
-  `deliver: false` only generates. The Briefs view also has a **Re-send** button, and
-  `brief.send { id }` does the same over the webhook.
+  `deliver: false` only generates. The Reports view also has a **Re-send** button, and
+  `report.send { id }` does the same over the webhook.
 - **Relevance-checked research:** the researcher agent finishes with a `{"found": <bool>, "notes":
   …}` verdict, and its tool budget is capped. Search engines return junk even for nonsense
   queries, so if no topic yields *relevant* material the workflow writes **no summary and sends
   no audio** — instead you get a plain text notice listing the topics and the exact queries that
   were tried. Topics that found nothing are marked as missing when other topics did have
   material. The same notice path is used when the agent runs out of steps or returns empty notes,
-  and the compiler is never allowed to store an empty brief.
+  and the compiler is never allowed to store an empty report.
 - **Follow-up research:** once the first draft exists, a planner model looks for claims that deserve
   a deeper look — implications, causes, missing context — and dispatches up to three subagents (one
   question each). Every subagent can use Wikipedia, the reputable web search, social search and past
-  briefs and returns compact findings with attributions; their sources are merged into the brief's
-  source list and a short **"Implications" section is appended** to the brief — which is also read
+  reports and returns compact findings with attributions; their sources are merged into the report's
+  source list and a short **"Implications" section is appended** to the report — which is also read
   aloud with the rest. If nothing qualifies, or the follow-ups find nothing, the draft is kept
-  unchanged, and a failed follow-up never throws away a good brief.
+  unchanged, and a failed follow-up never throws away a good report.
 - **Primary-source upgrades:** after the implications are settled, one more research agent hunts for
-  **primary sources** behind the brief's claims — the official announcement, company blog or IR page,
+  **primary sources** behind the report's claims — the official announcement, company blog or IR page,
   filing, documentation or government publication instead of the news coverage about it. When it
   finds one it replaces the matching entry in the source list (citation numbers stay stable) and may
   adjust the claim's wording to match the primary source more precisely. Source counts and the word
@@ -587,14 +587,14 @@ with `{ "ok": false, "error": "…", "code": "…" }`; the WebSocket reports the
 `code` in its error frame. Types starting with `hook.*` are fire-and-forget: they are forwarded to
 the bus as `hook.<channel>` events and answered with `202` (or an accepted result frame).
 
-Read-only message types (`event.*`, `*.list`, `*.get`, `artifact.search`, `brief.audio`,
+Read-only message types (`event.*`, `*.list`, `*.get`, `artifact.search`, `report.audio`,
 `config.get`) are "quiet": they generate no audit events, so streaming/polling can never feed
 itself. Settings edits (`settings.set/clear`) are quiet too — their payload carries secrets, so the
 change is audited through the value-free `settings.updated` event instead.
 
 Built-in message types: `config.get`, `settings.list/set/clear`, `context.list`,
 `topic.list/create/update/delete`, `job.list/create/update/delete/run`,
-`workflow.list/run/run.list/run.get/run.delete`, `brief.list/get/audio/audio.generate/send/delete`,
+`workflow.list/run/run.list/run.get/run.delete`, `report.list/get/audio/audio.generate/send/delete`,
 `artifact.list/search/get/content/data/delete`, `timeline.event.list`, `event.pull`. Adding one is
 `router.register("my.type", handler)` in `src/commands/registerCommands.ts`.
 
@@ -605,9 +605,9 @@ The `/api/ws` WebSocket pushes an ephemeral, in-memory status feed to the UI (br
 already carries:
 
 - On connect the client receives a `snapshot`, then incremental `entry` messages.
-- Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling brief` /
+- Entries are **coarse, workflow-level only**: `Researching "<topic>"`, `Compiling report` /
   `Waiting for the compiler model`, `Generating speech` / `Waiting for the local TTS server`,
-  `Delivering brief`, follow-up spans, plus job lifecycle entries
+  `Delivering report`, follow-up spans, plus job lifecycle entries
   (`Running job "…"`, finished/failed) and skipped/failed notices. Tool- and model-level activity
   (`Calling tool <tool>`, `Model requested N tool call(s)`, …) is **not** surfaced to the UI — it
   stays in the persisted event log as `agent.tool.*` / `agent.*` events for debugging.
@@ -647,7 +647,7 @@ they show up in the Live events view. A failed Matrix announce does not crash th
 
 Everything publishes to the event bus: `topic.*`, `job.*`, `workflow.started/finished/failed/deleted`,
 `agent.*` (including
-`agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `brief.*`, `tts.synthesized`,
+`agent.tool.invoked/succeeded/failed`), `artifact.created/deleted`, `report.*`, `tts.synthesized`,
 `delivery.updated` / `delivery.status`, `settings.updated`, `hook.received`, `chat.*` (commands,
 `chat.message.received` for every allowed
 message, and follow-up Q&A), `system.*`. Events are
@@ -695,7 +695,7 @@ The `Dockerfile` builds the Svelte UI and runs the server on the Bun slim image.
 - **Port:** `8080`. Point Coolify's healthcheck at `/api/webhook` (the image also ships a
   `HEALTHCHECK` that probes it).
 - **Volume:** mount a volume at `/app/data` (SQLite database, `DB_PATH=/app/data/app.db`).
-- **Env:** all variables from `.env.example` (`TZ` controls cron and brief dates; `STARTUP_CHECK`
+- **Env:** all variables from `.env.example` (`TZ` controls cron and report dates; `STARTUP_CHECK`
   controls the boot validation + startup message).
 - **Pangolin:** `AUTH_GLOBAL_PASSWORD` can protect the site directly (see Authentication); Pangolin
   can add its own layer on top. The UI runs entirely over the `/api/ws` WebSocket, so the proxy must

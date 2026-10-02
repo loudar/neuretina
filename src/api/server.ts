@@ -7,7 +7,7 @@ import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import type { CommandRouter } from "../core/commands/CommandRouter.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
-import type { Brief } from "../domain/briefs/BriefRepository.ts";
+import type { Report } from "../domain/reports/ReportRepository.ts";
 import type { Artifact } from "../domain/artifacts/ArtifactRepository.ts";
 import type { TimelineEvent } from "../domain/events/EventRepository.ts";
 
@@ -21,19 +21,19 @@ export interface ApiDeps {
   adminUser: string;
   /** The logged-in account's runtime: its stores, feeds and command router. */
   runtimeFor(username: string): ApiRuntime;
-  /** Resolves an anonymous brief share token across every account's data. */
-  sharedBrief(token: string): SharedBriefResult | null;
+  /** Resolves an anonymous report share token across every account's data. */
+  sharedReport(token: string): SharedReportResult | null;
 }
 
-/** The timeline artifact of a shared brief, with the events it renders. */
+/** The timeline artifact of a shared report, with the events it renders. */
 export interface SharedTimeline {
   artifact: Artifact;
   events: TimelineEvent[];
 }
 
-/** A brief reachable through its anonymous share token. */
-export interface SharedBriefResult {
-  brief: Brief;
+/** A report reachable through its anonymous share token. */
+export interface SharedReportResult {
+  report: Report;
   audio(): { audio: Uint8Array; mimeType: string } | null;
   timeline(): SharedTimeline | null;
 }
@@ -106,16 +106,16 @@ export function createApiServer(deps: ApiDeps): ApiServer {
         POST: guard((request) => handleLogout(request, deps)),
       },
 
-      // Anonymous, read-only brief access: the token in a delivery link is
+      // Anonymous, read-only report access: the token in a delivery link is
       // the only credential, so these stay outside the session guard.
-      "/api/share/brief/:token": {
-        GET: guard((request: Bun.BunRequest<"/api/share/brief/:token">) =>
-          handleSharedBrief(request, deps),
+      "/api/share/report/:token": {
+        GET: guard((request: Bun.BunRequest<"/api/share/report/:token">) =>
+          handleSharedReport(request, deps),
         ),
       },
-      "/api/share/brief/:token/audio": {
-        GET: guard((request: Bun.BunRequest<"/api/share/brief/:token/audio">) =>
-          handleSharedBriefAudio(request, deps),
+      "/api/share/report/:token/audio": {
+        GET: guard((request: Bun.BunRequest<"/api/share/report/:token/audio">) =>
+          handleSharedReportAudio(request, deps),
         ),
       },
 
@@ -385,38 +385,37 @@ function handleLogout(request: Request, deps: ApiDeps): Response {
 }
 
 /** Public payload for the read-only view; exactly what it renders. */
-function handleSharedBrief(
-  request: Bun.BunRequest<"/api/share/brief/:token">,
+function handleSharedReport(
+  request: Bun.BunRequest<"/api/share/report/:token">,
   deps: ApiDeps,
 ): Response {
-  const found = deps.sharedBrief(request.params.token);
-  if (!found) return jsonResponse({ ok: false, error: "Brief not found" }, 404);
-  const { brief } = found;
+  const found = deps.sharedReport(request.params.token);
+  if (!found) return jsonResponse({ ok: false, error: "Report not found" }, 404);
+  const { report } = found;
   const timeline = found.timeline();
   return jsonResponse({
     ok: true,
-    brief: {
-      id: brief.id,
-      createdAt: brief.createdAt,
-      topics: brief.topics,
-      markdown: brief.markdown,
-      narration: brief.narration,
-      sources: brief.sources,
-      hasAudio: brief.hasAudio,
-      audioMime: brief.audioMime,
-      audioDurationMs: brief.audioDurationMs,
-      timelineArtifactId: brief.timelineArtifactId,
+    report: {
+      id: report.id,
+      createdAt: report.createdAt,
+      topics: report.topics,
+      markdown: report.markdown,
+      narration: report.narration,
+      sources: report.sources,
+      hasAudio: report.hasAudio,
+      audioMime: report.audioMime,
+      audioDurationMs: report.audioDurationMs,
       ...(timeline ? { timeline } : {}),
     },
   });
 }
 
-/** Audio of a shared brief, playable without a session. */
-function handleSharedBriefAudio(
-  request: Bun.BunRequest<"/api/share/brief/:token/audio">,
+/** Audio of a shared report, playable without a session. */
+function handleSharedReportAudio(
+  request: Bun.BunRequest<"/api/share/report/:token/audio">,
   deps: ApiDeps,
 ): Response {
-  const audio = deps.sharedBrief(request.params.token)?.audio();
+  const audio = deps.sharedReport(request.params.token)?.audio();
   if (!audio) return jsonResponse({ ok: false, error: "Audio not found" }, 404);
   return new Response(audio.audio, {
     headers: {

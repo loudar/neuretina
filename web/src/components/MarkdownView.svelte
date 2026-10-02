@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { BriefSource } from "../lib/api";
+  import type { ReportSource } from "../lib/api";
   import { renderCitations } from "../lib/citations";
   import { READING_SIZES, readingPrefs, type ReadingSize } from "../lib/reading.svelte";
   import { markdownToHtml } from "../../../src/core/markdown.ts";
@@ -7,8 +7,8 @@
 
   interface Props {
     markdown: string;
-    sources?: BriefSource[];
-    /** Optional controlled source filter (the briefs view keeps it in the URL). */
+    sources?: ReportSource[];
+    /** Optional controlled source filter (the reports view keeps it in the URL). */
     filter?: string;
     onfilter?: (value: string) => void;
   }
@@ -24,7 +24,7 @@
   }
 </script>
 
-<!-- Reading controls live here so brief and artifact details stay in sync. -->
+<!-- Reading controls live here so report and artifact details stay in sync. -->
 <div class="reading" style:--markdown-font-size={readingPrefs.css}>
   <span class="reading-sizes" role="group" aria-label="Reading size">
     {#each READING_SIZES as size (size)}

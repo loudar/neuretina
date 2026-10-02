@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BriefSource } from "../src/domain/briefs/BriefRepository.ts";
+import type { ReportSource } from "../src/domain/reports/ReportRepository.ts";
 import {
   MAX_SOURCE_UPGRADES,
   applySourceUpgrades,
@@ -11,13 +11,13 @@ describe("parseSourceUpgrades", () => {
   test("parses markdown and upgrades", () => {
     const parsed = parseSourceUpgrades(
       JSON.stringify({
-        markdown: "# Brief [1]",
+        markdown: "# Report [1]",
         upgrades: [{ for: 2, title: "Official", url: "https://origin.example.com/a" }],
       }),
       2,
     );
 
-    expect(parsed?.markdown).toBe("# Brief [1]");
+    expect(parsed?.markdown).toBe("# Report [1]");
     expect(parsed?.upgrades).toEqual([
       { for: 2, title: "Official", url: "https://origin.example.com/a" },
     ]);
@@ -26,7 +26,7 @@ describe("parseSourceUpgrades", () => {
   test("drops invalid upgrades and falls back to the url as title", () => {
     const parsed = parseSourceUpgrades(
       JSON.stringify({
-        markdown: "# Brief [1]",
+        markdown: "# Report [1]",
         upgrades: [
           { for: 0, title: "Zero", url: "https://x.example/a" },
           { for: 9, title: "Out of range", url: "https://x.example/b" },
@@ -63,7 +63,7 @@ describe("parseSourceUpgrades", () => {
 });
 
 describe("applySourceUpgrades", () => {
-  const sources: BriefSource[] = [
+  const sources: ReportSource[] = [
     {
       title: "Coverage",
       url: "https://news.example.org/a",
@@ -74,7 +74,7 @@ describe("applySourceUpgrades", () => {
   ];
 
   test("replaces the source and keeps search metadata", () => {
-    const found: BriefSource[] = [
+    const found: ReportSource[] = [
       {
         title: "Official announcement",
         url: "https://origin.example.com/a",
@@ -99,7 +99,7 @@ describe("applySourceUpgrades", () => {
   });
 
   test("drops stale snippet and media when the url was not in the search results", () => {
-    const old: BriefSource[] = [
+    const old: ReportSource[] = [
       {
         title: "Coverage",
         url: "https://news.example.org/a",
@@ -130,11 +130,11 @@ describe("applySourceUpgrades", () => {
 
 describe("isAcceptableRevision", () => {
   const original =
-    "# Morning brief\n\n## Rust\nAll quiet [1].\n\n## Implications\nAdoption keeps accelerating [1].";
+    "# Morning report\n\n## Rust\nAll quiet [1].\n\n## Implications\nAdoption keeps accelerating [1].";
 
   test("accepts a faithful revision", () => {
     const revised =
-      "# Morning brief\n\n## Rust\nRust 1.90 shipped [1].\n\n## Implications\nAdoption keeps accelerating [1].";
+      "# Morning report\n\n## Rust\nRust 1.90 shipped [1].\n\n## Implications\nAdoption keeps accelerating [1].";
     expect(isAcceptableRevision(original, revised, 2)).toBe(true);
   });
 
@@ -146,11 +146,11 @@ describe("isAcceptableRevision", () => {
   });
 
   test("rejects dropped implications and unknown citation numbers", () => {
-    const noImplications = "# Morning brief\n\n## Rust\nAll quiet [1].";
+    const noImplications = "# Morning report\n\n## Rust\nAll quiet [1].";
     expect(isAcceptableRevision(original, noImplications, 2)).toBe(false);
 
     const badMarker =
-      "# Morning brief\n\n## Rust\nAll quiet [9].\n\n## Implications\nAdoption keeps accelerating [1].";
+      "# Morning report\n\n## Rust\nAll quiet [9].\n\n## Implications\nAdoption keeps accelerating [1].";
     expect(isAcceptableRevision(original, badMarker, 2)).toBe(false);
   });
 });

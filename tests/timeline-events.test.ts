@@ -242,7 +242,7 @@ describe("EventExtractor", () => {
     });
 
     const extractor = new EventExtractor({ llm, events, logger: log });
-    const result = await extractor.extract({ briefId: "brief-1", brief: "# Brief", sources: [] });
+    const result = await extractor.extract({ reportId: "report-1", report: "# Report", sources: [] });
 
     // The first suggestion updated the stored event instead of duplicating it.
     expect(result.events).toHaveLength(2);
@@ -252,7 +252,7 @@ describe("EventExtractor", () => {
     expect(updated.title).toBe("Nvidia earnings beat");
     expect(updated.description).toContain("guidance rose");
     expect(updated.tags).toEqual(["markets"]);
-    expect(updated.sourceBriefId).toBe("brief-1");
+    expect(updated.sourceReportId).toBe("report-1");
 
     // The second used "other": the decision step invented a tag, normalized it
     // and it is now part of the shared tag list.
@@ -287,7 +287,7 @@ describe("EventExtractor", () => {
     });
 
     const extractor = new EventExtractor({ llm, events, logger: log });
-    await extractor.extract({ brief: "# Brief", sources: [] });
+    await extractor.extract({ report: "# Report", sources: [] });
 
     expect(events.list().map((stored) => stored.title)).toEqual([
       "Google launches Gemini 4 Argon frontier model",

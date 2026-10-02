@@ -3,7 +3,7 @@ import { createKernel } from "../src/kernel/Kernel.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
-import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { ReportRepository } from "../src/domain/reports/ReportRepository.ts";
 import { ContextRepository } from "../src/domain/contexts/ContextRepository.ts";
 import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
 import { EventRepository } from "../src/domain/events/EventRepository.ts";
@@ -22,7 +22,7 @@ describe("kernel storage overrides", () => {
       events: new EventStore(memory),
       artifacts,
       topics: new TopicRepository(memory),
-      briefs: new BriefRepository(artifacts),
+      reports: new ReportRepository(artifacts),
       jobs: new JobRepository(memory),
       kv: new KeyValueRepository(memory),
       contexts: new ContextRepository(memory),
@@ -41,13 +41,13 @@ describe("kernel storage overrides", () => {
       const topic = kernel.topics.add({ name: "Rust" });
       expect(stores.topics.list().map((entry) => entry.id)).toEqual([topic.id]);
 
-      const brief = kernel.briefs.create({
+      const report = kernel.reports.create({
         topics: ["Rust"],
         markdown: "# Rust",
         narration: "n",
         sources: [],
       });
-      expect(stores.briefs.get(brief.id).markdown).toBe("# Rust");
+      expect(stores.reports.get(report.id).markdown).toBe("# Rust");
 
       expect(stores.jobs.count()).toBe(1); // the seeded default job
     } finally {

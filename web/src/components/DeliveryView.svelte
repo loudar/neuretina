@@ -441,7 +441,7 @@ import DataList from "./DataList.svelte";
         <TextFieldOutlined
           label="From"
           bind:value={form.from}
-          placeholder="briefs@example.org"
+          placeholder="reports@example.org"
           enter={() => void saveChannel()}
         />
         <TextFieldOutlined

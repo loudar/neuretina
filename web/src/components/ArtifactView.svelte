@@ -3,7 +3,7 @@
   import iconDelete from "@ktibow/iconset-material-symbols/delete";
   import iconHistory from "@ktibow/iconset-material-symbols/history";
   import { commands } from "../lib/commands";
-  import type { ArtifactInfo, BriefSource } from "../lib/api";
+  import type { ArtifactInfo, ReportSource } from "../lib/api";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { paths, router } from "../lib/router.svelte";
   import ConfirmDeleteDialog from "./ConfirmDeleteDialog.svelte";
@@ -25,7 +25,7 @@ import MarkdownView from "./MarkdownView.svelte";
   let deleting = $state(false);
 
   const isMarkdown = $derived(
-    artifact.kind === "brief" || artifact.contentType === "text/markdown",
+    artifact.kind === "report-text" || artifact.contentType === "text/markdown",
   );
   const isAudio = $derived(artifact.contentType.startsWith("audio/"));
   const isImage = $derived(artifact.contentType.startsWith("image/"));
@@ -38,7 +38,7 @@ import MarkdownView from "./MarkdownView.svelte";
   );
   const isTimeline = $derived(artifact.kind === "timeline" && timelineEventIds.length > 0);
   const sources = $derived(
-    Array.isArray(artifact.metadata.sources) ? (artifact.metadata.sources as BriefSource[]) : [],
+    Array.isArray(artifact.metadata.sources) ? (artifact.metadata.sources as ReportSource[]) : [],
   );
   const runPath = $derived(
     artifact.workflow && artifact.correlationId
@@ -139,7 +139,7 @@ import MarkdownView from "./MarkdownView.svelte";
 <ConfirmDeleteDialog
   bind:open={confirmingDelete}
   headline="Delete this artifact?"
-  message={`"${artifact.name ?? artifact.id.slice(0, 8)}" (${artifact.kind}) will be permanently removed, including anything referencing it (e.g. a brief's audio). This cannot be undone.`}
+  message={`"${artifact.name ?? artifact.id.slice(0, 8)}" (${artifact.kind}) will be permanently removed, including anything referencing it (e.g. a report's audio). This cannot be undone.`}
   busy={deleting}
   onconfirm={remove}
   oncancel={() => (confirmingDelete = false)}

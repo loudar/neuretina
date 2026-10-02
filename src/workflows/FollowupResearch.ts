@@ -1,7 +1,7 @@
 import { Agent } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
-import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
+import { ReportSearchTool } from "../agents/tools/ReportSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { LlmProvider } from "../capabilities/llm/LlmProvider.ts";
 import type { SearchProvider, SearchRecency } from "../capabilities/search/SearchProvider.ts";
@@ -9,7 +9,7 @@ import { addAgentCost } from "../core/cost/agentCosts.ts";
 import { errorMessage } from "../core/errors.ts";
 import { extractJson } from "../core/json.ts";
 import type { WorkflowContext } from "../core/workflow/Workflow.ts";
-import type { BriefSource, BriefStore } from "../domain/briefs/BriefRepository.ts";
+import type { ReportSource, ReportStore } from "../domain/reports/ReportRepository.ts";
 import { collectSources } from "./agentResults.ts";
 
 export interface FollowupTask {
@@ -19,8 +19,8 @@ export interface FollowupTask {
 
 export interface FollowupResearchDeps {
   llm: LlmProvider;
-  briefs: BriefStore;
-  /** Context the subagents search past briefs in. */
+  reports: ReportStore;
+  /** Context the subagents search past reports in. */
   contextId?: string;
   webSearch: SearchProvider;
   /** All configured web providers; one search.<name> tool each. */
@@ -36,7 +36,7 @@ export interface FollowupResearchDeps {
 
 export interface FollowupFindings {
   notes: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
 }
 
 /** At most this many follow-up investigations per briefing. */
@@ -44,7 +44,7 @@ export const MAX_FOLLOWUP_TASKS = 3;
 
 const PLANNER_SYSTEM_PROMPT = `You decide which follow-up investigations a briefing needs after its first draft. You receive the draft and the topics it covers.
 
-Look for claims or developments where a short investigation would add real value: implications ("what does X mean for Y"), causes, or background context the draft is missing. Only propose a follow-up when it would genuinely deepen the brief — if nothing qualifies, propose none.
+Look for claims or developments where a short investigation would add real value: implications ("what does X mean for Y"), causes, or background context the draft is missing. Only propose a follow-up when it would genuinely deepen the report — if nothing qualifies, propose none.
 
 Rules:
 - At most ${MAX_FOLLOWUP_TASKS} tasks, ordered by value.
@@ -55,12 +55,12 @@ Rules:
 Respond with a single JSON object:
 {"tasks": [{"question": "...", "reason": "<why it matters>"}]}`;
 
-const SUBAGENT_SYSTEM_PROMPT = `You research one specific follow-up question for a briefing, to add implications or context the main brief is missing.
+const SUBAGENT_SYSTEM_PROMPT = `You research one specific follow-up question for a briefing, to add implications or context the main report is missing.
 
 You research by writing JavaScript through the run_code tool: one small async function per run that calls the functions listed in the tool description and returns compact findings. Run independent calls in parallel with Promise.all — calls never throw: a failed one comes back with an "error" field and empty results, so continue with what succeeded.
 
 Rules:
-- Answer only the given question; do not re-summarise the main brief.
+- Answer only the given question; do not re-summarise the main report.
 - Prefer search.wikipedia for background and definitions, the web-search functions for recent reporting, and search.bluesky for how people react.
 - Run at most 4 searches in total.
 - Be concrete: facts, numbers, names, consequences and disagreements, attributed to a source (outlet or title) in what you return.
@@ -75,7 +75,7 @@ const IMPLICATIONS_SYSTEM_PROMPT = `You write the "Implications" section that is
 Write at most 2 short paragraphs (under 80 words in total) covering what the findings imply and the context that matters. This text is also read aloud by a text-to-speech model.
 
 Rules:
-- Conversational, neutral and speakable, like the rest of the brief: plain words, short sentences, active voice.
+- Conversational, neutral and speakable, like the rest of the report: plain words, short sentences, active voice.
 - Cite every claim with the matching number in square brackets from the source list, e.g. "… [4]".
 - No heading, no preamble, no lists, no links, no URLs.
 - Never invent material; use only the findings.
@@ -86,7 +86,7 @@ Respond with a single JSON object:
 /**
  * After the first draft exists, plans follow-up questions (implications,
  * causes, context) and dispatches one subagent per question. Each subagent
- * can use Wikipedia, reputable web search, social search and past briefs.
+ * can use Wikipedia, reputable web search, social search and past reports.
  */
 export class FollowupResearch {
   private readonly agent: Agent;
@@ -152,7 +152,7 @@ export class FollowupResearch {
     parentId?: string,
   ): Promise<FollowupFindings> {
     const notes: string[] = [];
-    const sources: BriefSource[] = [];
+    const sources: ReportSource[] = [];
 
     for (const [index, task] of tasks.entries()) {
       context.signal?.throwIfAborted();
@@ -194,11 +194,11 @@ export class FollowupResearch {
 
   /**
    * Turns the findings into the short "Implications" section appended to the
-   * brief (and read aloud). Falls back to the raw notes if the model fails.
+   * report (and read aloud). Falls back to the raw notes if the model fails.
    */
   async writeImplications(
     findings: FollowupFindings,
-    sources: BriefSource[],
+    sources: ReportSource[],
     context: WorkflowContext,
     parentId?: string,
   ): Promise<string> {
@@ -271,7 +271,7 @@ export class FollowupResearch {
         limit: defaults.resultsPerProvider,
         recency: defaults.recency,
       }),
-      new BriefSearchTool(this.deps.briefs, this.deps.contextId),
+      new ReportSearchTool(this.deps.reports, this.deps.contextId),
     ];
 
     return new CodeModeTool({ tools, maxToolCalls: 6 });

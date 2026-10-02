@@ -18,17 +18,17 @@ import type {
 
 /**
  * A rendered step output, ready to be sent through delivery channels. The
- * renderer decides which passes the output uses (a brief is text, an audio
+ * renderer decides which passes the output uses (a report is text, an audio
  * artifact is voice, …).
  */
 export interface DeliveryMessage {
-  /** Id of the content being delivered (brief id for now). */
+  /** Id of the content being delivered (report id for now). */
   reference?: string;
   /** Passes to run; defaults to text, plus voice when audio is present. */
   kinds?: DeliveryKind[];
   /** Human label for the voice message's filename and caption. */
   title?: string;
-  /** Plain-text summary (the compiled brief with source links). */
+  /** Plain-text summary (the compiled report with source links). */
   summary: string;
   /** Pre-rendered HTML for channels that support it (Matrix, email). */
   html?: string;
@@ -39,8 +39,8 @@ export interface DeliveryMessage {
 }
 
 export interface DeliverInput {
-  /** Id of the content being delivered (brief id for now). */
-  briefId: string;
+  /** Id of the content being delivered (report id for now). */
+  reportId: string;
   runId?: string;
   /**
    * Step output whose assigned channels receive the message. Explicit
@@ -56,11 +56,11 @@ export interface DeliverInput {
   title?: string;
   /** Which passes to run; defaults to text + voice. */
   kinds?: DeliveryKind[];
-  /** Plain-text summary (the compiled brief with source links). */
+  /** Plain-text summary (the compiled report with source links). */
   summary: string;
   /** Pre-rendered HTML for channels that support it (Matrix, email). */
   html?: string;
-  /** Spoken version of the brief; used as the voice message's text body. */
+  /** Spoken version of the report; used as the voice message's text body. */
   narration?: string;
   audio?: Uint8Array;
   audioMime?: string;
@@ -98,7 +98,7 @@ interface PassResult {
 }
 
 /**
- * Routes a brief through the delivery channels attached to it: records one
+ * Routes a report through the delivery channels attached to it: records one
  * delivery row per channel and pass (text/voice), publishes `delivery.status`
  * per attempt and never lets one failing channel abort the others.
  */
@@ -202,8 +202,8 @@ export class DeliveryService implements DeliveryRouter {
             sender.sendVoice({
               audio: input.audio!,
               mimeType: mime,
-              filename: `${slugify(input.title ?? "brief")}-${isoDate()}.${audioExtension(mime)}`,
-              caption: `${input.title ?? "Brief"} – ${isoDate()}`,
+              filename: `${slugify(input.title ?? "report")}-${isoDate()}.${audioExtension(mime)}`,
+              caption: `${input.title ?? "Report"} – ${isoDate()}`,
               text: input.narration ?? input.summary,
             }),
           ),
@@ -237,7 +237,7 @@ export class DeliveryService implements DeliveryRouter {
     send: () => Promise<{ eventId: string }>,
   ): Promise<PassResult> {
     const row = this.deps.store.record({
-      briefId: input.briefId,
+      reportId: input.reportId,
       runId: input.runId,
       channelId: channel.id,
       kind,
@@ -270,7 +270,7 @@ export class DeliveryService implements DeliveryRouter {
     message: string,
   ): Promise<PassResult> {
     const row = this.deps.store.record({
-      briefId: input.briefId,
+      reportId: input.reportId,
       runId: input.runId,
       channelId: channel.id,
       kind,
@@ -296,7 +296,7 @@ export class DeliveryService implements DeliveryRouter {
 
   private publish(record: DeliveryRecord, input: DeliverInput): void {
     const payload: {
-      briefId: string;
+      reportId: string;
       runId?: string;
       channelId: string;
       kind: DeliveryKind;
@@ -304,7 +304,7 @@ export class DeliveryService implements DeliveryRouter {
       eventId?: string;
       error?: string;
     } = {
-      briefId: record.briefId,
+      reportId: record.reportId,
       channelId: record.channelId,
       kind: record.kind,
       status: record.status,

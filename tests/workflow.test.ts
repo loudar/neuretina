@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { BriefingWorkflow, type BriefingProgress } from "../src/workflows/BriefingWorkflow.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
-import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { ReportRepository } from "../src/domain/reports/ReportRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
 import { DeliveryRepository } from "../src/domain/delivery/DeliveryRepository.ts";
 import { EventRepository } from "../src/domain/events/EventRepository.ts";
@@ -74,7 +74,7 @@ function setup(options: SetupOptions = {}) {
   const bus = new EventBus(new EventStore(db), log);
   const topics = new TopicRepository(db);
   const artifacts = new ArtifactRepository(db);
-  const briefs = new BriefRepository(artifacts);
+  const reports = new ReportRepository(artifacts);
   const events = new EventRepository(db);
   const compilerInputs: string[] = [];
   const dispatcherInputs: string[] = [];
@@ -128,11 +128,11 @@ function setup(options: SetupOptions = {}) {
       }
       if (options.longCompilerOutput && compilerCalls === 1) {
         const filler = Array.from({ length: 200 }, (_, index) => `longfact${index}`).join(" ");
-        return completion(JSON.stringify({ markdown: `# Morning brief\n\n${filler}` }));
+        return completion(JSON.stringify({ markdown: `# Morning report\n\n${filler}` }));
       }
       return completion(
         JSON.stringify({
-          markdown: "# Morning brief\n\n## Rust\nAll quiet.\n\n## AI regulation\nHeated debate.",
+          markdown: "# Morning report\n\n## Rust\nAll quiet.\n\n## AI regulation\nHeated debate.",
         }),
       );
     }
@@ -232,7 +232,7 @@ function setup(options: SetupOptions = {}) {
     config: {},
   });
   deliveryStore.attach(
-    { workflow: "briefing", step: "brief", output: "brief" },
+    { workflow: "briefing", step: "report", output: "report" },
     briefingChannel.id,
   );
   deliveryStore.attach(
@@ -242,7 +242,7 @@ function setup(options: SetupOptions = {}) {
 
   const workflow = new BriefingWorkflow({
     topics,
-    briefs,
+    reports,
     artifacts,
     events,
     llm,
@@ -263,7 +263,7 @@ function setup(options: SetupOptions = {}) {
   return {
     workflow,
     topics,
-    briefs,
+    reports,
     artifacts,
     events,
     bus,
@@ -286,11 +286,11 @@ describe("BriefingWorkflow", () => {
     const output = await workflow.run({}, { correlationId: "c1", bus, logger: log, statuses });
 
     expect(output.skipped).toBe(true);
-    expect(events.some((event) => event.topic === "brief.skipped")).toBe(true);
+    expect(events.some((event) => event.topic === "report.skipped")).toBe(true);
   });
 
-  test("researches topics, compiles a brief, synthesizes audio and delivers it", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, deliveryStore, statuses } = setup();
+  test("researches topics, compiles a report, synthesizes audio and delivers it", async () => {
+    const { workflow, topics, reports, bus, tts, sender, deliveryStore, statuses } = setup();
     topics.add({ name: "Rust" });
     topics.add({ name: "AI regulation" });
 
@@ -305,13 +305,13 @@ describe("BriefingWorkflow", () => {
     expect(output.skipped).toBe(false);
     expect(output.topics).toEqual(["AI regulation", "Rust"]);
 
-    const stored = briefs.get(output.briefId!, true);
-    expect(stored.markdown).toContain("Morning brief");
+    const stored = reports.get(output.reportId!, true);
+    expect(stored.markdown).toContain("Morning report");
     expect(stored.sources.length).toBe(2);
     expect(stored.hasAudio).toBe(true);
     expect(stored.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
 
-    // Narration is derived from the summary, so it matches the written brief.
+    // Narration is derived from the summary, so it matches the written report.
     expect(stored.narration).toContain("All quiet");
     expect(stored.narration).not.toContain("http");
     expect(stored.narration).not.toContain("Sources");
@@ -325,24 +325,24 @@ describe("BriefingWorkflow", () => {
     expect(sender.sent).toHaveLength(2);
     const summary = sender.sent[0]!;
     expect(summary.kind).toBe("text");
-    expect(summary.text).toContain("# Morning brief");
+    expect(summary.text).toContain("# Morning report");
     expect(summary.text).toContain("**Sources**");
     expect(summary.text).toContain("](https://");
     // The spoken narration must not contain the links.
     expect(tts.requests[0]).not.toContain("example.com");
-    expect(summary.html).toContain("<h2>Morning brief</h2>");
+    expect(summary.html).toContain("<h2>Morning report</h2>");
     expect(summary.html).toContain("<h3>Rust</h3>");
     expect(summary.html).toContain('href="https://example.com/article"');
     expect(sender.sent[1]?.kind).toBe("voice");
     expect(sender.sent[1]?.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
 
     // One recorded delivery row per channel and pass, all settled.
-    const rows = deliveryStore.deliveries({ briefId: output.briefId });
+    const rows = deliveryStore.deliveries({ reportId: output.reportId });
     expect(rows.map((row) => `${row.kind}:${row.status}`)).toEqual(["text:sent", "voice:sent"]);
 
     const topicsEmitted = events.map((event) => event.topic);
-    expect(topicsEmitted).toContain("brief.research.started");
-    expect(topicsEmitted).toContain("brief.generated");
+    expect(topicsEmitted).toContain("report.research.started");
+    expect(topicsEmitted).toContain("report.generated");
     expect(topicsEmitted).toContain("tts.synthesized");
     expect(topicsEmitted).toContain("delivery.status");
     expect(topicsEmitted).toContain("agent.tool.succeeded");
@@ -356,8 +356,8 @@ describe("BriefingWorkflow", () => {
     expect(statusesEmitted).toContain("voice:sent");
   });
 
-  test("can generate a brief without audio or delivery", async () => {
-    const { workflow, topics, briefs, tts, sender, statuses } = setup();
+  test("can generate a report without audio or delivery", async () => {
+    const { workflow, topics, reports, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -365,14 +365,14 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c3", bus: new EventBus(new EventStore(new SqliteDatabase(":memory:")), log), logger: log, statuses },
     );
 
-    expect(output.briefId).toBeTruthy();
-    expect(briefs.get(output.briefId!).hasAudio).toBe(false);
+    expect(output.reportId).toBeTruthy();
+    expect(reports.get(output.reportId!).hasAudio).toBe(false);
     expect(tts.requests).toHaveLength(0);
     expect(sender.sent).toHaveLength(0);
   });
 
   test("falls back to text delivery when speech generation fails", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
+    const { workflow, topics, reports, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
     tts.failWith = "local TTS returned HTTP 500";
 
@@ -382,19 +382,19 @@ describe("BriefingWorkflow", () => {
     );
 
     expect(output.skipped).toBe(false);
-    expect(output.briefId).toBeTruthy();
+    expect(output.reportId).toBeTruthy();
     expect(output.audioBytes).toBeUndefined();
-    expect(briefs.get(output.briefId!).hasAudio).toBe(false);
+    expect(reports.get(output.reportId!).hasAudio).toBe(false);
 
     expect(tts.requests).toHaveLength(1);
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]?.kind).toBe("text");
-    expect(sender.sent[0]?.text).toContain("# Morning brief");
-    expect(sender.sent[0]?.html).toContain("<h2>Morning brief</h2>");
+    expect(sender.sent[0]?.text).toContain("# Morning report");
+    expect(sender.sent[0]?.html).toContain("<h2>Morning report</h2>");
   });
 
-  test("sends a text notice instead of a brief when nothing was found", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup({
+  test("sends a text notice instead of a report when nothing was found", async () => {
+    const { workflow, topics, reports, bus, tts, sender, statuses } = setup({
       webResults: [],
       socialResults: [],
       researchVerdict: false,
@@ -411,24 +411,24 @@ describe("BriefingWorkflow", () => {
 
     expect(output.skipped).toBe(true);
     expect(output.reason).toContain("No material");
-    expect(briefs.list()).toHaveLength(0);
+    expect(reports.list()).toHaveLength(0);
     expect(tts.requests).toHaveLength(0);
 
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]?.kind).toBe("text");
-    expect(sender.sent[0]?.text).toContain("No brief today");
+    expect(sender.sent[0]?.text).toContain("No report today");
     expect(sender.sent[0]?.text).toContain("very obscure topic");
     expect(sender.sent[0]?.text).toContain('Queries tried: "t"');
     expect(sender.sent[0]?.text).toContain("No summary or audio was generated.");
 
-    const skipEvent = events.find((event) => event.topic === "brief.skipped");
+    const skipEvent = events.find((event) => event.topic === "report.skipped");
     expect(skipEvent?.payload).toMatchObject({ topics: ["very obscure topic"] });
-    expect(events.map((event) => event.topic)).not.toContain("brief.generated");
+    expect(events.map((event) => event.topic)).not.toContain("report.generated");
     expect(events.map((event) => event.topic)).not.toContain("tts.synthesized");
   });
 
   test("delivers text only when voice is disabled", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
+    const { workflow, topics, reports, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -438,14 +438,14 @@ describe("BriefingWorkflow", () => {
 
     expect(output.skipped).toBe(false);
     expect(output.audioBytes).toBeUndefined();
-    expect(briefs.get(output.briefId!).hasAudio).toBe(false);
+    expect(reports.get(output.reportId!).hasAudio).toBe(false);
     expect(tts.requests).toHaveLength(0);
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]?.kind).toBe("text");
   });
 
   test("compresses an over-long draft before delivering", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup({ longCompilerOutput: true });
+    const { workflow, topics, reports, bus, statuses } = setup({ longCompilerOutput: true });
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -453,14 +453,14 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c10", bus, logger: log, statuses },
     );
 
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     expect(stored.markdown).toContain("All quiet");
     expect(stored.markdown.split(/\s+/).filter(Boolean).length).toBeLessThan(40);
     expect(stored.narration).toContain("All quiet");
   });
 
   test("excludes muted topics from briefings", async () => {
-    const { workflow, topics, bus, briefs, statuses } = setup();
+    const { workflow, topics, bus, reports, statuses } = setup();
     const active = topics.add({ name: "Rust" });
     const muted = topics.add({ name: "Crypto" });
     topics.update(muted.id, { muted: true });
@@ -475,8 +475,8 @@ describe("BriefingWorkflow", () => {
 
     expect(output.skipped).toBe(false);
     expect(output.topics).toEqual(["Rust"]);
-    expect(briefs.latest()?.topics).toEqual(["Rust"]);
-    const researchStarted = events.find((event) => event.topic === "brief.research.started");
+    expect(reports.latest()?.topics).toEqual(["Rust"]);
+    const researchStarted = events.find((event) => event.topic === "report.research.started");
     expect(researchStarted?.payload).toMatchObject({ topics: ["Rust"] });
 
     // Explicitly requesting a muted topic does not bring it back.
@@ -499,7 +499,7 @@ describe("BriefingWorkflow", () => {
   test("ignores irrelevant search results when the researcher reports found=false", async () => {
     // Perplexity returns *something* even for nonsense queries, so the source
     // count alone cannot detect "nothing meaningful" — the agent's verdict must.
-    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup({
+    const { workflow, topics, reports, bus, tts, sender, statuses } = setup({
       researchVerdict: false,
     });
     topics.add({ name: "zzzuq flurble" });
@@ -513,16 +513,16 @@ describe("BriefingWorkflow", () => {
     );
 
     expect(output.skipped).toBe(true);
-    expect(briefs.list()).toHaveLength(0);
+    expect(reports.list()).toHaveLength(0);
     expect(tts.requests).toHaveLength(0);
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]?.kind).toBe("text");
-    expect(events.map((event) => event.topic)).not.toContain("brief.generated");
+    expect(events.map((event) => event.topic)).not.toContain("report.generated");
     expect(events.filter((event) => event.topic === "delivery.status").every(
       (event) => (event.payload as { kind: string }).kind === "text",
     )).toBe(true);
 
-    const researched = events.find((event) => event.topic === "brief.research.completed");
+    const researched = events.find((event) => event.topic === "report.research.completed");
     expect(researched?.payload).toMatchObject({ found: false });
   });
 
@@ -545,7 +545,7 @@ describe("BriefingWorkflow", () => {
         ],
       },
     ];
-    const { workflow, topics, briefs, bus, statuses } = setup({ socialResults: social });
+    const { workflow, topics, reports, bus, statuses } = setup({ socialResults: social });
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -553,7 +553,7 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c13", bus, logger: log, statuses },
     );
 
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     const source = stored.sources.find((item) => item.url === social[0]!.url);
     expect(source?.snippet).toBe("Local-first is the future");
     expect(source?.media?.[0]).toMatchObject({
@@ -563,8 +563,8 @@ describe("BriefingWorkflow", () => {
     });
   });
 
-  test("does not store a brief when the researcher returns empty notes", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup({ emptyNotes: true });
+  test("does not store a report when the researcher returns empty notes", async () => {
+    const { workflow, topics, reports, bus, statuses } = setup({ emptyNotes: true });
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -573,11 +573,11 @@ describe("BriefingWorkflow", () => {
     );
 
     expect(output.skipped).toBe(true);
-    expect(briefs.list()).toHaveLength(0);
+    expect(reports.list()).toHaveLength(0);
   });
 
-  test("fails instead of storing an empty brief when the compiler returns nothing", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup({ emptyCompilerOutput: true });
+  test("fails instead of storing an empty report when the compiler returns nothing", async () => {
+    const { workflow, topics, reports, bus, statuses } = setup({ emptyCompilerOutput: true });
     topics.add({ name: "Rust" });
 
     await expect(
@@ -585,8 +585,8 @@ describe("BriefingWorkflow", () => {
         { deliver: false, generateAudio: false },
         { correlationId: "c15", bus, logger: log, statuses },
       ),
-    ).rejects.toThrow(/empty brief/);
-    expect(briefs.list()).toHaveLength(0);
+    ).rejects.toThrow(/empty report/);
+    expect(reports.list()).toHaveLength(0);
   });
 
     test("passes the collected sources to the compiler for inline citations", async () => {    const { workflow, topics, bus, statuses, compilerInputs } = setup();
@@ -604,7 +604,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("appends the follow-up findings as an Implications section that is also spoken", async () => {
-    const { workflow, topics, briefs, bus, statuses, compilerInputs, dispatcherInputs } = setup({
+    const { workflow, topics, reports, bus, statuses, compilerInputs, dispatcherInputs } = setup({
       followups: true,
     });
     topics.add({ name: "Rust" });
@@ -617,10 +617,10 @@ describe("BriefingWorkflow", () => {
     expect(output.skipped).toBe(false);
     // The planner saw the first draft...
     expect(dispatcherInputs[0]).toContain("All quiet");
-    // ...the main brief was not recompiled...
+    // ...the main report was not recompiled...
     expect(compilerInputs).toHaveLength(1);
     // ...and the findings were appended and read aloud.
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     expect(stored.markdown).toContain("## Implications");
     expect(stored.markdown).toContain("Rust adoption keeps accelerating");
     expect(stored.narration).toContain("Rust adoption keeps accelerating");
@@ -650,11 +650,11 @@ describe("BriefingWorkflow", () => {
       title: "Rust 1.90 released",
       url: "https://blog.rust-lang.org/2026/09/01/Rust-1.90.html",
     };
-    const { workflow, topics, briefs, bus, statuses } = setup({
+    const { workflow, topics, reports, bus, statuses } = setup({
       followups: true,
       sourceUpgrades: {
         markdown:
-          "# Morning brief\n\n## Rust\nRust 1.90 is out [1].\n\n## Implications\nRust adoption keeps accelerating [1].",
+          "# Morning report\n\n## Rust\nRust 1.90 is out [1].\n\n## Implications\nRust adoption keeps accelerating [1].",
         upgrades: [primary],
       },
     });
@@ -665,7 +665,7 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c19", bus, logger: log, statuses },
     );
 
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     expect(stored.sources[0]?.url).toBe(primary.url);
     expect(stored.sources[0]?.title).toBe(primary.title);
     expect(stored.markdown).toContain("Rust 1.90 is out");
@@ -674,7 +674,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("keeps the draft when the primary-source revision is not acceptable", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup({
+    const { workflow, topics, reports, bus, statuses } = setup({
       followups: true,
       sourceUpgrades: {
         markdown: "# Rewritten\n\nNope.",
@@ -688,7 +688,7 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c20", bus, logger: log, statuses },
     );
 
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     // The upgrade still lands, but the mangled rewrite is rejected.
     expect(stored.sources[0]?.url).toBe("https://origin.example.com/a");
     expect(stored.markdown).toContain("All quiet");
@@ -739,7 +739,7 @@ describe("BriefingWorkflow", () => {
         source: "www.perplexity.ai",
       },
     ];
-    const { workflow, topics, briefs, bus, statuses } = setup({
+    const { workflow, topics, reports, bus, statuses } = setup({
       financeOnly: true,
       financeResults,
     });
@@ -750,7 +750,7 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c12", bus, logger: log, statuses },
     );
 
-    const stored = briefs.get(output.briefId!);
+    const stored = reports.get(output.reportId!);
     const source = stored.sources.find(
       (item) => item.url === "https://www.perplexity.ai/finance/NVDA",
     );
@@ -759,7 +759,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("resumes from checkpointed progress without re-running research or the compiler", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, statuses, llmRequests } = setup();
+    const { workflow, topics, reports, bus, tts, sender, statuses, llmRequests } = setup();
     topics.add({ name: "Rust" });
 
     const events: DomainEvent[] = [];
@@ -777,8 +777,8 @@ describe("BriefingWorkflow", () => {
         missingTopics: [],
       },
       compiled: {
-        markdown: "# Morning brief\n\n## Rust\nAll quiet.",
-        narration: "Morning brief. Rust. All quiet.",
+        markdown: "# Morning report\n\n## Rust\nAll quiet.",
+        narration: "Morning report. Rust. All quiet.",
       },
     };
 
@@ -802,11 +802,11 @@ describe("BriefingWorkflow", () => {
     expect(
       systems.some((system) => system.includes("calls the search and finance functions")),
     ).toBe(false);
-    expect(events.map((event) => event.topic)).not.toContain("brief.research.started");
-    expect(events.map((event) => event.topic)).not.toContain("brief.research.completed");
+    expect(events.map((event) => event.topic)).not.toContain("report.research.started");
+    expect(events.map((event) => event.topic)).not.toContain("report.research.completed");
 
-    // The brief is still stored, narrated and delivered.
-    const stored = briefs.get(output.briefId!, true);
+    // The report is still stored, narrated and delivered.
+    const stored = reports.get(output.reportId!, true);
     expect(stored.markdown).toContain("All quiet");
     expect(stored.sources).toHaveLength(2);
     expect(stored.hasAudio).toBe(true);
@@ -816,13 +816,13 @@ describe("BriefingWorkflow", () => {
     expect(sender.sent[1]?.kind).toBe("voice");
 
     expect(checkpoints.at(-1)).toMatchObject({
-      steps: { brief: { brief: { reference: output.briefId } } },
-      delivered: { "brief:brief": true, "audio:tts": true },
+      steps: { report: { report: { reference: output.reportId } } },
+      delivered: { "report:report": true, "audio:tts": true },
     });
   });
 
-  test("reuses stored audio when resuming a run whose brief already has it", async () => {
-    const { workflow, topics, briefs, bus, tts, sender, statuses } = setup();
+  test("reuses stored audio when resuming a run whose report already has it", async () => {
+    const { workflow, topics, reports, bus, tts, sender, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const research = {
@@ -834,17 +834,17 @@ describe("BriefingWorkflow", () => {
       missingTopics: [],
     };
     const compiled = {
-      markdown: "# Morning brief\n\n## Rust\nAll quiet.",
-      narration: "Morning brief. Rust. All quiet.",
+      markdown: "# Morning report\n\n## Rust\nAll quiet.",
+      narration: "Morning report. Rust. All quiet.",
     };
 
-    // The first attempt stores the brief and its audio before being
+    // The first attempt stores the report and its audio before being
     // interrupted ahead of delivery.
     const first = await workflow.run(
       { deliver: false, generateAudio: true },
       { correlationId: "c23", bus, logger: log, statuses, resume: { research, compiled } },
     );
-    expect(briefs.get(first.briefId!, true).hasAudio).toBe(true);
+    expect(reports.get(first.reportId!, true).hasAudio).toBe(true);
     expect(tts.requests).toHaveLength(1);
 
     const second = await workflow.run(
@@ -854,11 +854,11 @@ describe("BriefingWorkflow", () => {
         bus,
         logger: log,
         statuses,
-        resume: { research, compiled, briefId: first.briefId },
+        resume: { research, compiled, reportId: first.reportId },
       },
     );
 
-    expect(second.briefId).toBe(first.briefId);
+    expect(second.reportId).toBe(first.reportId);
     // No second synthesis; the stored audio was reused for the voice message.
     expect(tts.requests).toHaveLength(1);
     expect(sender.sent).toHaveLength(2);
@@ -869,7 +869,7 @@ describe("BriefingWorkflow", () => {
   });
 
   test("honors topicIds: only the selected topic ids are briefed", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup();
+    const { workflow, topics, reports, bus, statuses } = setup();
     topics.add({ name: "Rust" });
     const crypto = topics.add({ name: "Crypto" });
     const regulation = topics.add({ name: "AI regulation" });
@@ -882,11 +882,11 @@ describe("BriefingWorkflow", () => {
     expect(output.skipped).toBe(false);
     // The ids win over the requested names; the order follows the active topics.
     expect(output.topics).toEqual(["AI regulation", "Crypto"]);
-    expect(briefs.latest()?.topics).toEqual(["AI regulation", "Crypto"]);
+    expect(reports.latest()?.topics).toEqual(["AI regulation", "Crypto"]);
   });
 
   test("an empty topicIds array skips the briefing with the no-topics reason", async () => {
-    const { workflow, topics, briefs, bus, statuses } = setup();
+    const { workflow, topics, reports, bus, statuses } = setup();
     topics.add({ name: "Rust" });
 
     const output = await workflow.run(
@@ -896,11 +896,11 @@ describe("BriefingWorkflow", () => {
 
     expect(output.skipped).toBe(true);
     expect(output.reason).toBe("No topics configured");
-    expect(briefs.list()).toHaveLength(0);
+    expect(reports.list()).toHaveLength(0);
   });
 
   test("delivers through the channels of the workflow being run", async () => {
-    const { workflow, topics, briefs, bus, statuses, deliveryStore } = setup();
+    const { workflow, topics, reports, bus, statuses, deliveryStore } = setup();
     topics.add({ name: "Rust" });
 
     const briefingChannel = deliveryStore.attachments().find(
@@ -908,7 +908,7 @@ describe("BriefingWorkflow", () => {
     )!.channelId;
     const userChannel = deliveryStore.createChannel({ type: "matrix", name: "User" }).id;
     deliveryStore.attach(
-      { workflow: "user-1", step: "brief", output: "brief" },
+      { workflow: "user-1", step: "report", output: "report" },
       userChannel,
     );
     deliveryStore.attach(
@@ -932,18 +932,18 @@ describe("BriefingWorkflow", () => {
       { correlationId: "c26", bus, logger: log, statuses, run },
     );
 
-    const rows = deliveryStore.deliveries({ briefId: output.briefId });
+    const rows = deliveryStore.deliveries({ reportId: output.reportId });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.channelId).toBe(userChannel);
     expect(rows[0]?.channelId).not.toBe(briefingChannel);
 
-    // The brief is attributed to the workflow that was run, so consumers
+    // The report is attributed to the workflow that was run, so consumers
     // (e.g. the re-send dialog) resolve that workflow's channels.
-    expect(briefs.get(output.briefId!)?.workflow).toBe("user-1");
+    expect(reports.get(output.reportId!)?.workflow).toBe("user-1");
   });
 
-  test("extracts events and attaches a timeline artifact to the brief", async () => {
-    const { workflow, topics, briefs, artifacts, events, bus, statuses } = setup({
+  test("extracts events and attaches a timeline artifact to the report", async () => {
+    const { workflow, topics, reports, artifacts, events, bus, statuses } = setup({
       events: true,
     });
     topics.add({ name: "Rust" });
@@ -965,16 +965,18 @@ describe("BriefingWorkflow", () => {
     expect(stored[0]?.date).toBe("2026-09-30");
     expect(stored[0]?.tags).toEqual(["developer-tools"]);
     expect(stored[0]?.entities).toEqual(["Rust", "Rust Foundation"]);
-    expect(stored[0]?.sourceBriefId).toBe(output.briefId);
+    expect(stored[0]?.sourceReportId).toBe(output.reportId);
 
-    // The timeline artifact sits under the brief and the brief points at it.
-    const brief = briefs.get(output.briefId!);
-    expect(brief.timelineArtifactId).toBeTruthy();
-    const timeline = artifacts.get(brief.timelineArtifactId!);
-    expect(timeline.kind).toBe("timeline");
-    expect(timeline.parentId).toBe(brief.artifactId);
-    expect(timeline.content).toContain("Rust 1.90 released");
-    expect(timeline.metadata.eventIds).toEqual([stored[0]?.id]);
+    // The timeline artifact is attached to the report, in display order
+    // before the text (audio was disabled for this run).
+    const report = reports.get(output.reportId!);
+    const timeline = report.artifacts.find((artifact) => artifact.kind === "timeline");
+    expect(timeline).toBeTruthy();
+    expect(timeline?.parentId).toBe(report.artifactId);
+    expect(timeline?.content).toContain("Rust 1.90 released");
+    expect(timeline?.metadata.eventIds).toEqual([stored[0]?.id]);
+    expect(report.artifacts.map((artifact) => artifact.kind)).toEqual(["timeline", "report-text"]);
+    expect(artifacts.get(timeline!.id).kind).toBe("timeline");
     expect(emitted.some((event) => event.topic === "artifact.created")).toBe(true);
   });
 
@@ -999,9 +1001,9 @@ describe("BriefingWorkflow", () => {
     expect(timeline?.html).toContain("Rust 1.90 released");
     expect(timeline?.html).toContain("</code></pre>");
 
-    // The delivery rows are attributed to the brief, like the other passes:
-    // the brief text plus the timeline text.
-    const rows = deliveryStore.deliveries({ briefId: output.briefId! });
+    // The delivery rows are attributed to the report, like the other passes:
+    // the report text plus the timeline text.
+    const rows = deliveryStore.deliveries({ reportId: output.reportId! });
     expect(rows).toHaveLength(2);
     expect(rows.every((row) => row.kind === "text")).toBe(true);
   });

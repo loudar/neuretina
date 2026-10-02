@@ -34,7 +34,7 @@ export interface WorkflowInputSpec {
 export interface StepInputSpec {
   /**
    * Accepted port type (see ports.ts). Any derivative of it satisfies the
-   * input: an input accepting "text" consumes a brief, a draft, an answer, …
+   * input: an input accepting "text" consumes a report, a draft, an answer, …
    */
   kind: string;
   title: string;
@@ -48,7 +48,7 @@ export type OutputRenderer = (value: unknown) => DeliveryMessage | undefined;
 
 /** A value a step produces; deliverable outputs can be assigned channels. */
 export interface StepOutputSpec {
-  /** Port type id of the produced value, e.g. "brief", "tts" (see ports.ts). */
+  /** Port type id of the produced value, e.g. "report", "tts" (see ports.ts). */
   kind: string;
   title: string;
   description?: string;

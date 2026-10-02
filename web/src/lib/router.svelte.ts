@@ -1,5 +1,5 @@
 export const TABS = [
-  "briefs",
+  "reports",
   "topics",
   "jobs",
   "workflows",
@@ -23,7 +23,7 @@ export interface NavigateOptions {
   replace?: boolean;
 }
 
-const DEFAULT_TAB: Tab = "briefs";
+const DEFAULT_TAB: Tab = "reports";
 
 function parse(url: URL): Route {
   const parts = url.pathname
@@ -96,8 +96,8 @@ function withQuery(path: string, query?: Record<string, string | undefined>): st
 
 export const paths = {
   tab: (tab: Tab) => `/${tab}`,
-  briefs: (id?: string | null, query?: { source?: string }) =>
-    withQuery(id ? `/briefs/${encodeURIComponent(id)}` : "/briefs", query),
+  reports: (id?: string | null, query?: { source?: string }) =>
+    withQuery(id ? `/reports/${encodeURIComponent(id)}` : "/reports", query),
   topics: (id?: string | null) => (id ? `/topics/${encodeURIComponent(id)}` : "/topics"),
   jobs: (id?: string | null) => (id ? `/jobs/${encodeURIComponent(id)}` : "/jobs"),
   events: (id?: string | null, topic?: string) =>

@@ -1,24 +1,24 @@
-import type { BriefSource } from "./BriefRepository.ts";
+import type { ReportSource } from "./ReportRepository.ts";
 
-export interface BriefMessageOptions {
+export interface ReportMessageOptions {
   /** Cap on highlighted source links (default 6). */
   maxSources?: number;
-  /** Public app URL; with `briefId` and `shareToken` appends a "View this Brief" link. */
+  /** Public app URL; with `reportId` and `shareToken` appends a "View this Report" link. */
   appUrl?: string;
-  briefId?: string;
-  /** Anonymous read-only token for the brief; recipients have no account. */
+  reportId?: string;
+  /** Anonymous read-only token for the report; recipients have no account. */
   shareToken?: string;
 }
 
 /**
- * Message text for a brief: the summary plus the most interesting sources as
+ * Message text for a report: the summary plus the most interesting sources as
  * clickable markdown links. This is only used for the text message �?" the
  * spoken narration never contains links or sources.
  */
-export function buildBriefMessage(
+export function buildReportMessage(
   markdown: string,
-  sources: BriefSource[],
-  options: BriefMessageOptions = {},
+  sources: ReportSource[],
+  options: ReportMessageOptions = {},
 ): string {
   const body = linkCitations(markdown, sources);
   const highlights = selectHighlightSources(sources, options.maxSources ?? 6);
@@ -32,24 +32,24 @@ export function buildBriefMessage(
       ),
     );
   }
-  const link = briefLink(options);
+  const link = reportLink(options);
   if (link) lines.push("", link);
   if (lines.length === 0) return body;
 
   return `${body.trimEnd()}\n${lines.join("\n")}`;
 }
 
-function briefLink(options: BriefMessageOptions): string | undefined {
-  if (!options.appUrl || !options.briefId || !options.shareToken) return undefined;
+function reportLink(options: ReportMessageOptions): string | undefined {
+  if (!options.appUrl || !options.reportId || !options.shareToken) return undefined;
   const base = options.appUrl.replace(/\/+$/, "");
-  const url = `${base}/briefs/${encodeURIComponent(options.briefId)}?token=${encodeURIComponent(
+  const url = `${base}/reports/${encodeURIComponent(options.reportId)}?token=${encodeURIComponent(
     options.shareToken,
   )}`;
-  return `[View this Brief on Neuretina](${url})`;
+  return `[View this Report on Neuretina](${url})`;
 }
 
 /** Keeps [n] citation markers clickable in Matrix clients. */
-function linkCitations(markdown: string, sources: BriefSource[]): string {
+function linkCitations(markdown: string, sources: ReportSource[]): string {
   return markdown.replace(/\[(\d+)\]/g, (match, digits: string) => {
     const source = sources[Number(digits) - 1];
     if (!source) return match;
@@ -58,9 +58,9 @@ function linkCitations(markdown: string, sources: BriefSource[]): string {
 }
 
 /** Keeps research order but avoids listing several links from the same site. */
-export function selectHighlightSources(sources: BriefSource[], max: number): BriefSource[] {
+export function selectHighlightSources(sources: ReportSource[], max: number): ReportSource[] {
   const seenHosts = new Set<string>();
-  const picked: BriefSource[] = [];
+  const picked: ReportSource[] = [];
 
   for (const source of sources) {
     const host = hostOf(source.url);

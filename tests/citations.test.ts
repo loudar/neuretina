@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { renderCitations } from "../web/src/lib/citations.ts";
-import type { BriefSource } from "../web/src/lib/api.ts";
+import type { ReportSource } from "../web/src/lib/api.ts";
 
-const sources: BriefSource[] = [
+const sources: ReportSource[] = [
   { title: "First source", url: "https://a.com/1", provider: "perplexity" },
   { title: 'Second "quoted" <source>', url: "https://b.com/x?a=1&b=2", provider: "bluesky" },
 ];

@@ -4,7 +4,7 @@ import type { SqliteDatabase } from "../../infra/db/SqliteDatabase.ts";
 import { DEFAULT_CONTEXT_ID } from "../contexts/ContextRepository.ts";
 
 /**
- * Generic artifact: any text or binary output a workflow produces (briefs,
+ * Generic artifact: any text or binary output a workflow produces (reports,
  * audio, notes, datasets, …), with references back to the run that made it
  * and, optionally, to a parent artifact it belongs to.
  */
@@ -18,7 +18,7 @@ export interface Artifact {
   /** Binary payload — only loaded when requested. */
   data?: Uint8Array;
   metadata: Record<string, unknown>;
-  /** Artifact this one belongs to (e.g. a brief's audio → its brief). */
+  /** Artifact this one belongs to (e.g. a report's audio → its report). */
   parentId?: string;
   /** Workflow that produced the artifact. */
   workflow?: string;
@@ -89,7 +89,7 @@ export interface ArtifactStore {
     options?: { kind?: string; contextId?: string; limit?: number },
   ): Artifact[];
   updateMetadata(id: string, patch: Record<string, unknown>): Artifact;
-  /** Replaces the binary payload in place (regenerating a brief's audio). */
+  /** Replaces the binary payload in place (regenerating a report's audio). */
   replaceData(id: string, data: Uint8Array, contentType?: string): Artifact;
   /** Removes the artifact and everything referencing it as parent. */
   remove(id: string): Artifact;
@@ -226,7 +226,7 @@ export class ArtifactRepository implements ArtifactStore {
     return { ...artifact, metadata };
   }
 
-  /** Replaces the binary payload in place (regenerating a brief's audio). */
+  /** Replaces the binary payload in place (regenerating a report's audio). */
   replaceData(id: string, data: Uint8Array, contentType?: string): Artifact {
     const artifact = this.get(id);
     this.db.raw

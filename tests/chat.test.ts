@@ -89,10 +89,10 @@ describe("chat commands", () => {
 
   test("/list shows tasks with ids and workflows", async () => {
     const { handler, jobs } = setup();
-    jobs.create({ name: "morning-brief", cron: "0 7 * * *", workflow: "briefing" });
+    jobs.create({ name: "morning-report", cron: "0 7 * * *", workflow: "briefing" });
 
     const reply = await handler(command({ command: "list" }));
-    expect(reply).toContain('"morning-brief"');
+    expect(reply).toContain('"morning-report"');
     expect(reply).toContain("cron 0 7 * * *");
     expect(reply).toContain("Workflows: briefing");
   });
@@ -100,15 +100,15 @@ describe("chat commands", () => {
   test("/start by name runs the job off schedule and reports completion", async () => {
     const { handler, jobs, messaging, scheduler } = setup();
     scheduler.stop();
-    const job = jobs.create({ name: "morning-brief", cron: "0 7 * * *", workflow: "briefing" });
+    const job = jobs.create({ name: "morning-report", cron: "0 7 * * *", workflow: "briefing" });
 
-    const reply = await handler(command({ command: "start", args: "morning-brief" }));
-    expect(reply).toContain(`Started job "morning-brief"`);
+    const reply = await handler(command({ command: "start", args: "morning-report" }));
+    expect(reply).toContain(`Started job "morning-report"`);
 
     await waitFor(() => messaging.sent.length >= 1);
     expect(messaging.sent[0]?.message.kind).toBe("text");
     if (messaging.sent[0]?.message.kind === "text") {
-      expect(messaging.sent[0].message.text).toContain('Job "morning-brief" finished successfully');
+      expect(messaging.sent[0].message.text).toContain('Job "morning-report" finished successfully');
     }
 
     expect(jobs.get(job.id).lastStatus).toBe("success");

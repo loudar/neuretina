@@ -95,7 +95,7 @@ export interface AppConfig {
     language?: string;
     speed: number;
     apiKey?: string;
-    /** Per-attempt synthesis timeout; CPU servers need minutes per brief. */
+    /** Per-attempt synthesis timeout; CPU servers need minutes per report. */
     timeoutMs: number;
   };
   /** Kept for later; the ElevenLabs provider module is currently unused. */

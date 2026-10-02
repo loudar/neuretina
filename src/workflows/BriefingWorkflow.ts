@@ -2,8 +2,8 @@ import { wordCount } from "../core/text.ts";
 import { Agent, AGENT_STEP_LIMIT_MESSAGE } from "../agents/Agent.ts";
 import { SearchTool } from "../agents/tools/SearchTool.ts";
 import { createSocialSearchTool, createWebSearchTools } from "../agents/tools/searchTools.ts";
-import { BriefSearchTool } from "../agents/tools/BriefSearchTool.ts";
-import { BriefGetTool } from "../agents/tools/BriefGetTool.ts";
+import { ReportSearchTool } from "../agents/tools/ReportSearchTool.ts";
+import { ReportGetTool } from "../agents/tools/ReportGetTool.ts";
 import { FinanceSearchTool } from "../agents/tools/FinanceSearchTool.ts";
 import { CodeModeTool } from "../agents/tools/CodeModeTool.ts";
 import type { AgentRunResult } from "../agents/Agent.ts";
@@ -32,8 +32,13 @@ import { audioExtension } from "../core/media.ts";
 import { stringField } from "../core/records.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
-import type { BriefSource, BriefStore, BriefWithAudio } from "../domain/briefs/BriefRepository.ts";
-import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
+import {
+  orderReportArtifacts,
+  type ReportSource,
+  type ReportStore,
+  type ReportWithAudio,
+} from "../domain/reports/ReportRepository.ts";
+import { buildReportMessage } from "../domain/reports/reportMessage.ts";
 import { DEFAULT_CONTEXT_ID } from "../domain/contexts/ContextRepository.ts";
 import type { EventStore, TimelineEvent } from "../domain/events/EventRepository.ts";
 import type { Topic, TopicStore } from "../domain/topics/TopicRepository.ts";
@@ -68,10 +73,10 @@ export interface BriefingWorkflowInput {
 
 export interface BriefingWorkflowDeps {
   topics: TopicStore;
-  briefs: BriefStore;
+  reports: ReportStore;
   /** Generic artifact store, used for the timeline artifact. */
   artifacts: ArtifactStore;
-  /** Dated events extracted from briefs. */
+  /** Dated events extracted from reports. */
   events: EventStore;
   llm: LlmProvider;
   webSearch: SearchProvider;
@@ -84,7 +89,7 @@ export interface BriefingWorkflowDeps {
   tts: TextToSpeechProvider;
   /** Routes step outputs through their assigned delivery channels. */
   delivery: DeliveryRouter;
-  /** Public app URL; delivered briefs link back to their detail page. */
+  /** Public app URL; delivered reports link back to their detail page. */
   appUrl?: string;
   /** Local decision models (Laya) for event tagging; optional. */
   decisions?: DecisionModelRegistry;
@@ -106,7 +111,7 @@ export interface BriefingWorkflowDeps {
 
 export interface BriefingWorkflowOutput {
   skipped: boolean;
-  briefId?: string;
+  reportId?: string;
   topics: string[];
   sources: number;
   audioBytes?: number;
@@ -123,21 +128,21 @@ export interface BriefingWorkflowOutput {
 export interface BriefingProgress {
   research?: ResearchNotes;
   compiled?: Draft;
-  implications?: { section: string; sources: BriefSource[] } | null;
-  upgraded?: { markdown: string; sources: BriefSource[] } | null;
-  briefId?: string;
+  implications?: { section: string; sources: ReportSource[] } | null;
+  upgraded?: { markdown: string; sources: ReportSource[] } | null;
+  reportId?: string;
   delivered?: boolean;
 }
 
 /** Everything the research phase produced; consumed by the compiler. */
 interface ResearchNotes {
   notes: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
   queries: string[];
   missingTopics: string[];
 }
 
-/** The compiled brief text and its spoken form. */
+/** The compiled report text and its spoken form. */
 interface Draft {
   markdown: string;
   narration: string;
@@ -162,7 +167,7 @@ Plan first:
 - Social discussion carries as much weight as the reporting: run at least one Bluesky search per run, and treat it as the place where hype, skepticism and disagreement actually show up.
 - When a topic touches a publicly traded company, an ETF or the markets, use the finance tools for concrete numbers (quotes, revenue, margins, guidance, analyst estimates) — state the business question first, then the company or ticker.
 - Web search is restricted to a curated list of reputable sources. Only switch a query to scope "open" when that list cannot cover the topic at all (release notes, official documentation, a niche community) — prefer reputable coverage whenever it exists.
-- Search earlier briefs by topic with past_briefs and open any of them in full with past_brief, so your notes build on what was already covered instead of repeating it.
+- Search earlier reports by topic with past_reports and open any of them in full with past_report, so your notes build on what was already covered instead of repeating it.
 - Run at most 6 searches in total across web and social, plus at most 2 finance lookups. Do not run near-identical queries twice.
 
 Rules:
@@ -179,7 +184,7 @@ Finish with a single JSON object and nothing else:
 {"found": true|false, "notes": "<compact notes with attributions, or an explanation of what you searched and why nothing relevant came back>", "missingTopics": ["<topics that produced no relevant material>"]}
 Set "found" to false when nothing relevant to any topic came back.`;
 
-const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral briefing. You receive research notes covering several topics (they may overlap) and compile ONE short, conversational brief.
+const COMPILER_SYSTEM_PROMPT = `You are the editor of a neutral briefing. You receive research notes covering several topics (they may overlap) and compile ONE short, conversational report.
 
 Spoken delivery — this text is read aloud by a text-to-speech model, sentence by sentence. Write for the ear:
 - Complete, speakable sentences with a natural rhythm. Avoid fragments, stacked parentheticals, slashes, and symbol-heavy shorthand.
@@ -204,7 +209,7 @@ Substance — every sentence must earn its place:
 - No meta-commentary about the research process, the number of sources, or what was left out.
 
 Hard budget — brevity beats completeness:
-- The entire brief, title aside, must stay under 150 words. Shorter is better.
+- The entire report, title aside, must stay under 150 words. Shorter is better.
 - One short paragraph per subtopic, and at most 4 paragraphs in total. No lists, no "Worth a look" section, no action items.
 - Every sentence must add new information. Delete greetings, scene-setting, connective filler, hedges, repetition, and anything a reader could guess.
 - If two sentences overlap, keep the sharper one. Prefer concrete nouns and verbs over adjectives.
@@ -218,16 +223,16 @@ Shape — one paragraph per subtopic:
 Inline citations — every claim shows its source:
 - The source list you receive is numbered. Directly after every factual claim, add the matching number in square brackets: "Spotify crossed 300 million subscribers [4]." or "Revenue grew 12 percent [7][9]."
 - Cite the exact source that supports the claim; never invent a number and never cite a source that does not support it.
-- Short direct quotes are welcome when they carry the point — keep them brief, in quotation marks, with the same marker.
+- Short direct quotes are welcome when they carry the point — keep them report, in quotation marks, with the same marker.
 - Use no other citation style: no links, no URLs, no markers that are not in the source list, and no source list at the end. The markers are turned into hoverable source references in the app, and they are stripped from the spoken narration automatically.
 
 Respond with a single JSON object:
-{"markdown": "<full brief as markdown>"}`;
+{"markdown": "<full report as markdown>"}`;
 
 /**
  * The briefing pipeline, described as a workflow definition. Each step is a
  * phase of the pipeline and owns its ports: sources of values it accepts and
- * outputs it produces. Channels are assigned to deliverable outputs (`brief`
+ * outputs it produces. Channels are assigned to deliverable outputs (`report`
  * text, `audio` voice) and routed by the step pipeline.
  */
 export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, BriefingWorkflowOutput> {
@@ -238,7 +243,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       id: "briefing",
       title: "Briefing",
       description:
-        "Researches all configured topics (web + social), compiles a neutral brief, generates audio and delivers it.",
+        "Researches all configured topics (web + social), compiles a neutral report, generates audio and delivers it.",
       contextId: DEFAULT_CONTEXT_ID,
       triggers: [{ kind: "schedule" as const }, { kind: "manual" as const }],
       inputs: [TOPICS_INPUT],
@@ -265,8 +270,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           id: "compile",
           type: "compile",
           after: ["research"],
-          title: "Compile brief",
-          description: "Turns the research notes into one short, neutral brief.",
+          title: "Compile report",
+          description: "Turns the research notes into one short, neutral report.",
           inputs: [{ kind: "research", title: "Research notes", required: true }],
           outputs: [{ kind: "draft", title: "Draft", guaranteed: true }],
           run: this.compileStep.bind(this),
@@ -314,33 +319,33 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           run: this.sourcesStep.bind(this),
         },
         {
-          id: "brief",
-          type: "brief",
+          id: "report",
+          type: "report",
           after: ["sources"],
-          title: "Write brief",
-          description: "Stores the compiled brief as an artifact.",
+          title: "Write report",
+          description: "Stores the compiled report as an artifact.",
           inputs: [
             { kind: "text", title: "Text", required: true },
             { kind: "sources", title: "Sources", required: true },
           ],
           outputs: [
             {
-              kind: "brief",
-              title: "Brief",
-              description: "The written brief with source links.",
+              kind: "report",
+              title: "Report",
+              description: "The written report with source links.",
               guaranteed: true,
-              deliver: (value) => this.renderBrief(value),
+              deliver: (value) => this.renderReport(value),
             },
           ],
-          run: this.briefStep.bind(this),
+          run: this.reportStep.bind(this),
         },
         {
           id: "events",
           type: "events",
-          after: ["brief"],
+          after: ["report"],
           title: "Extract events",
           description:
-            "Turns the brief and its sources into dated events, deduplicating against the stored events.",
+            "Turns the report and its sources into dated events, deduplicating against the stored events.",
           inputs: [
             { kind: "text", title: "Text", required: true },
             { kind: "sources", title: "Sources", required: false },
@@ -361,7 +366,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           after: ["events"],
           title: "Build timeline",
           description:
-            "Collects the related stored events and stores a timeline artifact next to the brief.",
+            "Collects the related stored events and stores a timeline artifact next to the report.",
           inputs: [
             { kind: "events", title: "Events", required: true },
             { kind: "text", title: "Text", required: false },
@@ -371,7 +376,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
               kind: "timeline",
               title: "Timeline",
               description:
-                "The timeline artifact attached to the brief, delivered as a monospace code block.",
+                "The timeline artifact attached to the report, delivered as a monospace code block.",
               guaranteed: false,
               deliver: (value) => this.renderTimeline(value),
             },
@@ -381,10 +386,10 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         {
           id: "audio",
           type: "tts",
-          after: ["brief"],
+          after: ["report"],
           title: "Generate voice",
           description:
-            "Synthesizes any text output (the brief here) into a voice message.",
+            "Synthesizes any text output (the report here) into a voice message.",
           inputs: [
             {
               kind: "text",
@@ -414,7 +419,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   ): Promise<BriefingWorkflowOutput> {
     const { bus, correlationId } = context;
     const contextId = context.contextId ?? DEFAULT_CONTEXT_ID;
-    // A user workflow delegates its run here with its own id: briefs, their
+    // A user workflow delegates its run here with its own id: reports, their
     // audio and the delivery belong to the workflow that was actually run.
     const workflowId = context.run?.workflow ?? this.definition.id;
 
@@ -426,7 +431,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           ? "All topics are muted"
           : "No topics configured";
       bus.publish(
-        "brief.skipped",
+        "report.skipped",
         { correlationId, reason },
         { source: `workflow:${this.definition.id}`, correlationId },
       );
@@ -449,14 +454,19 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       return outcome.halted as BriefingWorkflowOutput;
     }
 
-    const briefId = briefReferenceOf(outcome.outputs);
-    const brief = briefId ? this.deps.briefs.get(briefId) : undefined;
+    const reportId = reportReferenceOf(outcome.outputs);
+    const report = reportId ? this.deps.reports.get(reportId) : undefined;
+    // The pipeline stores timeline/audio/text as they finish; the report
+    // displays them in the canonical order regardless of completion order.
+    if (reportId && report) {
+      this.deps.reports.order(reportId, orderReportArtifacts(report.artifacts).map((entry) => entry.id));
+    }
     const voice = outcome.outputs.get("audio")?.tts as { bytes?: number } | undefined;
     return {
       skipped: false,
-      ...(briefId ? { briefId } : {}),
+      ...(reportId ? { reportId } : {}),
       topics: topicNames,
-      sources: brief?.sources.length ?? 0,
+      sources: report?.sources.length ?? 0,
       ...(voice?.bytes !== undefined ? { audioBytes: voice.bytes } : {}),
       ...(outcome.delivered > 0 ? { deliveredChannels: outcome.delivered } : {}),
       ...(input.stopAfter ? { stoppedAfter: input.stopAfter } : {}),
@@ -480,23 +490,23 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     return active.filter((topic) => requested.has(topic.name.toLowerCase()));
   }
 
-  /** Renders the brief artifact as a text message for its assigned channels. */
-  private renderBrief(value: unknown): DeliveryMessage | undefined {
+  /** Renders the report artifact as a text message for its assigned channels. */
+  private renderReport(value: unknown): DeliveryMessage | undefined {
     const reference = textReference(value);
     if (!reference) return undefined;
-    const brief = this.deps.briefs.get(reference);
-    const summary = buildBriefMessage(brief.markdown, brief.sources, {
+    const report = this.deps.reports.get(reference);
+    const summary = buildReportMessage(report.markdown, report.sources, {
       appUrl: this.deps.appUrl,
-      briefId: brief.id,
-      shareToken: this.deps.briefs.shareToken(brief.id),
+      reportId: report.id,
+      shareToken: this.deps.reports.shareToken(report.id),
     });
     return {
       kinds: ["text"],
-      reference: brief.id,
-      title: brief.topics.join(", "),
+      reference: report.id,
+      title: report.topics.join(", "),
       summary,
       html: markdownToHtml(summary),
-      narration: brief.narration,
+      narration: report.narration,
     };
   }
 
@@ -504,16 +514,16 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private renderTts(value: unknown): DeliveryMessage | undefined {
     const reference = textReference(value);
     if (!reference) return undefined;
-    const brief = this.deps.briefs.get(reference, true);
-    if (!brief.audio) return undefined;
+    const report = this.deps.reports.get(reference, true);
+    if (!report.audio) return undefined;
     return {
       kinds: ["voice"],
-      reference: brief.id,
-      title: brief.topics.join(", "),
-      summary: brief.narration,
-      narration: brief.narration,
-      audio: brief.audio,
-      audioMime: brief.audioMime ?? "audio/ogg",
+      reference: report.id,
+      title: report.topics.join(", "),
+      summary: report.narration,
+      narration: report.narration,
+      audio: report.audio,
+      audioMime: report.audioMime ?? "audio/ogg",
     };
   }
 
@@ -528,20 +538,20 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       record.metadata && typeof record.metadata === "object"
         ? (record.metadata as Record<string, unknown>)
         : {};
-    const briefId = stringField(metadata, "briefId");
+    const reportId = stringField(metadata, "reportId");
     const ids = Array.isArray(metadata.eventIds)
       ? metadata.eventIds.filter(
           (id): id is string => typeof id === "string" && id.length > 0,
         )
       : [];
-    if (!briefId || ids.length === 0) return undefined;
+    if (!reportId || ids.length === 0) return undefined;
 
     const events = this.deps.events.list({ ids });
     if (events.length === 0) return undefined;
     const text = renderTimelineText(events);
     return {
       kinds: ["text"],
-      reference: briefId,
+      reference: reportId,
       title: "Timeline",
       summary: text,
       html: renderTimelineHtml(text),
@@ -550,7 +560,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
   /**
    * Researches all selected topics in one agent run. When nothing relevant
-   * turns up the pipeline halts: no brief, no audio, just a plain notice to
+   * turns up the pipeline halts: no report, no audio, just a plain notice to
    * the channels assigned anywhere in the workflow.
    */
   private async researchStep(ctx: StepContext): Promise<StepResult> {
@@ -560,13 +570,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const topicNames = topics.map((topic) => topic.name);
 
     bus.publish(
-      "brief.research.started",
+      "report.research.started",
       { correlationId, topics: topicNames },
       { source: `workflow:${this.definition.id}`, correlationId },
     );
 
     // One research run covers all topics: the agent plans its own searches,
-    // merges overlapping topics and can consult earlier briefs.
+    // merges overlapping topics and can consult earlier reports.
     const researchAgent = this.createResearchAgent(contextId);
     const researchSpan = this.deps.statuses?.begin(
       `${correlationId}:research`,
@@ -595,7 +605,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     const outcome = parseResearchOutcome(result.text);
     // The agent can "succeed" with nothing usable (empty notes, step limit):
-    // never compile or store a brief out of that.
+    // never compile or store a report out of that.
     const found = outcome.found && outcome.notes.trim().length > 0;
     const sources = found ? collectSources(result) : [];
     const queries = collectQueries(result);
@@ -611,7 +621,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     );
 
     bus.publish(
-      "brief.research.completed",
+      "report.research.completed",
       {
         correlationId,
         topics: topicNames,
@@ -642,7 +652,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     };
   }
 
-  /** Halts the pipeline with a plain notice instead of a brief. */
+  /** Halts the pipeline with a plain notice instead of a report. */
   private noMaterialNotice(
     topicNames: string[],
     queries: string[],
@@ -653,14 +663,14 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const reason = "No material found for the given topics";
 
     bus.publish(
-      "brief.skipped",
+      "report.skipped",
       { correlationId, reason, topics: topicNames, queries: uniqueQueries },
       { source: `workflow:${this.definition.id}`, correlationId },
     );
     logger.warn("no research material found", { topics: topicNames, queries: uniqueQueries });
 
     const notice = formatNoMaterialNotice(topicNames, uniqueQueries);
-    const summary = buildBriefMessage(notice, []);
+    const summary = buildReportMessage(notice, []);
     return {
       halt: { skipped: true, topics: topicNames, sources: 0, reason },
       fallback: {
@@ -679,7 +689,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const topicNames = topicNamesOf(ctx);
     const { correlationId } = ctx.run;
 
-    const compileSpan = this.deps.statuses?.begin(`${correlationId}:compile`, "Compiling brief", {
+    const compileSpan = this.deps.statuses?.begin(`${correlationId}:compile`, "Compiling report", {
       correlationId,
     });
     try {
@@ -691,7 +701,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       if (draft.usage) {
         compileSpan?.addCost(ctx.run.cost?.addLlm("Compilation", draft.usage) ?? 0);
       }
-      compileSpan?.done("Brief compiled");
+      compileSpan?.done("Report compiled");
       return { outputs: { draft: { text: draft.markdown, narration: draft.narration } } };
     } catch (error) {
       compileSpan?.failed("Compilation failed");
@@ -757,8 +767,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     };
   }
 
-  /** Stores the final draft and its sources as the brief artifact. */
-  private async briefStep(ctx: StepContext): Promise<StepResult> {
+  /** Stores the final draft and its sources as the report artifact. */
+  private async reportStep(ctx: StepContext): Promise<StepResult> {
     const draft = inputValue(ctx, "text") as TextPortValue | undefined;
     if (!draft) return { outputs: {} };
     const sources = finalSources(ctx);
@@ -767,7 +777,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const workflowId = ctx.run.run?.workflow ?? this.definition.id;
     const topicNames = topicNamesOf(ctx);
 
-    const brief = this.deps.briefs.create({
+    const report = this.deps.reports.create({
       correlationId,
       workflow: workflowId,
       contextId,
@@ -780,42 +790,42 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     bus.publish(
       "artifact.created",
       {
-        artifactId: brief.artifactId,
-        kind: "brief",
+        artifactId: report.artifactId,
+        kind: "report",
         workflow: workflowId,
         correlationId,
       },
       { source: `workflow:${this.definition.id}`, correlationId },
     );
     bus.publish(
-      "brief.generated",
+      "report.generated",
       {
         correlationId,
-        briefId: brief.id,
-        artifactId: brief.artifactId,
+        reportId: report.id,
+        artifactId: report.artifactId,
         topics: topicNames,
         sources: sources.length,
         characters: draft.text.length,
       },
       { source: `workflow:${this.definition.id}`, correlationId },
     );
-    ctx.run.logger.info("brief generated", {
+    ctx.run.logger.info("report generated", {
       correlationId,
-      briefId: brief.id,
+      reportId: report.id,
       characters: draft.text.length,
     });
 
     return {
       outputs: {
-        brief: { text: brief.markdown, narration: brief.narration, reference: brief.id },
+        report: { text: report.markdown, narration: report.narration, reference: report.id },
       },
     };
   }
 
   /**
-   * The event extraction action: reads the finished brief and its sources,
+   * The event extraction action: reads the finished report and its sources,
    * suggests dated events, reviews potential duplicates and upserts them.
-   * Failures are swallowed — a missing timeline must never lose the brief.
+   * Failures are swallowed — a missing timeline must never lose the report.
    */
   private async eventsStep(ctx: StepContext): Promise<StepResult> {
     const text = inputValue(ctx, "text") as TextPortValue | undefined;
@@ -841,8 +851,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           : {}),
       });
       const result = await extractor.extract({
-        briefId: text.reference,
-        brief: text.text,
+        reportId: text.reference,
+        report: text.text,
         sources: finalSources(ctx),
       });
       if (result.events.length === 0) {
@@ -861,7 +871,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
       };
     } catch (error) {
       span?.failed(`Event extraction failed (${errorMessage(error)})`);
-      logger.warn("event extraction failed; keeping the brief", {
+      logger.warn("event extraction failed; keeping the report", {
         error: errorMessage(error),
       });
       return { outputs: {} };
@@ -871,17 +881,17 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   /**
    * The timeline action: picks the related stored events for the freshly
    * extracted ones, renders them and stores a timeline artifact under the
-   * brief (the brief's metadata points at it).
+   * report (the report's metadata points at it).
    */
   private async timelineStep(ctx: StepContext): Promise<StepResult> {
     const eventsOutput = ctx.outputs.get("events")?.events as { ids?: string[] } | undefined;
-    const briefId = textReference(inputValue(ctx, "text"));
-    if (!eventsOutput?.ids?.length || !briefId) return { outputs: {} };
+    const reportId = textReference(inputValue(ctx, "text"));
+    if (!eventsOutput?.ids?.length || !reportId) return { outputs: {} };
     const { bus, correlationId, logger } = ctx.run;
     const workflowId = ctx.run.run?.workflow ?? this.definition.id;
 
     try {
-      const brief = this.deps.briefs.get(briefId);
+      const report = this.deps.reports.get(reportId);
       const fresh = eventsOutput.ids
         .map((id) => {
           try {
@@ -905,14 +915,14 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           from: selected.at(-1)?.date,
           to: selected[0]?.date,
           count: selected.length,
-          briefId,
+          reportId,
         },
-        parentId: brief.artifactId,
+        parentId: report.artifactId,
         workflow: workflowId,
         correlationId,
         contextId: ctx.run.contextId ?? DEFAULT_CONTEXT_ID,
       });
-      this.deps.artifacts.updateMetadata(brief.artifactId, { timelineArtifactId: artifact.id });
+      this.deps.reports.attach(reportId, artifact.id);
 
       bus.publish(
         "artifact.created",
@@ -920,7 +930,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
           artifactId: artifact.id,
           kind: "timeline",
           workflow: workflowId,
-          parentId: brief.artifactId,
+          parentId: report.artifactId,
           correlationId,
         },
         { source: `workflow:${this.definition.id}`, correlationId },
@@ -935,13 +945,13 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
             metadata: {
               eventIds: selected.map((event) => event.id),
               count: selected.length,
-              briefId,
+              reportId,
             },
           },
         },
       };
     } catch (error) {
-      logger.warn("timeline build failed; keeping the brief", {
+      logger.warn("timeline build failed; keeping the report", {
         error: errorMessage(error),
       });
       return { outputs: {} };
@@ -950,7 +960,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
   /**
    * The TTS action: synthesizes the spoken form of any text output (here the
-   * brief). Speech failures are not fatal — the step produces no voice message
+   * report). Speech failures are not fatal — the step produces no voice message
    * and the text is delivered as is. The audio is stored next to the text it
    * was spoken from, so the output can reference its source.
    */
@@ -967,9 +977,9 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     ctx.run.signal?.throwIfAborted();
 
     // A resumed run may already have stored audio; reuse it instead of
-    // synthesizing (and paying for) the same speech twice. The stored brief
+    // synthesizing (and paying for) the same speech twice. The stored report
     // also supplies the narration when the checkpoint only kept a reference.
-    const stored = this.deps.briefs.get(reference, true);
+    const stored = this.deps.reports.get(reference, true);
     const spoken =
       text.narration ??
       (text.text ? sanitizeNarration(stripMarkdown(text.text)) : stored.narration);
@@ -1011,7 +1021,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     ctx.run.signal?.throwIfAborted();
 
     if (!stored.hasAudio) {
-      const audioArtifactId = this.deps.briefs.attachAudio(
+      const audioArtifactId = this.deps.reports.attachAudio(
         reference,
         speech.data,
         speech.mimeType,
@@ -1033,7 +1043,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         "tts.synthesized",
         {
           correlationId,
-          briefId: reference,
+          reportId: reference,
           artifactId: reference,
           audioArtifactId,
           characters: spoken.length,
@@ -1082,8 +1092,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
         limit: this.deps.defaults.resultsPerProvider,
         recency: this.deps.defaults.recency,
       }),
-      new BriefSearchTool(this.deps.briefs, contextId),
-      new BriefGetTool(this.deps.briefs),
+      new ReportSearchTool(this.deps.reports, contextId),
+      new ReportGetTool(this.deps.reports),
       ...finance.map((provider) => new FinanceSearchTool(provider)),
     ];
 
@@ -1102,16 +1112,16 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   /**
    * Plans follow-up questions from the first draft and dispatches one
    * subagent per question (Wikipedia, reputable web search, social search,
-   * past briefs), then writes the "Implications" section that gets appended
-   * to the brief. Failures are swallowed so the draft survives.
+   * past reports), then writes the "Implications" section that gets appended
+   * to the report. Failures are swallowed so the draft survives.
    */
   private async researchFollowups(
     topics: string[],
     draft: string,
-    sources: BriefSource[],
+    sources: ReportSource[],
     contextId: string,
     context: WorkflowContext,
-  ): Promise<{ section: string; sources: BriefSource[] } | undefined> {
+  ): Promise<{ section: string; sources: ReportSource[] } | undefined> {
     const { correlationId, logger } = context;
     const span = context.statuses?.begin(`${correlationId}:followups`, "Digging deeper", {
       correlationId,
@@ -1120,7 +1130,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     try {
       const researcher = new FollowupResearch({
         llm: this.deps.llm,
-        briefs: this.deps.briefs,
+        reports: this.deps.reports,
         contextId,
         webSearch: this.deps.webSearch,
         searchProviders: this.deps.searchProviders,
@@ -1168,9 +1178,9 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   private async researchPrimarySources(
     topics: string[],
     markdown: string,
-    sources: BriefSource[],
+    sources: ReportSource[],
     context: WorkflowContext,
-  ): Promise<{ markdown: string; sources: BriefSource[] } | undefined> {
+  ): Promise<{ markdown: string; sources: ReportSource[] } | undefined> {
     try {
       const upgrades = new SourceUpgrades({
         llm: this.deps.llm,
@@ -1200,7 +1210,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   private async compile(
-    research: { topics: string[]; notes: string; sources: BriefSource[] },
+    research: { topics: string[]; notes: string; sources: ReportSource[] },
     context: WorkflowContext,
   ): Promise<{ markdown: string; narration: string; usage: LlmUsage }> {
     const draft = await this.requestCompilation(research, context);
@@ -1210,7 +1220,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     // Brevity is a hard requirement, not a suggestion: one compression pass
     // for over-long drafts before anything is spoken or delivered.
-    context.logger.warn("brief over word budget; compressing", { words: draftWords });
+    context.logger.warn("report over word budget; compressing", { words: draftWords });
     try {
       const compressed = await this.requestCompilation(research, context, {
         draft: draft.markdown,
@@ -1228,7 +1238,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 
   private async requestCompilation(
-    research: { topics: string[]; notes: string; sources: BriefSource[] },
+    research: { topics: string[]; notes: string; sources: ReportSource[] },
     context: WorkflowContext,
     compress?: { draft: string; words: number },
   ): Promise<{ markdown: string; narration: string; usage: LlmUsage }> {
@@ -1266,7 +1276,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
 
     if (markdown) {
       // The spoken version is derived from the summary itself, so the audio
-      // always matches the written brief (models tend to drop details when
+      // always matches the written report (models tend to drop details when
       // asked to rewrite it).
       return {
         markdown,
@@ -1276,12 +1286,12 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     }
 
     // JSON without usable markdown means the compiler gave up: never store an
-    // empty brief. Fall back to raw text only for genuinely non-JSON output.
-    if (parsed) throw new Error("Compiler returned an empty brief");
+    // empty report. Fall back to raw text only for genuinely non-JSON output.
+    if (parsed) throw new Error("Compiler returned an empty report");
 
     context.logger.warn("compiler returned non-JSON output, falling back to raw text");
     const raw = completion.text.trim();
-    if (!raw) throw new Error("Compiler returned an empty brief");
+    if (!raw) throw new Error("Compiler returned an empty report");
     return {
       markdown: raw,
       narration: sanitizeNarration(stripMarkdown(raw)),
@@ -1315,21 +1325,21 @@ function textReference(value: unknown): string | undefined {
 }
 
 /** Sources carried as metadata by a research/implications text value. */
-function sourcesOf(value: TextPortValue | undefined): BriefSource[] {
+function sourcesOf(value: TextPortValue | undefined): ReportSource[] {
   const sources = value?.metadata?.sources;
-  return Array.isArray(sources) ? (sources as BriefSource[]) : [];
+  return Array.isArray(sources) ? (sources as ReportSource[]) : [];
 }
 
 /** The latest sources produced or carried by the text pipeline. */
-function sourcesAfterResearch(ctx: StepContext): BriefSource[] {
+function sourcesAfterResearch(ctx: StepContext): ReportSource[] {
   const latest = sourcesOf(inputValue(ctx, "text") as TextPortValue | undefined);
   if (latest.length > 0) return latest;
   return sourcesOf(inputValue(ctx, "research") as TextPortValue | undefined);
 }
 
-function finalSources(ctx: StepContext): BriefSource[] {
+function finalSources(ctx: StepContext): ReportSource[] {
   return (
-    (ctx.outputs.get("sources")?.sources as BriefSource[] | undefined) ??
+    (ctx.outputs.get("sources")?.sources as ReportSource[] | undefined) ??
     sourcesAfterResearch(ctx)
   );
 }
@@ -1339,8 +1349,8 @@ function applyImplications(draft: TextPortValue, deeper: { section: string }): T
   return { text, narration: sanitizeNarration(stripMarkdown(text)) };
 }
 
-function briefReferenceOf(outputs: Map<string, Record<string, unknown>>): string | undefined {
-  return textReference(outputs.get("brief")?.brief);
+function reportReferenceOf(outputs: Map<string, Record<string, unknown>>): string | undefined {
+  return textReference(outputs.get("report")?.report);
 }
 
 /**
@@ -1349,7 +1359,19 @@ function briefReferenceOf(outputs: Map<string, Record<string, unknown>>): string
  */
 function migrateResume(resume: unknown): PipelineState | undefined {
   if (!resume || typeof resume !== "object") return undefined;
-  if ("steps" in (resume as Record<string, unknown>)) return resume as PipelineState;
+  if ("steps" in (resume as Record<string, unknown>)) {
+    // Checkpoints from before the rename stored the report step as "brief".
+    const state = resume as PipelineState;
+    if (state.steps.brief !== undefined && state.steps.report === undefined) {
+      state.steps.report = state.steps.brief;
+      delete state.steps.brief;
+    }
+    if (state.delivered["brief:brief"] && !state.delivered["report:report"]) {
+      state.delivered["report:report"] = true;
+      delete state.delivered["brief:brief"];
+    }
+    return state;
+  }
 
   const progress = resume as BriefingProgress;
   const state: PipelineState = { steps: {}, delivered: {} };
@@ -1396,18 +1418,18 @@ function migrateResume(resume: unknown): PipelineState | undefined {
     };
   }
 
-  if (progress.briefId) state.steps.brief = { brief: { reference: progress.briefId } };
+  if (progress.reportId) state.steps.report = { report: { reference: progress.reportId } };
 
   if (progress.delivered) {
     state.steps.audio ??= {};
-    state.delivered["brief:brief"] = true;
+    state.delivered["report:report"] = true;
     state.delivered["audio:tts"] = true;
   }
 
   return state;
 }
 
-function progressSources(progress: BriefingProgress): BriefSource[] {
+function progressSources(progress: BriefingProgress): ReportSource[] {
   return progress.implications?.sources ?? progress.research?.sources ?? [];
 }
 
@@ -1425,7 +1447,7 @@ function addUsage(a: LlmUsage, b: LlmUsage): LlmUsage {
   };
 }
 
-/** Target length for the compiled brief (title aside). */
+/** Target length for the compiled report (title aside). */
 const WORD_BUDGET = 150;
 /** Drafts longer than this get one compression pass. */
 const HARD_WORD_CEILING = 170;
@@ -1492,7 +1514,7 @@ export function parseResearchOutcome(text: string): {
 }
 
 export function formatNoMaterialNotice(topics: string[], queries: string[]): string {  const lines: string[] = [
-    "No brief today: the research found nothing usable for the configured topic(s).",
+    "No report today: the research found nothing usable for the configured topic(s).",
     "",
     "Topics:",
     ...topics.map((topic) => `- ${topic}`),

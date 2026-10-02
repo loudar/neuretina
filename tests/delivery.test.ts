@@ -67,17 +67,17 @@ describe("DeliveryRepository", () => {
     const repo = new DeliveryRepository(new SqliteDatabase(":memory:"));
     const first = repo.createChannel({ type: "matrix", name: "Matrix" });
     const second = repo.createChannel({ type: "email", name: "Mail" });
-    const briefText = { workflow: "briefing", step: "brief", output: "brief" };
+    const reportText = { workflow: "briefing", step: "report", output: "report" };
     const voice = { workflow: "briefing", step: "audio", output: "tts" };
     const answer = { workflow: "qa", step: "answer", output: "answer" };
 
-    repo.attach(briefText, first.id);
+    repo.attach(reportText, first.id);
     repo.attach(voice, second.id);
     repo.attach(answer, second.id);
-    repo.attach(briefText, first.id); // idempotent
+    repo.attach(reportText, first.id); // idempotent
 
     expect(repo.attachments()).toEqual([
-      { ...briefText, channelId: first.id },
+      { ...reportText, channelId: first.id },
       { ...voice, channelId: second.id },
       { ...answer, channelId: second.id },
     ]);
@@ -86,7 +86,7 @@ describe("DeliveryRepository", () => {
       { workflow: "qa", channelIds: [second.id] },
     ]);
 
-    repo.detach(briefText, first.id);
+    repo.detach(reportText, first.id);
     expect(repo.workflows()[0]?.channelIds).toEqual([second.id]);
 
     // Removing a channel cascades to every attachment referencing it.
@@ -100,13 +100,13 @@ describe("DeliveryRepository", () => {
     const first = repo.createChannel({ type: "matrix", name: "Matrix" });
     const second = repo.createChannel({ type: "email", name: "Mail" });
 
-    repo.attach({ workflow: "briefing", step: "brief", output: "brief" }, first.id);
-    repo.attach({ workflow: "user-1", step: "brief", output: "brief" }, first.id);
+    repo.attach({ workflow: "briefing", step: "report", output: "report" }, first.id);
+    repo.attach({ workflow: "user-1", step: "report", output: "report" }, first.id);
     repo.attach({ workflow: "user-1", step: "audio", output: "tts" }, second.id);
 
     repo.detachWorkflow("user-1");
     expect(repo.attachments()).toEqual([
-      { workflow: "briefing", step: "brief", output: "brief", channelId: first.id },
+      { workflow: "briefing", step: "report", output: "report", channelId: first.id },
     ]);
   });
 
@@ -115,7 +115,7 @@ describe("DeliveryRepository", () => {
     const channel = repo.createChannel({ type: "matrix", name: "Matrix" });
 
     const row = repo.record({
-      briefId: "brief-1",
+      reportId: "report-1",
       runId: "run-1",
       channelId: channel.id,
       kind: "text",
@@ -123,7 +123,7 @@ describe("DeliveryRepository", () => {
     expect(row.status).toBe("pending");
     expect(row.runId).toBe("run-1");
 
-    const voice = repo.record({ briefId: "brief-1", channelId: channel.id, kind: "voice" });
+    const voice = repo.record({ reportId: "report-1", channelId: channel.id, kind: "voice" });
     expect(voice.runId).toBeUndefined();
 
     repo.complete(row.id, { status: "sent", eventId: "$evt-1" });
@@ -137,9 +137,9 @@ describe("DeliveryRepository", () => {
     expect(rows[0]?.eventId).toBe("$evt-1");
     expect(rows[1]?.error).toBe("SMTP refused");
 
-    expect(repo.deliveries({ briefId: "brief-1" })).toHaveLength(2);
+    expect(repo.deliveries({ reportId: "report-1" })).toHaveLength(2);
     expect(repo.deliveries({ runId: "run-1" }).map((entry) => entry.kind)).toEqual(["text"]);
-    expect(repo.deliveries({ briefId: "other" })).toEqual([]);
+    expect(repo.deliveries({ reportId: "other" })).toEqual([]);
     expect(() => repo.complete("missing", { status: "sent" })).toThrow(/not found/);
   });
 });
@@ -191,8 +191,8 @@ describe("createDeliverySender", () => {
     const voice = await sender.sendVoice({
       audio: new Uint8Array([1]),
       mimeType: "audio/ogg",
-      filename: "brief.ogg",
-      caption: "Morning brief",
+      filename: "report.ogg",
+      caption: "Morning report",
       text: "summary text",
     });
     expect(voice.eventId).toBe("msg-2");
@@ -255,8 +255,8 @@ describe("createDeliverySender", () => {
     const voice = await sender.sendVoice({
       audio: new Uint8Array([1, 2]),
       mimeType: "audio/ogg",
-      filename: "brief.ogg",
-      caption: "Morning brief",
+      filename: "report.ogg",
+      caption: "Morning report",
       text: "narration",
     });
     expect(voice.eventId).toBe("$evt1");
@@ -316,8 +316,8 @@ describe("createDeliverySender", () => {
     await sender.sendVoice({
       audio: new Uint8Array([1]),
       mimeType: "audio/ogg",
-      filename: "brief.ogg",
-      caption: "Morning brief",
+      filename: "report.ogg",
+      caption: "Morning report",
       text: "narration",
     });
 
@@ -391,7 +391,7 @@ describe("DeliveryService", () => {
   test("delivers text and voice to the channels attached to the step output", async () => {
     const { service, store, bus } = setupDelivery();
     const channel = store.createChannel({ type: "matrix", name: "Matrix", config: {} });
-    const target = { workflow: "briefing", step: "brief", output: "brief" };
+    const target = { workflow: "briefing", step: "report", output: "report" };
     store.attach(target, channel.id);
 
     expect(service.channelsFor(target)).toEqual([channel.id]);
@@ -401,7 +401,7 @@ describe("DeliveryService", () => {
     bus.subscribe("delivery.*", (event) => events.push(event));
 
     const results = await service.deliver({
-      briefId: "brief-1",
+      reportId: "report-1",
       runId: "run-1",
       target,
       summary: "Summary text",
@@ -413,7 +413,7 @@ describe("DeliveryService", () => {
 
     expect(results).toEqual([{ channelId: channel.id, status: "sent", eventId: "evt-2" }]);
 
-    const rows = store.deliveries({ briefId: "brief-1" });
+    const rows = store.deliveries({ reportId: "report-1" });
     expect(rows.map((row) => `${row.kind}:${row.status}`)).toEqual(["text:sent", "voice:sent"]);
     expect(rows[0]?.eventId).toBe("evt-1");
     expect(rows[0]?.runId).toBe("run-1");
@@ -423,7 +423,7 @@ describe("DeliveryService", () => {
 
     const sentEvent = events[1]!;
     expect(sentEvent.payload).toMatchObject({
-      briefId: "brief-1",
+      reportId: "report-1",
       runId: "run-1",
       channelId: channel.id,
       kind: "text",
@@ -440,21 +440,21 @@ describe("DeliveryService", () => {
     store.attach({ workflow: "qa", step: "answer", output: "answer" }, enabled.id);
 
     const results = await service.deliver({
-      briefId: "b",
+      reportId: "b",
       channels: [enabled.id],
       summary: "s",
     });
     expect(results.map((result) => result.channelId)).toEqual([enabled.id]);
 
     await expect(
-      service.deliver({ briefId: "b", channels: ["missing"], summary: "s" }),
+      service.deliver({ reportId: "b", channels: ["missing"], summary: "s" }),
     ).rejects.toThrow(/not found/);
     await expect(
-      service.deliver({ briefId: "b", channels: [disabled.id], summary: "s" }),
+      service.deliver({ reportId: "b", channels: [disabled.id], summary: "s" }),
     ).rejects.toThrow(/disabled/);
 
     // No workflow, target or channels: nothing to do.
-    expect(await service.deliver({ briefId: "b", summary: "s" })).toEqual([]);
+    expect(await service.deliver({ reportId: "b", summary: "s" })).toEqual([]);
   });
 
   test("one failing channel does not stop the others", async () => {
@@ -473,12 +473,12 @@ describe("DeliveryService", () => {
 
     const first = store.createChannel({ type: "matrix", name: "Matrix" });
     const second = store.createChannel({ type: "discord", name: "Hook" });
-    const target = { workflow: "briefing", step: "brief", output: "brief" };
+    const target = { workflow: "briefing", step: "report", output: "report" };
     store.attach(target, first.id);
     store.attach(target, second.id);
 
     const results = await service.deliver({
-      briefId: "b1",
+      reportId: "b1",
       workflow: "briefing",
       summary: "s",
       audio: new Uint8Array([1]),
@@ -491,7 +491,7 @@ describe("DeliveryService", () => {
     expect(good.sent).toHaveLength(2);
     expect(bad.sent).toHaveLength(0);
 
-    const rows = store.deliveries({ briefId: "b1" });
+    const rows = store.deliveries({ reportId: "b1" });
     expect(rows.filter((row) => row.channelId === second.id).map((row) => row.status)).toEqual([
       "failed",
       "failed",
@@ -510,14 +510,14 @@ describe("DeliveryService", () => {
       },
     });
     const channel = store.createChannel({ type: "matrix", name: "Broken" });
-    store.attach({ workflow: "briefing", step: "brief", output: "brief" }, channel.id);
+    store.attach({ workflow: "briefing", step: "report", output: "report" }, channel.id);
 
-    const results = await service.deliver({ briefId: "b", workflow: "briefing", summary: "s" });
+    const results = await service.deliver({ reportId: "b", workflow: "briefing", summary: "s" });
 
     expect(results).toEqual([
       { channelId: channel.id, status: "failed", error: "channel config needs a homeserverUrl" },
     ]);
-    expect(store.deliveries({ briefId: "b" }).map((row) => row.status)).toEqual(["failed"]);
+    expect(store.deliveries({ reportId: "b" }).map((row) => row.status)).toEqual(["failed"]);
   });
 
   test("honors the kinds filter (voice only)", async () => {
@@ -526,7 +526,7 @@ describe("DeliveryService", () => {
     store.attach({ workflow: "briefing", step: "audio", output: "tts" }, channel.id);
 
     const results = await service.deliver({
-      briefId: "b",
+      reportId: "b",
       workflow: "briefing",
       kinds: ["voice"],
       summary: "s",
@@ -536,23 +536,23 @@ describe("DeliveryService", () => {
     expect(results).toEqual([{ channelId: channel.id, status: "sent", eventId: "evt-1" }]);
     expect(sender.sent.map((entry) => entry.kind)).toEqual(["voice"]);
     expect(sender.sent[0]?.text).toBe("s");
-    expect(sender.sent[0]?.caption).toContain("Brief");
+    expect(sender.sent[0]?.caption).toContain("Report");
   });
 
   test("uses the channels attached to the workflow being delivered", async () => {
     const { service, store, sender } = setupDelivery();
     const briefing = store.createChannel({ type: "matrix", name: "Briefing" });
     const user = store.createChannel({ type: "discord", name: "User" });
-    store.attach({ workflow: "briefing", step: "brief", output: "brief" }, briefing.id);
-    store.attach({ workflow: "user-1", step: "brief", output: "brief" }, user.id);
+    store.attach({ workflow: "briefing", step: "report", output: "report" }, briefing.id);
+    store.attach({ workflow: "user-1", step: "report", output: "report" }, user.id);
 
-    const results = await service.deliver({ briefId: "b", workflow: "user-1", summary: "s" });
+    const results = await service.deliver({ reportId: "b", workflow: "user-1", summary: "s" });
 
     expect(results.map((result) => result.channelId)).toEqual([user.id]);
     expect(sender.sent).toHaveLength(1);
 
     // A workflow without attachments receives nothing.
-    expect(await service.deliver({ briefId: "b", workflow: "missing", summary: "s" })).toEqual([]);
+    expect(await service.deliver({ reportId: "b", workflow: "missing", summary: "s" })).toEqual([]);
   });
 });
 

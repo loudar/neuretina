@@ -1,9 +1,9 @@
-import type { BriefSource } from "./api";
+import type { ReportSource } from "./api";
 
 export interface SourceGroup {
   /** Hostname without a leading www (or "other" for unparseable URLs). */
   domain: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
   /** Distinct providers in the group, in first-seen order. */
   providers: string[];
 }
@@ -19,7 +19,7 @@ export function sourceDomain(url: string): string {
 }
 
 /** Groups sources by domain, keeping the research order of first appearance. */
-export function groupSourcesByDomain(sources: BriefSource[]): SourceGroup[] {
+export function groupSourcesByDomain(sources: ReportSource[]): SourceGroup[] {
   const groups = new Map<string, SourceGroup>();
   for (const source of sources) {
     const domain = sourceDomain(source.url);
@@ -38,7 +38,7 @@ export function groupSourcesByDomain(sources: BriefSource[]): SourceGroup[] {
  * Case-insensitive filter over title, URL, snippet, provider and media alt
  * text. Multiple words must all match (AND), in any field.
  */
-export function filterSources(sources: BriefSource[], query: string): BriefSource[] {
+export function filterSources(sources: ReportSource[], query: string): ReportSource[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return sources;
 

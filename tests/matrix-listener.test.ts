@@ -29,9 +29,9 @@ afterEach(() => {
 
 describe("parseChatCommand", () => {
   test("parses commands and arguments", () => {
-    expect(parseChatCommand("/start morning-brief")).toEqual({
+    expect(parseChatCommand("/start morning-report")).toEqual({
       command: "start",
-      args: "morning-brief",
+      args: "morning-report",
     });
     expect(parseChatCommand("  /Start   a b  ")).toEqual({ command: "start", args: "a b" });
     expect(parseChatCommand("/help")).toEqual({ command: "help", args: "" });
@@ -87,7 +87,7 @@ function setupListener(options: {
                       type: "m.room.message",
                       sender: "@user:matrix.test",
                       event_id: "$m1",
-                      content: { msgtype: "m.text", body: "/start morning-brief" },
+                      content: { msgtype: "m.text", body: "/start morning-report" },
                     },
                     {
                       type: "m.room.message",
@@ -130,7 +130,7 @@ function setupListener(options: {
                         event_id: "$m5",
                         content: {
                           msgtype: "m.text",
-                          body: "> <@bot:matrix.test> Morning brief\n\nwhat is X?",
+                          body: "> <@bot:matrix.test> Morning report\n\nwhat is X?",
                           "m.relates_to": { "m.in_reply_to": { event_id: "$botmsg" } },
                         },
                       },
@@ -176,7 +176,7 @@ function setupListener(options: {
           event_id: "$botmsg",
           sender: "@bot:matrix.test",
           type: "m.room.message",
-          content: { msgtype: "m.text", body: "Morning brief" },
+          content: { msgtype: "m.text", body: "Morning report" },
         });
       }
       if (url.includes("someone-else")) {
@@ -233,7 +233,7 @@ describe("MatrixCommandListener", () => {
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({
       command: "start",
-      args: "morning-brief",
+      args: "morning-report",
       sender: "@user:matrix.test",
       channel: "!room:matrix.test",
     });
@@ -308,7 +308,7 @@ describe("MatrixCommandListener", () => {
       replyToBot: true,
     });
     expect(messages[0]?.chain).toEqual([
-      expect.objectContaining({ eventId: "$botmsg", fromBot: true, body: "Morning brief" }),
+      expect.objectContaining({ eventId: "$botmsg", fromBot: true, body: "Morning report" }),
     ]);
 
     const reply = sent.find((request) => request.body?.includes("Answer text"));
@@ -327,7 +327,7 @@ describe("MatrixCommandListener", () => {
               event_id: "$m7",
               content: {
                 msgtype: "m.text",
-                body: "> <@bot:matrix.test> Morning brief\n\nwhat about X?",
+                body: "> <@bot:matrix.test> Morning report\n\nwhat about X?",
                 "m.relates_to": {
                   rel_type: "m.thread",
                   event_id: "$threadroot",
@@ -341,7 +341,7 @@ describe("MatrixCommandListener", () => {
               event_id: "$m8",
               content: {
                 msgtype: "m.text",
-                body: "> <@bot:matrix.test> Morning brief\n\nlegacy quote",
+                body: "> <@bot:matrix.test> Morning report\n\nlegacy quote",
                 "m.relates_to": { rel_type: "m.in_reply_to", event_id: "$botmsg" },
               },
             },
@@ -383,7 +383,7 @@ describe("MatrixCommandListener", () => {
 
 describe("stripReplyFallback", () => {
   test("removes the quoted reply lines", () => {
-    expect(stripReplyFallback("> <@bot:test> Brief title\n\nwhat is X?")).toBe("what is X?");
+    expect(stripReplyFallback("> <@bot:test> Report title\n\nwhat is X?")).toBe("what is X?");
     expect(stripReplyFallback("> a\n> b\nplain text")).toBe("plain text");
     expect(stripReplyFallback("no quote here")).toBe("no quote here");
   });

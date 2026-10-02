@@ -292,7 +292,7 @@ export class StepPipeline {
     context: WorkflowRunContext,
   ): Promise<number> {
     const attempts = await router.deliver({
-      briefId: message.reference ?? context.correlationId,
+      reportId: message.reference ?? context.correlationId,
       runId: context.correlationId,
       channels,
       kinds: message.kinds,

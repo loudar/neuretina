@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { buildBriefMessage, selectHighlightSources } from "../src/domain/briefs/briefMessage.ts";
-import type { BriefSource } from "../src/domain/briefs/BriefRepository.ts";
+import { buildReportMessage, selectHighlightSources } from "../src/domain/reports/reportMessage.ts";
+import type { ReportSource } from "../src/domain/reports/ReportRepository.ts";
 
-const sources: BriefSource[] = [
+const sources: ReportSource[] = [
   { title: "First", url: "https://a.com/1", provider: "perplexity" },
   { title: "Same domain", url: "https://a.com/2", provider: "perplexity" },
   { title: "Second [brackets]", url: "https://b.com/x", provider: "bluesky" },
@@ -16,9 +16,9 @@ describe("selectHighlightSources", () => {
   });
 });
 
-describe("buildBriefMessage", () => {
+describe("buildReportMessage", () => {
   test("appends clickable markdown sources and sanitizes titles", () => {
-    const message = buildBriefMessage("# Brief\n\nBody.", sources, { maxSources: 3 });
+    const message = buildReportMessage("# Report\n\nBody.", sources, { maxSources: 3 });
 
     expect(message).toContain("**Sources**");
     expect(message).toContain("1. [First](https://a.com/1)");
@@ -27,33 +27,33 @@ describe("buildBriefMessage", () => {
   });
 
   test("returns the summary unchanged when there are no sources", () => {
-    expect(buildBriefMessage("# Brief", [])).toBe("# Brief");
+    expect(buildReportMessage("# Report", [])).toBe("# Report");
   });
 
   test("keeps citation markers clickable in the message body", () => {
-    const message = buildBriefMessage("Up 12 percent [2].", sources);
+    const message = buildReportMessage("Up 12 percent [2].", sources);
 
     expect(message).toContain("Up 12 percent [2](https://a.com/2).");
   });
 
   test("appends the share link with the anonymous token", () => {
-    const message = buildBriefMessage("# Brief", [], {
-      appUrl: "https://briefs.test/",
-      briefId: "brief-1",
+    const message = buildReportMessage("# Report", [], {
+      appUrl: "https://reports.test/",
+      reportId: "report-1",
       shareToken: "abc123",
     });
 
     expect(message).toContain(
-      "[View this Brief on Neuretina](https://briefs.test/briefs/brief-1?token=abc123)",
+      "[View this Report on Neuretina](https://reports.test/reports/report-1?token=abc123)",
     );
   });
 
   test("omits the link when no share token exists", () => {
-    const message = buildBriefMessage("# Brief", [], {
-      appUrl: "https://briefs.test",
-      briefId: "brief-1",
+    const message = buildReportMessage("# Report", [], {
+      appUrl: "https://reports.test",
+      reportId: "report-1",
     });
 
-    expect(message).not.toContain("View this Brief");
+    expect(message).not.toContain("View this Report");
   });
 });

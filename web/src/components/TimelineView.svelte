@@ -34,10 +34,11 @@
   const LABEL_LINE_REM = 1.35;
 
   let fetchedEvents = $state<TimelineEvent[] | null>(null);
-  let loading = $state(preloadedEvents === undefined);
+  let fetching = $state(true);
   let measuredWidth = $state(0);
 
   const events = $derived(preloadedEvents ?? fetchedEvents);
+  const loading = $derived(preloadedEvents === undefined && fetching);
 
   interface ActivePopover {
     key: string;
@@ -79,15 +80,12 @@
   );
 
   $effect(() => {
-    if (preloadedEvents !== undefined) {
-      loading = false;
-      return;
-    }
+    if (preloadedEvents !== undefined) return;
     const ids = eventIds;
     fetchedEvents = null;
-    loading = true;
+    fetching = true;
     if (ids.length === 0) {
-      loading = false;
+      fetching = false;
       return;
     }
     let cancelled = false;
@@ -98,7 +96,7 @@
       } catch (error) {
         if (!cancelled) reportError(error);
       } finally {
-        if (!cancelled) loading = false;
+        if (!cancelled) fetching = false;
       }
     })();
     return () => {

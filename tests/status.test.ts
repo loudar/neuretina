@@ -133,37 +133,37 @@ describe("StatusService", () => {
 
     bus.publish(
       "job.started",
-      { id: "j1", name: "morning-brief", workflow: "briefing", trigger: "manual" },
+      { id: "j1", name: "morning-report", workflow: "briefing", trigger: "manual" },
       { source: "t", correlationId: "c1" },
     );
     expect(hub.snapshot()[0]).toMatchObject({
-      text: 'Running job "morning-brief" (manual)',
+      text: 'Running job "morning-report" (manual)',
       state: "running",
     });
 
     bus.publish(
       "job.finished",
-      { id: "j1", name: "morning-brief", workflow: "briefing", durationMs: 5000 },
+      { id: "j1", name: "morning-report", workflow: "briefing", durationMs: 5000 },
       { source: "t", correlationId: "c1" },
     );
     expect(hub.snapshot()).toHaveLength(1);
     expect(hub.snapshot()[0]).toMatchObject({
-      text: 'Job "morning-brief" finished (5s)',
+      text: 'Job "morning-report" finished (5s)',
       state: "done",
     });
   });
 
-  test("records skips, compiled briefs, failures and chat commands", () => {
+  test("records skips, compiled reports, failures and chat commands", () => {
     const { bus, hub } = setup();
 
-    bus.publish("brief.skipped", { correlationId: "c", reason: "No material found", topics: ["a"] }, { source: "t", correlationId: "c" });
-    bus.publish("brief.generated", { correlationId: "c", briefId: "b1", topics: ["a"], sources: 3, characters: 100 }, { source: "t", correlationId: "c" });
+    bus.publish("report.skipped", { correlationId: "c", reason: "No material found", topics: ["a"] }, { source: "t", correlationId: "c" });
+    bus.publish("report.generated", { correlationId: "c", reportId: "b1", topics: ["a"], sources: 3, characters: 100 }, { source: "t", correlationId: "c" });
     bus.publish("workflow.failed", { workflow: "briefing", correlationId: "c", error: "x" }, { source: "t", correlationId: "c" });
     bus.publish("chat.command.received", { channel: "r", sender: "@u:x", command: "start", args: "j" }, { source: "t", correlationId: "c" });
 
     const entries = hub.snapshot();
     expect(entries.map((entry) => entry.state)).toEqual(["failed", "done", "failed", "done"]);
-    expect(entries[1]!.text).toContain("Brief compiled");
+    expect(entries[1]!.text).toContain("Report compiled");
   });
 
   test("a failed workflow also fails its still-running entries", () => {

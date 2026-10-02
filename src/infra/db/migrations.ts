@@ -343,6 +343,89 @@ export const migrations: Migration[] = [
       ALTER TABLE user_workflows ADD COLUMN stop_after TEXT;
     `,
   },
+  {
+    // Briefs become reports: a `report` container holding an ordered list of
+    // artifacts. The brief's markdown moves into a `report-text` child; the
+    // timeline and audio children are listed after it. Share tokens, delivery
+    // rows and event attribution are renamed with the entity.
+    id: 21,
+    name: "reports",
+    sql: `
+      INSERT INTO artifacts (
+        id, kind, name, content_type, content, metadata, parent_id,
+        workflow, correlation_id, context_id, created_at
+      )
+      SELECT
+        lower(hex(randomblob(16))),
+        'report-text',
+        name,
+        content_type,
+        content,
+        json_object(
+          'narration', COALESCE(json_extract(metadata, '$.narration'), ''),
+          'sources', COALESCE(json_extract(metadata, '$.sources'), json('[]'))
+        ),
+        id,
+        workflow,
+        correlation_id,
+        context_id,
+        created_at
+      FROM artifacts
+      WHERE kind = 'brief';
+
+      WITH children AS (
+        SELECT parent_id AS report_id, json_group_array(id) AS ids
+        FROM (
+          SELECT parent_id, id,
+                 CASE kind
+                   WHEN 'timeline' THEN 0
+                   WHEN 'audio' THEN 1
+                   WHEN 'report-text' THEN 2
+                   ELSE 3
+                 END AS ord
+          FROM artifacts
+          WHERE parent_id IS NOT NULL
+          ORDER BY ord, created_at
+        )
+        GROUP BY parent_id
+      )
+      UPDATE artifacts
+      SET kind = 'report',
+          content_type = 'application/json',
+          content = NULL,
+          metadata = json_object(
+            'topics', COALESCE(json_extract(metadata, '$.topics'), json('[]')),
+            'artifactIds', json(COALESCE(
+              (SELECT ids FROM children WHERE children.report_id = artifacts.id),
+              json('[]')
+            ))
+          )
+      WHERE kind = 'brief';
+
+      UPDATE artifacts
+      SET metadata = json_set(
+        json_remove(metadata, '$.briefId'),
+        '$.reportId',
+        json_extract(metadata, '$.briefId')
+      )
+      WHERE kind IN ('audio', 'timeline')
+        AND json_extract(metadata, '$.briefId') IS NOT NULL;
+
+      ALTER TABLE brief_shares RENAME TO report_shares;
+      ALTER TABLE report_shares RENAME COLUMN brief_id TO report_id;
+
+      ALTER TABLE deliveries RENAME COLUMN brief_id TO report_id;
+      DROP INDEX IF EXISTS idx_deliveries_brief;
+      CREATE INDEX IF NOT EXISTS idx_deliveries_report ON deliveries (report_id);
+
+      ALTER TABLE timeline_events RENAME COLUMN source_brief_id TO source_report_id;
+
+      UPDATE workflow_delivery_channels
+      SET step = 'report', output = 'report'
+      WHERE step = 'brief' AND output = 'brief';
+      UPDATE user_workflows SET stop_after = 'report' WHERE stop_after = 'brief';
+    `,
+  },
 ];
 
 export function runMigrations(db: BunDatabaseType): void {

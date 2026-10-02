@@ -6,7 +6,7 @@ import { ValidationError, NotFoundError, errorMessage } from "../core/errors.ts"
 import type { EventBus } from "../core/events/EventBus.ts";
 import type { Logger } from "../core/logger.ts";
 import { markdownToHtml } from "../core/markdown.ts";
-import { buildBriefMessage } from "../domain/briefs/briefMessage.ts";
+import { buildReportMessage } from "../domain/reports/reportMessage.ts";
 import { Scheduler } from "../core/scheduler/Scheduler.ts";
 import {
   deliveryTargetForKind,
@@ -17,7 +17,7 @@ import type { WorkflowRegistry, Workflow } from "../core/workflow/Workflow.ts";
 import type { TextToSpeechProvider } from "../capabilities/tts/TtsProvider.ts";
 import type { StatusHub } from "../core/status/StatusHub.ts";
 import type { ArtifactStore } from "../domain/artifacts/ArtifactRepository.ts";
-import type { BriefStore } from "../domain/briefs/BriefRepository.ts";
+import type { ReportStore } from "../domain/reports/ReportRepository.ts";
 import type { ContextStore } from "../domain/contexts/ContextRepository.ts";
 import type { EventStore } from "../domain/events/EventRepository.ts";
 import type { CreateJobInput, JobStore, UpdateJobInput } from "../domain/jobs/JobRepository.ts";
@@ -87,9 +87,9 @@ export interface CommandDeps {
   runner: WorkflowRunner;
   artifacts: ArtifactStore;
   topics: TopicStore;
-  briefs: BriefStore;
+  reports: ReportStore;
   jobs: JobStore;
-  /** Dated events extracted from briefs. */
+  /** Dated events extracted from reports. */
   events: EventStore;
   workflows: WorkflowRegistry;
   /** Core (built-in) workflow instances by id; customizations are rows under the same id. */
@@ -104,7 +104,7 @@ export interface CommandDeps {
 }
 
 export function registerCommands(router: CommandRouter, deps: CommandDeps): void {
-  const { bus, logger, contexts, runs, runner, artifacts, topics, briefs, jobs, events, workflows, coreWorkflows, scheduler, statuses, settings, config, delivery, deliveries, userWorkflows } = deps;
+  const { bus, logger, contexts, runs, runner, artifacts, topics, reports, jobs, events, workflows, coreWorkflows, scheduler, statuses, settings, config, delivery, deliveries, userWorkflows } = deps;
 
   router.register("config.get", () => {
     const matrixChannel = deliveries
@@ -409,7 +409,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   });
 
   // Deletes a run (and, on request, every artifact it produced). Artifacts
-  // are collected by correlation id, so children (e.g. a brief's audio) are
+  // are collected by correlation id, so children (e.g. a report's audio) are
   // covered; removing a parent also cascades to anything referencing it.
   router.register("workflow.run.delete", (payload, context) => {
     const record = asRecord(payload);
@@ -559,61 +559,61 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return { ok: true };
   });
 
-  router.register("brief.list", (payload) => {
+  router.register("report.list", (payload) => {
     const record = asRecord(payload);
     const limit = typeof record.limit === "number" ? Math.min(Math.max(1, record.limit), 200) : 50;
-    return briefs.list(limit);
+    return reports.list(limit);
   });
 
-  router.register("brief.get", (payload) => {
+  router.register("report.get", (payload) => {
     const record = asRecord(payload);
-    return briefs.get(requireString(record, "id"));
+    return reports.get(requireString(record, "id"));
   });
 
-  router.register("brief.audio", (payload) => {
+  router.register("report.audio", (payload) => {
     const id = requireString(asRecord(payload), "id");
-    const audio = briefs.getAudio(id);
+    const audio = reports.getAudio(id);
     if (!audio) return null;
-    const brief = briefs.get(id);
+    const report = reports.get(id);
     return {
       dataUrl: `data:${audio.mimeType};base64,${Buffer.from(audio.audio).toString("base64")}`,
       mimeType: audio.mimeType,
-      durationMs: brief.audioDurationMs ?? null,
+      durationMs: report.audioDurationMs ?? null,
     };
   });
 
-  router.register("brief.delete", (payload, context) => {
+  router.register("report.delete", (payload, context) => {
     const id = requireString(asRecord(payload), "id");
-    const brief = briefs.remove(id);
-    publish(bus, "artifact.deleted", { artifactId: brief.artifactId, kind: "brief" }, context);
-    publish(bus, "brief.deleted", { correlationId: context.correlationId, briefId: brief.id }, context);
-    return { ok: true, briefId: brief.id };
+    const report = reports.remove(id);
+    publish(bus, "artifact.deleted", { artifactId: report.artifactId, kind: "report" }, context);
+    publish(bus, "report.deleted", { correlationId: context.correlationId, reportId: report.id }, context);
+    return { ok: true, reportId: report.id };
   });
 
-  // Generates speech for a stored brief on demand (useful for text-only
-  // briefings) and delivers it as a voice message through the brief's
+  // Generates speech for a stored report on demand (useful for text-only
+  // briefings) and delivers it as a voice message through the report's
   // delivery channels.
-  router.register("brief.audio.generate", async (payload, context) => {
+  router.register("report.audio.generate", async (payload, context) => {
     const record = asRecord(payload);
     const id = requireString(record, "id");
     const deliver = record.deliver !== false;
     const regenerate = record.regenerate === true;
-    const brief = briefs.get(id);
+    const report = reports.get(id);
 
-    let audio = briefs.getAudio(id);
-    let durationMs = brief.audioDurationMs;
+    let audio = reports.getAudio(id);
+    let durationMs = report.audioDurationMs;
     let generated = false;
-    let audioArtifactId = brief.audioArtifactId;
+    let audioArtifactId = report.audioArtifactId;
 
     if (!audio || regenerate) {
       const status = statuses.begin(`${context.correlationId}:tts`, "Generating voice", {
         correlationId: context.correlationId,
-        detail: brief.topics.join(", "),
+        detail: report.topics.join(", "),
       });
       try {
         status.update("Waiting for the local TTS server");
-        const speech = await deps.tts.synthesize({ text: brief.narration });
-        audioArtifactId = briefs.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
+        const speech = await deps.tts.synthesize({ text: report.narration });
+        audioArtifactId = reports.attachAudio(id, speech.data, speech.mimeType, speech.durationMs);
         audio = { audio: speech.data, mimeType: speech.mimeType };
         durationMs = speech.durationMs;
         generated = true;
@@ -625,15 +625,15 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         publish(bus, "artifact.created", {
             artifactId: audioArtifactId,
             kind: "audio",
-            parentId: brief.artifactId,
+            parentId: report.artifactId,
             correlationId: context.correlationId,
           }, context);
         publish(bus, "tts.synthesized", {
             correlationId: context.correlationId,
-            briefId: id,
-            artifactId: brief.artifactId,
+            reportId: id,
+            artifactId: report.artifactId,
             audioArtifactId,
-            characters: brief.narration.length,
+            characters: report.narration.length,
             bytes: speech.data.byteLength,
             durationMs: speech.durationMs ?? 0,
           }, context);
@@ -650,34 +650,34 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
         correlationId: context.correlationId,
       });
       try {
-        const summary = buildBriefMessage(brief.markdown, brief.sources, {
+        const summary = buildReportMessage(report.markdown, report.sources, {
           appUrl: config.appUrl,
-          briefId: brief.id,
-          shareToken: briefs.shareToken(brief.id),
+          reportId: report.id,
+          shareToken: reports.shareToken(report.id),
         });
-        // The brief's workflow owns the routing: voice goes to the channels
+        // The report's workflow owns the routing: voice goes to the channels
         // assigned to the TTS output of that workflow.
         const voiceTarget = deliveryTargetForKind(
-          definitionOf(workflows, brief.workflow),
+          definitionOf(workflows, report.workflow),
           "tts",
         );
         results = await deps.delivery.deliver({
-          briefId: id,
+          reportId: id,
           runId: context.correlationId,
-          ...(brief.workflow && voiceTarget
+          ...(report.workflow && voiceTarget
             ? {
                 target: {
-                  workflow: brief.workflow,
+                  workflow: report.workflow,
                   step: voiceTarget.step,
                   output: voiceTarget.output,
                 },
               }
             : {}),
           kinds: ["voice"],
-          title: brief.topics.join(", "),
+          title: report.topics.join(", "),
           summary,
           html: markdownToHtml(summary),
-          narration: brief.narration,
+          narration: report.narration,
           audio: audio.audio,
           audioMime: audio.mimeType,
         });
@@ -696,7 +696,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     }
 
     return {
-      briefId: id,
+      reportId: id,
       generated,
       bytes: audio.audio.byteLength,
       durationMs: durationMs ?? null,
@@ -705,35 +705,35 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     };
   });
 
-  // Re-sends a stored brief through the requested delivery channels: the
+  // Re-sends a stored report through the requested delivery channels: the
   // summary as formatted text, plus the audio as a voice message when one
-  // exists. Without explicit channels the brief workflow's attached channels
+  // exists. Without explicit channels the report workflow's attached channels
   // are used.
-  router.register("brief.send", async (payload, context) => {
+  router.register("report.send", async (payload, context) => {
     const record = asRecord(payload);
     const id = requireString(record, "id");
     const channels = optionalChannelIds(record);
-    const brief = briefs.get(id);
-    const audio = briefs.getAudio(id);
+    const report = reports.get(id);
+    const audio = reports.getAudio(id);
 
-    const text = buildBriefMessage(brief.markdown, brief.sources, {
+    const text = buildReportMessage(report.markdown, report.sources, {
       appUrl: config.appUrl,
-      briefId: brief.id,
-      shareToken: briefs.shareToken(brief.id),
+      reportId: report.id,
+      shareToken: reports.shareToken(report.id),
     });
     const results = await deps.delivery.deliver({
-      briefId: id,
+      reportId: id,
       runId: context.correlationId,
       channels,
-      title: brief.topics.join(", "),
+      title: report.topics.join(", "),
       summary: text,
       html: markdownToHtml(text),
-      narration: brief.narration,
+      narration: report.narration,
       audio: audio?.audio,
       audioMime: audio?.mimeType,
     });
 
-    return { briefId: id, results };
+    return { reportId: id, results };
   });
 
   // ── Delivery channels ────────────────────────────────────────────────────
@@ -816,12 +816,12 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
   router.register("delivery.list", (payload) => {
     const record = asRecord(payload);
     return deliveries.deliveries({
-      briefId: optionalString(record, "briefId"),
+      reportId: optionalString(record, "reportId"),
       runId: optionalString(record, "runId"),
     });
   });
 
-  // Dated events extracted from briefs (the rows behind timeline artifacts).
+  // Dated events extracted from reports (the rows behind timeline artifacts).
   // With `ids` this fetches exactly the events a timeline artifact references.
   router.register("timeline.event.list", (payload) => {
     const record = asRecord(payload);
@@ -886,7 +886,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
 
   router.register("artifact.delete", (payload, context) => {
     const artifact = artifacts.remove(requireString(asRecord(payload), "id"));
-    if (artifact.kind === "brief") briefs.forgetShare(artifact.id);
+    if (artifact.kind === "report") reports.forgetShare(artifact.id);
     publish(bus, "artifact.deleted", { artifactId: artifact.id, kind: artifact.kind }, context);
     return { ok: true, artifactId: artifact.id, kind: artifact.kind };
   });
@@ -938,9 +938,9 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "workflow.user.list",
     "workflow.run.list",
     "workflow.run.get",
-    "brief.list",
-    "brief.get",
-    "brief.audio",
+    "report.list",
+    "report.get",
+    "report.audio",
     "artifact.list",
     "artifact.get",
     "artifact.search",
@@ -1135,7 +1135,7 @@ function definitionOf(
   }
 }
 
-/** Optional array of channel ids (`brief.send`), validated element-wise. */
+/** Optional array of channel ids (`report.send`), validated element-wise. */
 function optionalChannelIds(record: Record<string, unknown>): string[] | undefined {
   const value = record.channels;
   if (value === undefined || value === null) return undefined;

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildQuestionPrompt, QuestionWorkflow } from "../src/workflows/QuestionWorkflow.ts";
 import { SqliteDatabase } from "../src/infra/db/SqliteDatabase.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
-import { BriefRepository } from "../src/domain/briefs/BriefRepository.ts";
+import { ReportRepository } from "../src/domain/reports/ReportRepository.ts";
 import { EventBus } from "../src/core/events/EventBus.ts";
 import { EventStore } from "../src/core/events/EventStore.ts";
 import { createLogger } from "../src/core/logger.ts";
@@ -59,7 +59,7 @@ describe("QuestionWorkflow", () => {
       llm,
       webSearch,
       socialSearch,
-      briefs: new BriefRepository(new ArtifactRepository(db)),
+      reports: new ReportRepository(new ArtifactRepository(db)),
       defaults: { recency: "week", resultsPerProvider: 3, language: "en", searchDomains: [] },
     });
 
@@ -79,7 +79,7 @@ describe("QuestionWorkflow", () => {
       llm: stubLlm(() => completion("x")),
       webSearch: { name: "web", kind: "web", search: async (q) => ({ query: q.query, provider: "web", kind: "web", results: [] }) },
       socialSearch: { name: "social", kind: "social", search: async (q) => ({ query: q.query, provider: "social", kind: "social", results: [] }) },
-      briefs: new BriefRepository(new ArtifactRepository(new SqliteDatabase(":memory:"))),
+      reports: new ReportRepository(new ArtifactRepository(new SqliteDatabase(":memory:"))),
       defaults: { recency: "week", resultsPerProvider: 3, language: "en", searchDomains: [] },
     }).definition.triggers;
 

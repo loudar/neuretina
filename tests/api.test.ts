@@ -259,7 +259,7 @@ describe("webhook gateway", () => {
 
     // No topics exist at this point, so the run skips. Subscribe before
     // sending, because the workflow starts synchronously with the command.
-    const skipped = waitForEvent(kernel.bus, "brief.skipped");
+    const skipped = waitForEvent(kernel.bus, "report.skipped");
 
     const started = await call<{ started: boolean; runId: string }>("workflow.run", {
       id: "briefing",
@@ -506,9 +506,9 @@ describe("webhook gateway", () => {
     }
   });
 
-  test("re-sends a stored brief through the requested delivery channels", async () => {
-    const brief = kernel.briefs.create({
-      correlationId: "c-brief",
+  test("re-sends a stored report through the requested delivery channels", async () => {
+    const report = kernel.reports.create({
+      correlationId: "c-report",
       topics: ["Rust"],
       markdown: "# Rust\n\nAll quiet.",
       narration: "Rust is quiet",
@@ -518,20 +518,20 @@ describe("webhook gateway", () => {
         { title: "News", url: "https://news.example.org/story", provider: "bluesky" },
       ],
     });
-    kernel.briefs.attachAudio(brief.id, new Uint8Array([1, 2, 3]), "audio/ogg", 1000);
+    kernel.reports.attachAudio(report.id, new Uint8Array([1, 2, 3]), "audio/ogg", 1000);
     const channel = kernel.deliveries.createChannel({ type: "matrix", name: "Matrix", config: {} });
 
     const result = await call<{
-      briefId: string;
+      reportId: string;
       results: Array<{ channelId: string; status: string; eventId?: string }>;
-    }>("brief.send", { id: brief.id, channels: [channel.id] });
+    }>("report.send", { id: report.id, channels: [channel.id] });
 
-    expect(result.briefId).toBe(brief.id);
+    expect(result.reportId).toBe(report.id);
     // The injected stub delivery service answers with its canned result.
     expect(result.results).toEqual([{ channelId: "chan-1", status: "sent", eventId: "event-1" }]);
 
     const input = delivery.delivered.at(-1)!;
-    expect(input.briefId).toBe(brief.id);
+    expect(input.reportId).toBe(report.id);
     expect(input.channels).toEqual([channel.id]);
     expect(input.summary).toContain("# Rust");
     expect(input.summary).toContain("**Sources**");
@@ -570,8 +570,8 @@ describe("webhook gateway", () => {
 
     await call("delivery.attach", {
       workflow: "briefing",
-      step: "brief",
-      output: "brief",
+      step: "report",
+      output: "report",
       channelId: created.id,
     });
     const workflows = await call<Array<{ workflow: string; channelIds: string[] }>>(
@@ -585,8 +585,8 @@ describe("webhook gateway", () => {
     >("delivery.attachments");
     expect(attachments).toContainEqual({
       workflow: "briefing",
-      step: "brief",
-      output: "brief",
+      step: "report",
+      output: "report",
       channelId: created.id,
     });
 
@@ -595,8 +595,8 @@ describe("webhook gateway", () => {
 
     await call("delivery.detach", {
       workflow: "briefing",
-      step: "brief",
-      output: "brief",
+      step: "report",
+      output: "report",
       channelId: created.id,
     });
     const afterDetach =
@@ -607,7 +607,7 @@ describe("webhook gateway", () => {
 
     const missingChannel = await post({
       type: "delivery.attach",
-      payload: { workflow: "briefing", step: "brief", output: "brief", channelId: "missing" },
+      payload: { workflow: "briefing", step: "report", output: "report", channelId: "missing" },
     });
     expect(missingChannel.status).toBe(404);
 
@@ -628,8 +628,8 @@ describe("webhook gateway", () => {
     expect((await call<Array<{ id: string }>>("delivery.channel.list")).map((c) => c.id)).not.toContain(created.id);
   });
 
-  test("deletes a stored brief", async () => {
-    const brief = kernel.briefs.create({
+  test("deletes a stored report", async () => {
+    const report = kernel.reports.create({
       topics: ["Obsolete"],
       markdown: "# Obsolete",
       narration: "n",
@@ -638,24 +638,24 @@ describe("webhook gateway", () => {
 
     const deletedEvent = waitForEvent(
       kernel.bus,
-      "brief.deleted",
-      (event) => (event.payload as { briefId: string }).briefId === brief.id,
+      "report.deleted",
+      (event) => (event.payload as { reportId: string }).reportId === report.id,
     );
 
-    const result = await call<{ ok: boolean; briefId: string }>("brief.delete", { id: brief.id });
-    expect(result).toEqual({ ok: true, briefId: brief.id });
+    const result = await call<{ ok: boolean; reportId: string }>("report.delete", { id: report.id });
+    expect(result).toEqual({ ok: true, reportId: report.id });
     await deletedEvent;
 
-    const listed = await call<Array<{ id: string }>>("brief.list");
-    expect(listed.some((entry) => entry.id === brief.id)).toBe(false);
+    const listed = await call<Array<{ id: string }>>("report.list");
+    expect(listed.some((entry) => entry.id === report.id)).toBe(false);
 
-    const missing = await post({ type: "brief.delete", payload: { id: brief.id } });
+    const missing = await post({ type: "report.delete", payload: { id: report.id } });
     expect(missing.status).toBe(404);
     expect(missing.body.error).toContain("not found");
   });
 
-  test("exposes briefs and their audio as referenced generic artifacts", async () => {
-    const brief = kernel.briefs.create({
+  test("exposes reports and their audio as referenced generic artifacts", async () => {
+    const report = kernel.reports.create({
       correlationId: "c-artifact",
       workflow: "briefing",
       topics: ["Rust"],
@@ -663,8 +663,8 @@ describe("webhook gateway", () => {
       narration: "Rust is quiet",
       sources: [],
     });
-    const audioArtifactId = kernel.briefs.attachAudio(
-      brief.id,
+    const audioArtifactId = kernel.reports.attachAudio(
+      report.id,
       new Uint8Array([7, 7]),
       "audio/ogg",
       1500,
@@ -672,17 +672,20 @@ describe("webhook gateway", () => {
 
     const list = await call<
       Array<{ id: string; kind: string; workflow?: string; correlationId?: string }>
-    >("artifact.list", { kind: "brief" });
-    const listed = list.find((entry) => entry.id === brief.id);
-    expect(listed?.kind).toBe("brief");
+    >("artifact.list", { kind: "report" });
+    const listed = list.find((entry) => entry.id === report.id);
+    expect(listed?.kind).toBe("report");
     expect(listed?.workflow).toBe("briefing");
     expect(listed?.correlationId).toBe("c-artifact");
 
-    const content = await call<{ content: string | null }>("artifact.content", { id: brief.id });
+    // The markdown lives on the report's text child artifact.
+    const content = await call<{ content: string | null }>("artifact.content", {
+      id: report.textArtifact!.id,
+    });
     expect(content.content).toContain("All quiet");
 
     const audio = await call<{ parentId?: string }>("artifact.get", { id: audioArtifactId });
-    expect(audio.parentId).toBe(brief.id);
+    expect(audio.parentId).toBe(report.id);
 
     const data = await call<{ contentType: string; dataUrl: string } | null>("artifact.data", {
       id: audioArtifactId,
@@ -692,9 +695,9 @@ describe("webhook gateway", () => {
 
     const deleted = await call<{ ok: boolean; artifactId: string; kind: string }>(
       "artifact.delete",
-      { id: brief.id },
+      { id: report.id },
     );
-    expect(deleted).toEqual({ ok: true, artifactId: brief.id, kind: "brief" });
+    expect(deleted).toEqual({ ok: true, artifactId: report.id, kind: "report" });
 
     // The audio child artifact is removed with its parent.
     const gone = await post({ type: "artifact.get", payload: { id: audioArtifactId } });
@@ -725,7 +728,7 @@ describe("webhook gateway", () => {
   });
 
   test("generates voice on demand and delivers it through the channels", async () => {
-    const brief = kernel.briefs.create({
+    const report = kernel.reports.create({
       topics: ["Rust"],
       markdown: "# Rust\n\nAll quiet.",
       narration: "Rust is quiet",
@@ -735,35 +738,35 @@ describe("webhook gateway", () => {
     const deliveredBefore = delivery.delivered.length;
 
     const result = await call<{
-      briefId: string;
+      reportId: string;
       generated: boolean;
       bytes: number;
       durationMs: number | null;
       eventId: string | null;
       results: Array<{ channelId: string; status: string; eventId?: string }>;
-    }>("brief.audio.generate", { id: brief.id });
+    }>("report.audio.generate", { id: report.id });
 
     expect(result.generated).toBe(true);
     expect(result.bytes).toBe(4);
     expect(result.eventId).toBeTruthy();
     expect(result.results).toEqual([{ channelId: "chan-1", status: "sent", eventId: "event-1" }]);
     expect(tts.requests).toHaveLength(1);
-    expect(kernel.briefs.get(brief.id).hasAudio).toBe(true);
+    expect(kernel.reports.get(report.id).hasAudio).toBe(true);
 
     const input = delivery.delivered.at(-1)!;
     expect(input.kinds).toEqual(["voice"]);
     expect(input.audio).toEqual(new Uint8Array([1, 2, 3, 4]));
 
     // A second call reuses the stored audio (no regeneration) but delivers again.
-    const second = await call<{ generated: boolean }>("brief.audio.generate", { id: brief.id });
+    const second = await call<{ generated: boolean }>("report.audio.generate", { id: report.id });
     expect(second.generated).toBe(false);
     expect(tts.requests).toHaveLength(1);
     expect(delivery.delivered).toHaveLength(deliveredBefore + 2);
 
     // regenerate without delivery only produces audio.
     const third = await call<{ generated: boolean; eventId: string | null; results: unknown[] }>(
-      "brief.audio.generate",
-      { id: brief.id, regenerate: true, deliver: false },
+      "report.audio.generate",
+      { id: report.id, regenerate: true, deliver: false },
     );
     expect(third.generated).toBe(true);
     expect(third.eventId).toBeNull();

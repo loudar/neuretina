@@ -7,7 +7,7 @@ export interface Topic {
   createdAt: number;
 }
 
-export interface BriefSourceMedia {
+export interface ReportSourceMedia {
   type: "image" | "video";
   thumbUrl: string;
   fullUrl: string;
@@ -16,17 +16,17 @@ export interface BriefSourceMedia {
   height?: number;
 }
 
-export interface BriefSource {
+export interface ReportSource {
   title: string;
   url: string;
   provider: string;
   /** Short excerpt, e.g. the text of a social post. */
   snippet?: string;
   /** Attached media (Bluesky images / video thumbnails). */
-  media?: BriefSourceMedia[];
+  media?: ReportSourceMedia[];
 }
 
-export interface Brief {
+export interface Report {
   id: string;
   /** Id of the underlying generic artifact. */
   artifactId: string;
@@ -35,15 +35,15 @@ export interface Brief {
   contextId?: string;
   workflow?: string;
   topics: string[];
+  /** Attached artifacts in display order (timeline, audio, text, …). */
+  artifacts: ArtifactInfo[];
   markdown: string;
   narration: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
   audioArtifactId?: string;
   hasAudio: boolean;
   audioMime?: string;
   audioDurationMs?: number;
-  /** Timeline artifact composed of the brief's extracted events, when any. */
-  timelineArtifactId?: string;
 }
 
 export interface ArtifactInfo {
@@ -63,35 +63,33 @@ export interface ArtifactInfo {
   byteSize?: number;
 }
 
-export interface BriefAudio {
+export interface ReportAudio {
   dataUrl: string;
   mimeType: string;
   durationMs: number | null;
 }
 
-/** The timeline artifact of a shared brief, with the events it renders. */
+/** The timeline artifact of a shared report, with the events it renders. */
 export interface SharedTimeline {
   artifact: ArtifactInfo;
   events: TimelineEvent[];
 }
 
-/** A brief fetched through its anonymous share token (no session needed). */
-export interface SharedBrief {
+/** A report fetched through its anonymous share token (no session needed). */
+export interface SharedReport {
   id: string;
   createdAt: number;
   topics: string[];
   markdown: string;
   narration: string;
-  sources: BriefSource[];
+  sources: ReportSource[];
   hasAudio: boolean;
   audioMime?: string;
   audioDurationMs?: number;
-  /** Timeline artifact composed of the brief's extracted events, when any. */
-  timelineArtifactId?: string;
   timeline?: SharedTimeline;
 }
 
-/** A dated event extracted from a brief; the rows behind timeline artifacts. */
+/** A dated event extracted from a report; the rows behind timeline artifacts. */
 export interface TimelineEvent {
   id: string;
   /** ISO calendar date (YYYY-MM-DD). */
@@ -102,8 +100,8 @@ export interface TimelineEvent {
   tags: string[];
   title: string;
   description: string;
-  /** Brief the event was extracted from, when known. */
-  sourceBriefId?: string;
+  /** Report the event was extracted from, when known. */
+  sourceReportId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -582,7 +580,7 @@ export interface DeliveryTargetInfo {
 
 export interface DeliveryRecord {
   id: string;
-  briefId: string;
+  reportId: string;
   runId?: string;
   channelId: string;
   kind: "text" | "voice";
@@ -593,15 +591,15 @@ export interface DeliveryRecord {
   updatedAt: number;
 }
 
-/** Fetches a shared brief without a session; the token is the credential. */
-export async function fetchSharedBrief(token: string): Promise<SharedBrief> {
-  const response = await fetch(`/api/share/brief/${encodeURIComponent(token)}`);
+/** Fetches a shared report without a session; the token is the credential. */
+export async function fetchSharedReport(token: string): Promise<SharedReport> {
+  const response = await fetch(`/api/share/report/${encodeURIComponent(token)}`);
   const body = (await response.json().catch(() => ({}))) as {
-    brief?: SharedBrief;
+    report?: SharedReport;
     error?: string;
   };
-  if (!response.ok || !body.brief) {
+  if (!response.ok || !body.report) {
     throw new Error(body.error ?? `${response.status} ${response.statusText}`);
   }
-  return body.brief;
+  return body.report;
 }

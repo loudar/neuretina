@@ -124,15 +124,15 @@ describe("Matrix voice message content", () => {
         audio: new Uint8Array([0, 1, 2]),
         mimeType: "audio/ogg",
         durationMs: 3000,
-        filename: "brief.ogg",
-        caption: "Morning brief",
+        filename: "report.ogg",
+        caption: "Morning report",
       },
       "mxc://example.org/abc",
     );
 
     expect(content.msgtype).toBe("m.audio");
     expect(content.url).toBe("mxc://example.org/abc");
-    expect(content.body).toBe("Morning brief");
+    expect(content.body).toBe("Morning report");
     expect(content["org.matrix.msc3245.voice"]).toEqual({});
     expect(content["org.matrix.msc1767.audio"]).toEqual({ duration: 3000 });
     expect((content.info as Record<string, unknown>).duration).toBe(3000);

@@ -55,7 +55,7 @@ export type DeliveryStatus = "pending" | "sent" | "failed";
 
 export interface DeliveryRecord {
   id: string;
-  briefId: string;
+  reportId: string;
   runId?: string;
   channelId: string;
   kind: DeliveryKind;
@@ -67,7 +67,7 @@ export interface DeliveryRecord {
 }
 
 export interface RecordDeliveryInput {
-  briefId: string;
+  reportId: string;
   runId?: string;
   channelId: string;
   kind: DeliveryKind;
@@ -80,7 +80,7 @@ export interface CompleteDeliveryInput {
 }
 
 export interface DeliveryListFilter {
-  briefId?: string;
+  reportId?: string;
   runId?: string;
 }
 
@@ -120,7 +120,7 @@ interface ChannelRow {
 
 interface DeliveryRow {
   id: string;
-  brief_id: string;
+  report_id: string;
   run_id: string | null;
   channel_id: string;
   kind: string;
@@ -287,9 +287,9 @@ export class DeliveryRepository implements DeliveryStore {
   deliveries(filter: DeliveryListFilter = {}): DeliveryRecord[] {
     const conditions: string[] = [];
     const params: string[] = [];
-    if (filter.briefId) {
-      conditions.push("brief_id = ?");
-      params.push(filter.briefId);
+    if (filter.reportId) {
+      conditions.push("report_id = ?");
+      params.push(filter.reportId);
     }
     if (filter.runId) {
       conditions.push("run_id = ?");
@@ -308,7 +308,7 @@ export class DeliveryRepository implements DeliveryStore {
     const now = Date.now();
     const delivery: DeliveryRecord = {
       id: crypto.randomUUID(),
-      briefId: input.briefId,
+      reportId: input.reportId,
       runId: input.runId,
       channelId: input.channelId,
       kind: input.kind,
@@ -319,12 +319,12 @@ export class DeliveryRepository implements DeliveryStore {
 
     this.db.raw
       .query(
-        `INSERT INTO deliveries (id, brief_id, run_id, channel_id, kind, status, created_at, updated_at)
+        `INSERT INTO deliveries (id, report_id, run_id, channel_id, kind, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`,
       )
       .run(
         delivery.id,
-        delivery.briefId,
+        delivery.reportId,
         delivery.runId ?? null,
         delivery.channelId,
         delivery.kind,
@@ -389,7 +389,7 @@ function toChannel(row: ChannelRow): DeliveryChannel {
 function toDelivery(row: DeliveryRow): DeliveryRecord {
   return {
     id: row.id,
-    briefId: row.brief_id,
+    reportId: row.report_id,
     runId: row.run_id ?? undefined,
     channelId: row.channel_id,
     kind: row.kind as DeliveryKind,

@@ -2,7 +2,7 @@
  * Delivery channel capability: a sender built from one stored delivery
  * channel's configuration (Matrix room, Discord webhook, SMTP mailbox, …).
  * Unlike `MessagingProvider` (the single legacy Matrix integration), a sender
- * is per-channel and knows nothing about briefs or runs.
+ * is per-channel and knows nothing about reports or runs.
  */
 
 export interface DeliverySentMessage {

@@ -1,11 +1,11 @@
-import type { BriefSource } from "./api";
+import type { ReportSource } from "./api";
 import { faviconUrl, providerLabel, sourceDomain } from "./sources";
 
 /**
- * Removes [n] citation markers from rendered brief HTML and wraps the text
+ * Removes [n] citation markers from rendered report HTML and wraps the text
  * preceding each citation group in a hover popover linking to the sources.
  */
-export function renderCitations(html: string, sources: BriefSource[]): string {
+export function renderCitations(html: string, sources: ReportSource[]): string {
   return html.replace(
     /<(p|li|h[1-6]|blockquote)([^>]*)>([\s\S]*?)<\/\1>/g,
     (_match, tag: string, attrs: string, inner: string) =>
@@ -19,7 +19,7 @@ interface CitationMarker {
   number: number;
 }
 
-function decorateBlock(inner: string, sources: BriefSource[]): string {
+function decorateBlock(inner: string, sources: ReportSource[]): string {
   const markers = findMarkers(inner);
   if (markers.length === 0) return inner;
 
@@ -95,7 +95,7 @@ function resolveIndices(group: CitationMarker[], sourceCount: number): number[] 
   return [...indices].sort((a, b) => a - b);
 }
 
-function wrapSegment(segment: string, indices: number[], sources: BriefSource[]): string {
+function wrapSegment(segment: string, indices: number[], sources: ReportSource[]): string {
   let items = "";
   for (const index of indices) {
     const source = sources[index - 1];

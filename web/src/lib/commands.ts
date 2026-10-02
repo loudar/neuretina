@@ -3,8 +3,8 @@ import type {
   AppConfigInfo,
   AppContextInfo,
   ArtifactInfo,
-  Brief,
-  BriefAudio,
+  Report,
+  ReportAudio,
   DataBundle,
   DataImportSummary,
   DecisionProviderId,
@@ -125,20 +125,20 @@ export const commands = {
       send<{ started: boolean; jobId: string; workflow: string; runId: string }>("job.run", { id }),
   },
 
-  briefs: {
-    list: () => send<Brief[]>("brief.list"),
-    get: (id: string) => send<Brief>("brief.get", { id }),
-    audio: (id: string) => send<BriefAudio | null>("brief.audio", { id }),
-    remove: (id: string) => send<{ ok: boolean; briefId: string }>("brief.delete", { id }),
+  reports: {
+    list: () => send<Report[]>("report.list"),
+    get: (id: string) => send<Report>("report.get", { id }),
+    audio: (id: string) => send<ReportAudio | null>("report.audio", { id }),
+    remove: (id: string) => send<{ ok: boolean; reportId: string }>("report.delete", { id }),
     generateAudio: (id: string, options: { regenerate?: boolean; deliver?: boolean } = {}) =>
       send<{
-        briefId: string;
+        reportId: string;
         generated: boolean;
         bytes: number;
         durationMs: number | null;
         eventId: string | null;
-      }>("brief.audio.generate", { id, ...options }),
-    send: (id: string, channels: string[]) => send<{ briefId: string; results: Array<{ channelId: string; status: string; eventId?: string; error?: string }> }>("brief.send", {
+      }>("report.audio.generate", { id, ...options }),
+    send: (id: string, channels: string[]) => send<{ reportId: string; results: Array<{ channelId: string; status: string; eventId?: string; error?: string }> }>("report.send", {
       id,
       channels,
     }),
@@ -172,7 +172,7 @@ export const commands = {
       send<{ ok: boolean }>("delivery.attach", { ...target, channelId }),
     detach: (target: DeliveryTargetInfo, channelId: string) =>
       send<{ ok: boolean }>("delivery.detach", { ...target, channelId }),
-    list: (filter: { briefId?: string; runId?: string } = {}) =>
+    list: (filter: { reportId?: string; runId?: string } = {}) =>
       send<DeliveryRecord[]>("delivery.list", filter),
   },
 

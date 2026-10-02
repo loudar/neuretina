@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fetchSharedBrief, type SharedBrief } from "../lib/api";
+  import { fetchSharedReport, type SharedReport } from "../lib/api";
   import { formatDateTime } from "../lib/format";
   import MarkdownView from "./MarkdownView.svelte";
   import TimelineView from "./TimelineView.svelte";
@@ -11,24 +11,24 @@
 
   let { token }: Props = $props();
 
-  let brief = $state<SharedBrief | null>(null);
+  let report = $state<SharedReport | null>(null);
   let error = $state<string | null>(null);
 
   const audioUrl = $derived(
-    brief?.hasAudio ? `/api/share/brief/${encodeURIComponent(token)}/audio` : null,
+    report?.hasAudio ? `/api/share/report/${encodeURIComponent(token)}/audio` : null,
   );
 
   $effect(() => {
     const requested = token;
     let cancelled = false;
-    brief = null;
+    report = null;
     error = null;
-    fetchSharedBrief(requested)
+    fetchSharedReport(requested)
       .then((value) => {
-        if (!cancelled) brief = value;
+        if (!cancelled) report = value;
       })
       .catch(() => {
-        if (!cancelled) error = "This brief is no longer available.";
+        if (!cancelled) error = "This report is no longer available.";
       });
     return () => {
       cancelled = true;
@@ -39,11 +39,11 @@
 <main class="share">
   <header class="share-header">
     <span class="brand">Neuretina</span>
-    {#if brief}
-      <h1>{brief.topics.join(", ") || "Brief"}</h1>
+    {#if report}
+      <h1>{report.topics.join(", ") || "Report"}</h1>
       <p class="muted">
-        {formatDateTime(brief.createdAt)}{brief.audioDurationMs
-          ? ` · ${Math.round(brief.audioDurationMs / 1000)}s audio`
+        {formatDateTime(report.createdAt)}{report.audioDurationMs
+          ? ` · ${Math.round(report.audioDurationMs / 1000)}s audio`
           : ""}
       </p>
     {/if}
@@ -51,18 +51,18 @@
 
   {#if error}
     <p class="muted">{error}</p>
-  {:else if !brief}
+  {:else if !report}
     <p class="muted">Loading…</p>
   {:else}
-    {#if brief.timeline}
+    {#if report.timeline}
       <div class="timeline">
-        <TimelineView artifact={brief.timeline.artifact} events={brief.timeline.events} />
+        <TimelineView artifact={report.timeline.artifact} events={report.timeline.events} />
       </div>
     {/if}
     {#if audioUrl}
       <audio controls src={audioUrl}></audio>
     {/if}
-    <MarkdownView markdown={brief.markdown} sources={brief.sources} />
+    <MarkdownView markdown={report.markdown} sources={report.sources} />
   {/if}
 </main>
 
