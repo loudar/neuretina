@@ -570,6 +570,19 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     return reports.get(requireString(record, "id"));
   });
 
+  // The anonymous read-only link for a report: the share token is created on
+  // first use. The URL is absolute when APP_URL is configured, else relative
+  // so the web can prefix its own origin.
+  router.register("report.share", (payload) => {
+    const id = requireString(asRecord(payload), "id");
+    reports.get(id);
+    const token = reports.shareToken(id);
+    if (!token) throw new Error("Sharing is not available for this report");
+    const base = (config.appUrl ?? "").replace(/\/+$/, "");
+    const path = `/reports/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`;
+    return { token, url: base ? `${base}${path}` : path };
+  });
+
   router.register("report.audio", (payload) => {
     const id = requireString(asRecord(payload), "id");
     const audio = reports.getAudio(id);
@@ -941,6 +954,7 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     "report.list",
     "report.get",
     "report.audio",
+    "report.share",
     "artifact.list",
     "artifact.get",
     "artifact.search",

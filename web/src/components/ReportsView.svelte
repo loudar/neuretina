@@ -8,6 +8,7 @@
   import iconSend from "@ktibow/iconset-material-symbols/send";
   import { commands } from "../lib/commands";
   import type { Report, DeliveryChannelInfo } from "../lib/api";
+  import { copyText } from "../lib/clipboard";
   import { reportError, reportSuccess } from "../lib/feedback";
   import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
   import { useRefresh } from "../lib/refresh.svelte";
@@ -136,6 +137,18 @@
     }
   }
 
+  async function copyLink(): Promise<void> {
+    if (!selected) return;
+    try {
+      const { url } = await commands.reports.share(selected.id);
+      const absolute = /^https?:\/\//.test(url) ? url : `${window.location.origin}${url}`;
+      await copyText(absolute);
+      reportSuccess("Public link copied");
+    } catch (error) {
+      reportError(error);
+    }
+  }
+
   async function generateVoice(): Promise<void> {
     if (!selected || generating) return;
     generating = true;
@@ -227,6 +240,14 @@
           <Icon icon={iconMic} /> {generating ? "Generating…" : "Generate voice"}
         </Button>
       {/if}
+      <Button
+        variant="tonal"
+        iconType="left"
+        onclick={() => void copyLink()}
+        title="Copy the anonymous read-only link"
+      >
+        <Icon icon={iconLink} /> Copy link
+      </Button>
       <Button variant="tonal" iconType="left" onclick={() => void openResend()} disabled={resending}>
         <Icon icon={iconSend} /> Re-send
       </Button>

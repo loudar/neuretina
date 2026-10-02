@@ -129,6 +129,7 @@ export const commands = {
     list: () => send<Report[]>("report.list"),
     get: (id: string) => send<Report>("report.get", { id }),
     audio: (id: string) => send<ReportAudio | null>("report.audio", { id }),
+    share: (id: string) => send<{ token: string; url: string }>("report.share", { id }),
     remove: (id: string) => send<{ ok: boolean; reportId: string }>("report.delete", { id }),
     generateAudio: (id: string, options: { regenerate?: boolean; deliver?: boolean } = {}) =>
       send<{

@@ -727,6 +727,26 @@ describe("webhook gateway", () => {
     expect(empty).toEqual([]);
   });
 
+  test("returns the anonymous share link for a report", async () => {
+    const report = kernel.reports.create({
+      topics: ["Rust"],
+      markdown: "# Rust",
+      narration: "n",
+      sources: [],
+    });
+
+    const first = await call<{ token: string; url: string }>("report.share", { id: report.id });
+    expect(first.token).toBeTruthy();
+    expect(first.url).toContain(`/reports/${report.id}?token=${first.token}`);
+
+    // The token is stable across calls.
+    const second = await call<{ token: string; url: string }>("report.share", { id: report.id });
+    expect(second.token).toBe(first.token);
+
+    const missing = await post({ type: "report.share", payload: { id: "missing" } });
+    expect(missing.status).toBe(404);
+  });
+
   test("generates voice on demand and delivers it through the channels", async () => {
     const report = kernel.reports.create({
       topics: ["Rust"],
