@@ -484,6 +484,15 @@ h3 {
   color: var(--m3c-on-tertiary-container);
 }
 
+/*
+ * Modals (m3-svelte Dialog): at least 500px wide, but never wider than the
+ * window when the viewport is narrower than that.
+ */
+body dialog.m3-container {
+  min-width: min(500px, 99vw);
+  max-width: min(35rem, 99vw);
+}
+
 /* One spacing scale for every margin, padding and gap. */
 :root {
   --space-small: 5px;

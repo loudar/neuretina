@@ -73,13 +73,19 @@
   );
   const preset = $derived(presets[form.provider as P]);
   const hasModel = $derived((preset?.models?.length ?? 0) > 0);
-  const canSave = $derived.by(() => {
-    if (saving) return false;
+  const original = $derived(
+    editingId ? (connections.find((entry) => entry.id === editingId) ?? null) : null,
+  );
+  const unchanged = $derived(
+    original !== null && JSON.stringify(form) === JSON.stringify(formOf(original)),
+  );
+  const formValid = $derived.by(() => {
     if (!form.baseUrl?.trim()) return false;
     if (hasModel && !form.model?.trim()) return false;
     if (preset?.accountScoped && !form.accountId?.trim()) return false;
     return true;
   });
+  const canSave = $derived(!saving && formValid && !unchanged);
 
   function blankForm(provider: string): Record<string, string> {
     const entry = presets[provider as P];
@@ -287,7 +293,7 @@
     <Button
       variant="text"
       onclick={() => void test(null)}
-      disabled={testing === "form" || !canSave}
+      disabled={testing === "form" || !formValid}
     >
       {testing === "form" ? "Testing…" : "Test"}
     </Button>
@@ -356,7 +362,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-large);
-    width: min(24rem, 100%);
   }
 
   .type-row {

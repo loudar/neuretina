@@ -9,7 +9,8 @@
   import type { Report } from "../lib/api";
   import { copyText } from "../lib/clipboard";
   import { reportError, reportSuccess } from "../lib/feedback";
-  import { formatDateTime, formatListDate, formatRelativeTime } from "../lib/format";
+  import { formatDateTime, formatRelativeTime } from "../lib/format";
+  import { reportTitle } from "../lib/reports";
   import { useRefresh } from "../lib/refresh.svelte";
   import { paths, router } from "../lib/router.svelte";
   import DataList from "./DataList.svelte";
@@ -144,7 +145,7 @@
     {#snippet children(report)}
       <div class="entry" class:selected={selected?.id === report.id}>
         <button type="button" class="report-row" onclick={() => router.navigate(paths.reports(report.id))}>
-          <span class="report-date">{formatListDate(report.createdAt)}</span>
+          <span class="report-title">{reportTitle(report)}</span>
           <span class="badges">
             <span class="badge topics" title={`${report.topics.length} topic(s)`}>
               <Icon icon={iconLabel} size={14} />{report.topics.length}
@@ -170,7 +171,7 @@
 
 <Pane
   variant="detail"
-  title={selected ? selected.topics.join(", ") || "Untitled report" : "Report details"}
+  title={selected ? reportTitle(selected) : "Report details"}
   subtitle={selected
     ? `${formatRelativeTime(selected.createdAt)}${selected.audioDurationMs
         ? ` · ${Math.round(selected.audioDurationMs / 1000)}s audio`
@@ -279,7 +280,7 @@
     background-color: var(--m3c-surface-container-high);
   }
 
-  .report-date {
+  .report-title {
     width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;

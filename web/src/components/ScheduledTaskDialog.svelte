@@ -87,7 +87,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-large);
-    width: min(24rem, 100%);
   }
 
   .voice-toggle {

@@ -71,7 +71,6 @@
   const selectedResettable = $derived(selectedWorkflow !== null && isBriefingReset(selectedWorkflow));
   const selectedUser = $derived(selectedWorkflow !== null && selectedWorkflow.user === true);
   /** The briefing definition new workflows are created from. */
-  const createTemplate = $derived(workflows.find((w) => w.id === "briefing") ?? workflows[0]);
   const resettingBriefing = $derived(
     deleteWorkflowTarget !== null && isBriefingReset(deleteWorkflowTarget),
   );
@@ -332,7 +331,7 @@
   onconfirm={(withArtifacts) => void deleteRun(withArtifacts)}
 />
 
-<CreateWorkflowDialog bind:open={createOpen} template={createTemplate} onsaved={onWorkflowCreated} />
+<CreateWorkflowDialog bind:open={createOpen} onsaved={onWorkflowCreated} />
 
 <DeleteWorkflowDialog
   bind:open={confirmingDeleteWorkflow}

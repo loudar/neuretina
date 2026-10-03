@@ -54,6 +54,8 @@
   let type = $state<DeliveryChannelType>("matrix");
   let editingId = $state<string | null>(null);
   let form = $state<ChannelForm>({ ...emptyForm });
+  /** Snapshot of the edited channel; a save needs a change from it. */
+  let baseForm = $state<ChannelForm | null>(null);
   let saving = $state(false);
 
   function formFromConfig(source: DeliveryChannelInfo): ChannelForm {
@@ -86,19 +88,23 @@
       editingId = channel.id;
       type = channel.type;
       form = formFromConfig(channel);
+      baseForm = { ...form };
     } else if (duplicate) {
       editingId = null;
+      baseForm = null;
       type = duplicate.type;
       form = { ...formFromConfig(duplicate), name: `${duplicate.name} (copy)` };
     } else {
       editingId = null;
+      baseForm = null;
       type = "matrix";
       form = { ...emptyForm };
     }
   });
 
+  const unchanged = $derived(baseForm !== null && JSON.stringify(form) === JSON.stringify(baseForm));
   const canSave = $derived.by(() => {
-    if (saving || !form.name.trim()) return false;
+    if (saving || unchanged || !form.name.trim()) return false;
     if (type === "matrix") {
       return form.homeserverUrl.trim() !== "" && (form.roomId.trim() !== "" || form.dmUserId.trim() !== "");
     }
@@ -212,11 +218,6 @@
         bind:value={form.allowedSenders}
         enter={() => void save()}
       />
-      <p class="muted hint">
-        Authenticate with an access token or username + password. Set a room ID to post into a room,
-        or a DM user to let the bot open (or reuse) the direct message room with that person.
-        Allowed senders is an optional comma-separated allowlist.
-      </p>
     {:else if type === "discord"}
       <TextFieldOutlined
         label="Webhook URL"
@@ -267,7 +268,6 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-large);
-    width: min(24rem, 100%);
   }
 
   .type-row {

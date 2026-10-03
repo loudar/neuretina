@@ -436,9 +436,11 @@ export function registerCommands(router: CommandRouter, deps: CommandDeps): void
     const record = asRecord(payload);
     const definition = userWorkflowTemplate(coreWorkflows);
     const stopAfter = validateStopAfter(definition, record.stopAfter);
+    // A new workflow starts unconfigured: its inputs are picked in the
+    // details editor, so creation only needs a name.
     const workflow = userWorkflows.add({
       name: requireString(record, "name"),
-      inputs: validateWorkflowInputs(definition, record.inputs, topics),
+      inputs: validateWorkflowInputs(definition, record.inputs, topics, { requireFilled: false }),
       ...(stopAfter ? { stopAfter } : {}),
     });
     publishUserWorkflowChanged(bus, "create", workflow.id, context.correlationId);
@@ -1012,15 +1014,18 @@ function userWorkflowTemplate(coreWorkflows: ReadonlyMap<string, Workflow>): Wor
 }
 
 /**
- * Validates configured input values against a workflow definition. Every
- * required input must hold a value and each known kind gets its own check
- * (topics must reference existing topic ids); unknown kinds pass through.
+ * Validates configured input values against a workflow definition. Each known
+ * kind gets its own check (topics must reference existing topic ids); unknown
+ * kinds pass through. Unless `requireFilled` is off, required inputs must hold
+ * a value.
  */
 function validateWorkflowInputs(
   definition: WorkflowDefinition,
   value: unknown,
   topics: TopicStore,
+  options: { requireFilled?: boolean } = {},
 ): Record<string, unknown> {
+  const requireFilled = options.requireFilled ?? true;
   const record =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Record<string, unknown>)
@@ -1037,7 +1042,7 @@ function validateWorkflowInputs(
         if (!known.has(id)) throw new ValidationError(`Topic ${id} not found`);
       }
       const unique = [...new Set(ids)];
-      if (spec.required && unique.length === 0) {
+      if (requireFilled && spec.required && unique.length === 0) {
         throw new ValidationError(`"${spec.id}" must be a non-empty array of topic ids`);
       }
       result[spec.id] = unique;

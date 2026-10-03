@@ -401,12 +401,23 @@ describe("user workflows through the gateway", () => {
     });
     expect(emptyName.status).toBe(400);
 
+    // Creating needs only a name; inputs are configured later in the editor.
     const noTopics = await post({
       type: "workflow.user.create",
-      payload: { name: "No topics", inputs: { topics: [] } },
+      payload: { name: "No topics" },
     });
-    expect(noTopics.status).toBe(400);
-    expect(noTopics.body.error).toContain("topics");
+    expect(noTopics.status).toBe(200);
+    const unconfigured = noTopics.body.result as UserWorkflowInfo;
+    expect(unconfigured.inputs).toEqual({ topics: [] });
+
+    // The required check still guards updates that clear the topics.
+    const clearedTopics = await post({
+      type: "workflow.user.update",
+      payload: { id: unconfigured.id, inputs: { topics: [] } },
+    });
+    expect(clearedTopics.status).toBe(400);
+    expect(clearedTopics.body.error).toContain("topics");
+    await call("workflow.user.remove", { id: unconfigured.id });
 
     const unknownTopic = await post({
       type: "workflow.user.create",

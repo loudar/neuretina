@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { formatTime } from "../lib/format";
+  import { formatRelativeTime, formatTime } from "../lib/format";
+  import { clock } from "../lib/clock.svelte";
   import { Button, TextFieldOutlined } from "m3-svelte";
   import { eventStream } from "../lib/events.svelte";
   import type { DomainEvent } from "../lib/api";
@@ -74,7 +75,9 @@
           class:selected={selectedId === event.id}
           onclick={() => router.navigate(paths.events(event.id, filter.trim() || undefined))}
         >
-          <span class="time">{formatTime(event.ts)}</span>
+          <span class="time" title={formatTime(event.ts)}>
+            {formatRelativeTime(event.ts, clock.now)}
+          </span>
           <span class="topic">{event.topic}</span>
         </button>
       {/each}

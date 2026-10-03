@@ -37,6 +37,11 @@
   const route = $derived(router.current);
   const topicId = $derived(route.segments[0] ?? null);
   const selected = $derived(topics.find((topic) => topic.id === topicId) ?? null);
+  const editDirty = $derived(
+    selected !== null &&
+      (editName.trim() !== selected.name ||
+        editDescription.trim() !== (selected.description ?? "")),
+  );
 
   // Seed the edit fields when a different topic is opened; a background
   // refresh of the list must not clobber unsaved edits.
@@ -206,7 +211,7 @@
       <TextFieldOutlined label="Topic" bind:value={editName} enter={save} />
       <TextFieldOutlinedMultiline label="Context (optional)" rows={4} bind:value={editDescription} />
       <div class="actions">
-        <Button variant="filled" onclick={save} disabled={saving || !editName.trim()}>
+        <Button variant="filled" onclick={save} disabled={saving || !editName.trim() || !editDirty}>
           Save changes
         </Button>
       </div>

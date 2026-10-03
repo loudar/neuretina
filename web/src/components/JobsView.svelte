@@ -37,6 +37,10 @@
   const route = $derived(router.current);
   const jobId = $derived(route.segments[0] ?? null);
   const selected = $derived(jobs.find((job) => job.id === jobId) ?? null);
+  const editDirty = $derived(
+    selected !== null &&
+      (editName.trim() !== selected.name || editCron.trim() !== selected.cron),
+  );
 
   // Seed the edit fields when a different job is opened; a background refresh
   // of the list must not clobber unsaved edits.
@@ -198,7 +202,7 @@
       <TextFieldOutlined label="Name" bind:value={editName} enter={save} />
       <TextFieldOutlined label="Cron expression" bind:value={editCron} enter={save} />
       <div class="actions">
-        <Button variant="filled" onclick={save} disabled={saving}>Save changes</Button>
+        <Button variant="filled" onclick={save} disabled={saving || !editDirty}>Save changes</Button>
       </div>
     </div>
 
