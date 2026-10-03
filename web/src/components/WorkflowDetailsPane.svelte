@@ -94,13 +94,13 @@
 
       const inputs: Record<string, string[]> = {};
       for (const spec of target.inputs) {
-        if (spec.kind !== "topics") continue;
         const stored = target.inputValues?.[spec.id];
         if (Array.isArray(stored)) {
           inputs[spec.id] = stored.filter((value): value is string => typeof value === "string");
         } else {
           // The un-customized briefing covers all topics until pinned.
-          inputs[spec.id] = id === "briefing" ? loadedTopics.map((topic) => topic.id) : [];
+          inputs[spec.id] =
+            spec.kind === "topics" && id === "briefing" ? loadedTopics.map((topic) => topic.id) : [];
         }
       }
 

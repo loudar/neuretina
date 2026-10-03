@@ -13,9 +13,9 @@ export interface WorkflowTriggerBinding {
 }
 
 /**
- * A configurable workflow input. Inputs are generic: `kind` names the port
- * type of the value ("topics" today; artifacts, feeds or documents later),
- * and the editor/validation for a kind is registered by its consumer.
+ * A configurable workflow input. `kind` names a registered input kind (see
+ * inputs.ts): "topics" is one context kind today, and file/document kinds can
+ * register later without changing the workflow plumbing.
  */
 export interface WorkflowInputSpec {
   /** Stable key the configured value is stored under, e.g. "topics". */

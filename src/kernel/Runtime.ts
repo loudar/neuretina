@@ -49,6 +49,7 @@ import {
   type MatrixChannelConfig,
 } from "../providers/delivery/MatrixDeliveryChannel.ts";
 import { BriefingWorkflow } from "../workflows/BriefingWorkflow.ts";
+import { createWorkflowInputs } from "../workflows/inputKinds.ts";
 import { createUserWorkflowSync } from "../workflows/UserBriefingWorkflow.ts";
 import { QuestionWorkflow } from "../workflows/QuestionWorkflow.ts";
 import { registerCommands } from "../commands/registerCommands.ts";
@@ -387,8 +388,13 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
   };
   buildDecisionModels();
 
+  // One registry shared by the runtime (context resolution) and the command
+  // layer (settings validation), so both understand the same input kinds.
+  const inputKinds = createWorkflowInputs();
+
   const briefing = new BriefingWorkflow({
     topics,
+    inputKinds,
     reports,
     artifacts,
     events: timelineEvents,
@@ -521,6 +527,7 @@ export function createRuntime(options: RuntimeOptions): KernelRuntime {
     delivery,
     deliveries,
     userWorkflows,
+    inputKinds,
     get tts() {
       return bag.tts;
     },

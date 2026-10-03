@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BriefingWorkflow, type BriefingProgress } from "../src/workflows/BriefingWorkflow.ts";
+import { createWorkflowInputs } from "../src/workflows/inputKinds.ts";
 import { ArtifactRepository } from "../src/domain/artifacts/ArtifactRepository.ts";
 import { ReportRepository } from "../src/domain/reports/ReportRepository.ts";
 import { TopicRepository } from "../src/domain/topics/TopicRepository.ts";
@@ -235,6 +236,7 @@ function setup(options: SetupOptions = {}) {
 
   const workflow = new BriefingWorkflow({
     topics,
+    inputKinds: createWorkflowInputs(),
     reports,
     artifacts,
     events,

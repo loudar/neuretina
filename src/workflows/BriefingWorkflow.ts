@@ -17,6 +17,7 @@ import {
   type WorkflowDefinition,
   type WorkflowInputSpec,
 } from "../core/workflow/definition.ts";
+import type { WorkflowInputRegistry } from "../core/workflow/inputs.ts";
 import type { TextPortValue } from "../core/workflow/ports.ts";
 import { StepPipeline, type PipelineState } from "../core/workflow/StepPipeline.ts";
 import type { Workflow, WorkflowContext, WorkflowRunContext } from "../core/workflow/Workflow.ts";
@@ -71,6 +72,8 @@ export interface BriefingWorkflowInput {
 
 export interface BriefingWorkflowDeps {
   topics: TopicStore;
+  /** Registered input kinds; context inputs resolve through them. */
+  inputKinds: WorkflowInputRegistry;
   reports: ReportStore;
   /** Generic artifact store, used for the timeline artifact. */
   artifacts: ArtifactStore;
@@ -421,7 +424,8 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     // audio and the delivery belong to the workflow that was actually run.
     const workflowId = context.run?.workflow ?? this.definition.id;
 
-    const selectedTopics = this.resolveTopics(input, contextId);
+    const workflowInputs = this.resolveInputs(input, contextId);
+    const selectedTopics = (workflowInputs.topics as Topic[] | undefined) ?? [];
     if (selectedTopics.length === 0) {
       const stored = this.deps.topics.list();
       const reason =
@@ -439,7 +443,7 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     const topicNames = selectedTopics.map((topic) => topic.name);
     const pipeline = new StepPipeline(this.definition);
     const outcome = await pipeline.run({
-      inputs: { topics: selectedTopics },
+      inputs: workflowInputs,
       options: { ...(input as Record<string, unknown>) },
       context,
       resume: migrateResume(context.resume),
@@ -471,21 +475,21 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
     };
   }
 
-  private resolveTopics(input: BriefingWorkflowInput, contextId: string): Topic[] {
-    // Muted topics are never part of a briefing, not even when requested.
-    const active = this.deps.topics.listActive(contextId);
-
-    // User workflows pin the exact topic ids; an empty list selects nothing.
-    const pinned = pinnedTopicIds(input);
-    if (pinned !== undefined) {
-      const selected = new Set(pinned);
-      return active.filter((topic) => selected.has(topic.id));
+  /**
+   * Resolves a run's context inputs: the stored user-workflow values, with the
+   * legacy `topicIds` and topic-name run fields accepted as aliases.
+   */
+  private resolveInputs(
+    input: BriefingWorkflowInput,
+    contextId: string,
+  ): Record<string, unknown> {
+    const values = { ...(input.inputs ?? {}) };
+    for (const [id, value] of Object.entries(topicAliases(input, contextId, this.deps.topics))) {
+      values[id] ??= value;
     }
-
-    if (!input.topics || input.topics.length === 0) return active;
-
-    const requested = new Set(input.topics.map((name) => name.trim().toLowerCase()));
-    return active.filter((topic) => requested.has(topic.name.toLowerCase()));
+    return this.deps.inputKinds.resolveContext(this.definition.inputs, values, this.deps, {
+      contextId,
+    });
   }
 
   /** Renders the report artifact as a text message for its assigned channels. */
@@ -1295,17 +1299,27 @@ export class BriefingWorkflow implements Workflow<BriefingWorkflowInput, Briefin
   }
 }
 
-/** Reads the topics a run is pinned to from input values or the legacy field. */
-function pinnedTopicIds(input: BriefingWorkflowInput): string[] | undefined {
-  const configured = input.inputs?.topics;
-  if (Array.isArray(configured)) {
-    return configured.filter((id): id is string => typeof id === "string");
+/** Maps the legacy `topicIds` and topic-name run fields onto the topics input. */
+function topicAliases(
+  input: BriefingWorkflowInput,
+  contextId: string,
+  topics: TopicStore,
+): Record<string, unknown> {
+  if (input.topicIds !== undefined) return { topics: input.topicIds };
+  if (input.topics && input.topics.length > 0) {
+    const requested = new Set(input.topics.map((name) => name.trim().toLowerCase()));
+    return {
+      topics: topics
+        .listActive(contextId)
+        .filter((topic) => requested.has(topic.name.toLowerCase()))
+        .map((topic) => topic.id),
+    };
   }
-  return input.topicIds;
+  return {};
 }
 
 function topicNamesOf(ctx: StepContext): string[] {
-  return (ctx.inputs.topics as Topic[]).map((topic) => topic.name);
+  return ((ctx.inputs.topics as Topic[] | undefined) ?? []).map((topic) => topic.name);
 }
 
 /** Resolves a declared step input to the latest output that satisfies it. */
